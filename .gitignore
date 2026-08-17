@@ -1,0 +1,134 @@
+# Proposed GitHub curation rules for this research workspace.
+# Keep this file conservative: compact scientific summaries and predictor .pkl
+# files are intentionally NOT ignored.
+
+# OS/editor/agent-local state
+.DS_Store
+Icon*
+/.claude/
+/.vscode/
+*.swp
+*.swo
+*~
+
+# Python environments and caches
+/.venv/
+/venv/
+/env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Build/package output and native crash artifacts
+build/
+dist/
+*.egg-info/
+core
+core.*
+*.core
+
+# Model-serving caches/weights (the small scheduler predictors use .pkl and are kept)
+/.cache/
+/.huggingface/
+/**/huggingface/hub/
+/**/vllm/cache/
+*.safetensors
+*.ckpt
+*.pth
+*.pt
+
+# LaTeX build products; publication figures under paper/figures remain includable
+/paper/build/
+/paper/main.aux
+/paper/main.bbl
+/paper/main.blg
+/paper/main.fdb_latexmk
+/paper/main.fls
+/paper/main.log
+/paper/main.out
+/paper/main.pdf
+/paper/main.run.xml
+/paper/main.synctex.gz
+
+# Local/runtime logs and partial output
+/logs/
+*.partial
+*.tmp
+*.bak
+
+# Raw Phase-2 monitoring corpora. Keep compact merged tables.
+/Phase2_Results_L40S/**
+!/Phase2_Results_L40S/
+!/Phase2_Results_L40S/master_results.csv
+/Phase2_Results_L4/**
+!/Phase2_Results_L4/
+!/Phase2_Results_L4/master_results.csv
+
+# Observation-2 raw validation logs. Keep the compact result table.
+/Obs2_Validation_L4/**
+!/Obs2_Validation_L4/
+!/Obs2_Validation_L4/obs2_validation_results.csv
+
+# Downloadable Azure source data and large expanded replay material.
+/data/
+/traces/**
+!/traces/
+!/traces/azure_production/
+!/traces/azure_production/**
+!/traces/azure_diurnal/
+!/traces/azure_diurnal/**
+
+# Raw and historical experiments. Curated paper analyses/traces and selected
+# frozen summaries are explicitly re-included below.
+/archive/
+/results/**
+!/results/
+!/results/paper/
+!/results/paper/analyses/
+!/results/paper/analyses/**
+!/results/paper/synthetic_traces/
+!/results/paper/synthetic_traces/**
+!/results/paper/section42_frozen_main/
+!/results/paper/section42_frozen_main/summary.csv
+!/results/paper/prod_conv_frozen/
+!/results/paper/prod_conv_frozen/summary.csv
+!/results/paper/prod_code_frozen/
+!/results/paper/prod_code_frozen/summary.csv
+!/results/paper/prod_diurnal_frozen/
+!/results/paper/prod_diurnal_frozen/summary.csv
+!/results/paper/section45_ablation/
+!/results/paper/section45_ablation/summary.csv
+!/results/paper/section47_overhead/
+!/results/paper/section47_overhead/summary.csv
+
+# The exhaustive motivation/regime evaluation tables are ~300 MB each and
+# dominate the repository. Publication-sized outputs live in paper/figures.
+/results/paper/figures/
+*_evaluations.csv
+
+# Generated high-volume query log; keep its derived coverage reports instead.
+/artifacts/paper/analyses/scheduler_query_log.csv
+
+# Older root-level predictor snapshots. Canonical bundles are under
+# artifacts/paper/models/ and are intentionally committed.
+/models_l40s/
+/models_l4/
+
+# The benchmark emits this generated proxy; its source template is preserved
+# inside run_disagg_benchmark.sh.
+/disagg_proxy.py
+
+# Final local-metadata guardrails. Keep these after all re-inclusion rules so
+# broad curated-tree exceptions cannot accidentally add workstation state.
+.DS_Store
+.vscode/
+.claude/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

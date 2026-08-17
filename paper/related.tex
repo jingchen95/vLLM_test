@@ -1,0 +1,19 @@
+\section{Related Work}
+\label{sec:related}
+
+\textbf{DVFS and energy control for LLM inference.}
+GPU frequency control is an established energy lever for LLM serving, including kernel-level DVFS~\cite{huang2026reducing}, phase-aware SLO-driven scaling in GreenLLM~\cite{ye2025greenllm}, workload-dependent DVFS characterization~\cite{patel2025investigating}, predictive throttling with autoscaling in throttLL'eM~\cite{kakolyris2025throttllem}, and analytical fine-grained DVFS for accelerators~\cite{wang2025asplos}.
+These systems establish the value of frequency control, but they do not jointly optimize DVFS with routing, tensor parallelism, and GPU allocation in heterogeneous phase-disaggregated serving.
+
+\textbf{Heterogeneous and disaggregated serving.}
+Splitwise~\cite{patel2024splitwise} and DistServe~\cite{zhong2024distserve} separate prefill and decode to improve cost efficiency or goodput.
+Melange~\cite{griggs2024melange}, Jiang et al.~\cite{jiang2025demystifying}, and Hetis~\cite{liu2025hetis} study heterogeneous GPU and parallelism choices.
+The closest systems, DynamoLLM~\cite{stojkovic2024dynamollm} and DualScale~\cite{biscale2025}, respectively combine scaling, TP, and DVFS across separate timescales and combine phase-aware placement with DVFS, but both target homogeneous clusters.
+SWEEP-LLM instead treats routing, TP, frequency, and allocation as one state-aware joint decision on heterogeneous pools under reconfiguration costs.
+Because these systems target different settings, our evaluation compares against strong inspired or extended variants---DynamoLLM-Mono, DualScale-Ext, and GreenLLM-OracleDVFS (\S\ref{sec:eval_setup})---rather than claiming verbatim reproductions.
+
+\textbf{Power-, thermal-, and offline energy-aware scheduling.}
+POLCA~\cite{patel2024polca} addresses power oversubscription, and TAPAS~\cite{stojkovic2025tapas} performs thermal-aware scheduling.
+These systems target operating constraints rather than joint energy minimization for heterogeneous phase-disaggregated serving.
+Wilkins et al.~\cite{wilkins2024hybrid,wilkins2024offline} reduce inference energy by assigning workloads to efficient hardware offline rather than through online serving control.
+More broadly, SWEEP~\cite{chen2024sweep} jointly explores mapping, parallelism, and frequency on asymmetric multiprocessors; SWEEP-LLM adopts this viewpoint for runtime phase-disaggregated LLM serving on heterogeneous GPU pools.

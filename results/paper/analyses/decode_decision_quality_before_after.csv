@@ -1,0 +1,8 @@
+gpu_type,phase,slo_ms,workloads_before,oracle_exists_workloads_before,chosen_exists_workloads_before,top1_match_rate_pct_before,top3_recall_rate_pct_before,mean_regret_pct_before,median_regret_pct_before,p90_regret_pct_before,unsafe_admission_rate_pct_before,oracle_rejected_rate_pct_before,mean_pruning_ratio_pct_before,mean_pred_safe_count_before,workloads_after,oracle_exists_workloads_after,chosen_exists_workloads_after,top1_match_rate_pct_after,top3_recall_rate_pct_after,mean_regret_pct_after,median_regret_pct_after,p90_regret_pct_after,unsafe_admission_rate_pct_after,oracle_rejected_rate_pct_after,mean_pruning_ratio_pct_after,mean_pred_safe_count_after
+l40s,decode,200,60,50,39,74.36,60.0,8.9,0.0,39.49,0.0,40.0,39.03,3.83,60,50,39,79.49,64.0,7.749,0.0,25.558,0.0,36.0,38.88,3.87
+l40s,decode,500,60,60,47,91.49,73.33,3.024,0.0,0.0,0.0,26.67,23.27,4.3,60,60,47,91.49,73.33,3.024,0.0,0.0,0.0,26.67,23.27,4.3
+l40s,decode,1000,60,60,46,91.3,71.67,3.9,0.0,0.0,0.0,28.33,24.46,4.22,60,60,46,91.3,71.67,3.9,0.0,0.0,0.0,28.33,24.46,4.22
+l4,decode,200,60,31,28,64.29,58.06,57.248,0.0,268.193,0.0,41.94,67.38,2.37,60,31,28,60.71,54.84,60.405,0.0,268.193,0.0,45.16,67.55,2.37
+l4,decode,500,60,56,15,26.67,7.14,150.969,128.65,325.887,0.0,92.86,83.1,1.52,60,56,15,53.33,14.29,48.375,0.097,131.799,0.0,85.71,80.09,1.8
+l4,decode,1000,60,60,39,79.49,51.67,32.006,0.0,100.226,0.0,48.33,40.51,3.27,60,60,39,79.49,51.67,32.006,0.0,100.226,0.0,48.33,40.51,3.27
+l4,decode,2000,60,60,39,82.05,53.33,20.023,0.0,89.24,0.0,46.67,39.4,3.33,60,60,39,82.05,53.33,20.023,0.0,89.24,0.0,46.67,39.4,3.33

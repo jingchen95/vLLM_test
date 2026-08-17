@@ -1,0 +1,3 @@
+case_id,gpu_type,phase,slo_ms,unsafe_support,safe_support,chosen_p_th,chosen_rho_th,false_safe,false_unsafe,admit_rate_pct,safe_precision_pct,false_safe_rate_pct,prob_auc,rho_auc,safe_prob_q10,safe_prob_q50,safe_prob_q90,unsafe_prob_q10,unsafe_prob_q50,unsafe_prob_q90,safe_rho_q10,safe_rho_q50,safe_rho_q90,unsafe_rho_q10,unsafe_rho_q50,unsafe_rho_q90,diagnosis
+l4_decode_500,l4,decode,500,12,190,0.01,0.1,1,119,35.64,98.61,8.33,0.5717,0.4596,0.0006,0.0083,0.1439,0.0006,0.02,0.6857,0.002,0.0874,1.6991,0.0057,0.0321,0.8676,weak_feature_separability_or_intrinsic_overlap
+l40s_decode_200,l40s,decode,200,13,228,0.02,1.0,2,35,80.91,98.97,15.38,0.9076,0.748,0.0003,0.0009,0.0223,0.0083,0.9145,0.9967,0.0043,0.0508,0.636,0.0135,0.4403,7.3088,moderate_boundary_issue

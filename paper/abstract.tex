@@ -1,0 +1,21 @@
+\begin{abstract}
+LLM inference on phase-disaggregated heterogeneous GPU clusters exposes several tightly coupled energy-control decisions: where to route prefill and decode, what tensor-parallelism degree to use, which GPU frequency to select, and how many GPUs to keep active in each pool. These choices interact with request token lengths, workload phase balance, and reconfiguration cost, so optimizing any one knob in isolation can leave substantial energy savings unrealized or push the system into infeasible operating points. Existing DVFS, heterogeneous-serving, and disaggregated-serving systems do not jointly control routing, parallelism, frequency, and active capacity for energy-efficient serving on heterogeneous phase-disaggregated clusters.
+
+We present SWEEP-LLM, a model-driven scheduler that selects these four controls jointly for each scheduling window on a two-pool L40S/L4 deployment. SWEEP-LLM classifies each window into bottleneck states, uses state-guided candidate generation to keep joint search tractable, and applies fast controls immediately while promoting slower TP and GPU-allocation changes only after bundle-stability tests. We evaluate SWEEP-LLM with a measurement-calibrated simulator: same-pool latency and power models are trained and validated on real hardware, while cross-pool KV-transfer cost is swept analytically. Under a common utilization-based feasibility gate, SWEEP-LLM is the lowest-energy zero-modeled-violation scheduler on all synthetic traces, saving $9.6$–$31.9\%$ ($18.6\%$ on average) over the best feasible non-SWEEP baseline. On Azure trace replays, it stays on the feasible/Pareto frontier, saving $27.9$–$35.5\%$ on conversation traffic and $6.8$–$7.7\%$ on prefill-bound code traffic over the strongest feasible or near-feasible baseline, while keeping modeled violations at $0$–$0.1\%$.
+\end{abstract}
+
+% LLM inference on phase-disaggregated heterogeneous GPU clusters exposes four tightly coupled control dimensions: cross-pool routing, tensor parallelism, GPU frequency, and active GPU allocation.
+% Optimizing these jointly is necessary for energy efficiency but computationally challenging at runtime.
+% We present \textbf{SWEEP-LLM}, a model-driven scheduler that jointly selects all four dimensions per scheduling window on a heterogeneous cluster with compute-oriented L40S and memory-efficient L4 GPU pools.
+% SWEEP-LLM classifies each window into one of four bottleneck states (PREFILL\_HEAVY, DECODE\_HEAVY, BOTH\_LOW, BOTH\_HEAVY) with a BURST overlay, evaluates candidates using lightweight per-pool latency and power models trained on real hardware measurements (power MAPE $\approx$5\%, feasibility classifier precision $\geq$94\%), and applies routing and frequency changes immediately while gating tensor-parallelism and GPU-allocation changes through bundle-stability tests.
+% We evaluate SWEEP-LLM via a measurement-calibrated simulation framework: same-pool models are validated against hardware data; cross-pool KV-transfer cost is swept analytically.
+% On controlled synthetic traces, evaluated under a common utilization-based feasibility gate, SWEEP-LLM is the lowest-energy scheduler among those holding $0\%$ modeled violations under that gate on all four traces, saving $9.6$--$31.9\%$ ($18.6\%$ on average) in modeled GPU-side energy over the best feasible non-SWEEP baseline---a routing-aware sequential controller or a monolithic-routing DynamoLLM variant, depending on the trace.
+% Baselines that report lower raw energy reach it only by incurring modeled violations under that gate and are therefore not valid operating points.
+% On Azure conversation- and code-trace replays, SWEEP-LLM stays on the feasible/Pareto frontier: it saves $27.9$--$35.5\%$ over the best feasible baseline on conversation traffic (at $0\%$ modeled violations) and $6.8$--$7.7\%$ over the strongest near-feasible baseline on prefill-bound code traffic, keeping modeled violations at $0$--$0.1\%$ throughout; a DualScale-style $5$-minute two-tier provisioner instead under-provisions the bursty traffic.
+
+
+
+% \begin{IEEEkeywords}
+% LLM inference, energy efficiency, DVFS, task scheduling, heterogeneous GPU, tensor parallelism
+% \end{IEEEkeywords}
+

@@ -1,0 +1,8 @@
+l4/decode/200ms: retuned, supported, false-safe 1->0, admit 25.9%->18.0%, guard (p<0.02, rho<1.00)
+l4/decode/500ms: retuned, supported, false-safe 3->0, admit 78.0%->56.1%, guard (p<0.02, rho<0.10)
+l4/decode/1000ms: kept, low-support, false-safe 1->1, admit 89.2%->89.2%, guard (p<0.10, rho<0.80)
+l4/decode/2000ms: kept, low-support, false-safe 0->0, admit 90.9%->90.9%, guard (p<0.05, rho<1.00)
+l4/prefill/200ms: retuned, supported, false-safe 1->0, admit 7.7%->10.1%, guard (p<0.15, rho<0.50)
+l4/prefill/500ms: retuned, supported, false-safe 0->0, admit 12.8%->13.3%, guard (p<0.05, rho<1.00)
+l4/prefill/1000ms: retuned, supported, false-safe 0->0, admit 20.7%->20.9%, guard (p<0.10, rho<1.00)
+l4/prefill/2000ms: kept, supported, false-safe 0->0, admit 22.1%->22.1%, guard (p<0.05, rho<1.00)

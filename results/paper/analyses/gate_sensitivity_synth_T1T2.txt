@@ -1,0 +1,86 @@
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l40s
+  Config space: TP=[1, 2, 4], Freq=[210..2520] (10 levels)
+  SLO thresholds: [200, 500, 1000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l4
+  Config space: TP=[1, 2, 4, 8], Freq=[210..2040] (10 levels)
+  SLO thresholds: [200, 500, 1000, 2000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l40s
+  Config space: TP=[1, 2, 4], Freq=[210..2520] (10 levels)
+  SLO thresholds: [200, 500, 1000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l4
+  Config space: TP=[1, 2, 4, 8], Freq=[210..2040] (10 levels)
+  SLO thresholds: [200, 500, 1000, 2000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l40s
+  Config space: TP=[1, 2, 4], Freq=[210..2520] (10 levels)
+  SLO thresholds: [200, 500, 1000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l4
+  Config space: TP=[1, 2, 4, 8], Freq=[210..2040] (10 levels)
+  SLO thresholds: [200, 500, 1000, 2000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l40s
+  Config space: TP=[1, 2, 4], Freq=[210..2520] (10 levels)
+  SLO thresholds: [200, 500, 1000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l4
+  Config space: TP=[1, 2, 4, 8], Freq=[210..2040] (10 levels)
+  SLO thresholds: [200, 500, 1000, 2000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l40s
+  Config space: TP=[1, 2, 4], Freq=[210..2520] (10 levels)
+  SLO thresholds: [200, 500, 1000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l4
+  Config space: TP=[1, 2, 4, 8], Freq=[210..2040] (10 levels)
+  SLO thresholds: [200, 500, 1000, 2000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l40s
+  Config space: TP=[1, 2, 4], Freq=[210..2520] (10 levels)
+  SLO thresholds: [200, 500, 1000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l4
+  Config space: TP=[1, 2, 4, 8], Freq=[210..2040] (10 levels)
+  SLO thresholds: [200, 500, 1000, 2000]
+  Phase-specific stack: prefill + decode
+
+SLO TTFT<=500 TPOT<=200 | tau_kv=16us/tok | dur=120s win=5s seed=42
+  [rho] sweep_llm done
+  [rho] dynamollm done
+  [rho] dualscale done
+  [rho] greenllm done
+  [rho] static done
+  [rho] hierarchical done
+  [classifier_rho] sweep_llm done
+  [classifier_rho] dynamollm done
+  [classifier_rho] dualscale done
+  [classifier_rho] greenllm done
+  [classifier_rho] static done
+  [classifier_rho] hierarchical done
+  [latency_rho] sweep_llm done
+  [latency_rho] dynamollm done
+  [latency_rho] dualscale done
+  [latency_rho] greenllm done
+  [latency_rho] static done
+  [latency_rho] hierarchical done
+
+===== GATE: rho =====
+trace    SWEEP kJ SWEEP v% |     best feasible baseline       kJ | headline
+--------------------------------------------------------------------------------
+T1          42.69     0.0% |               hierarchical    70.20 | HOLDS
+T2          38.34     0.0% |                  dynamollm    47.95 | HOLDS
+
+===== GATE: classifier_rho =====
+trace    SWEEP kJ SWEEP v% |     best feasible baseline       kJ | headline
+--------------------------------------------------------------------------------
+T1          45.70     0.0% |                     (none)      nan | HOLDS
+T2          44.43     0.0% |                     (none)      nan | HOLDS
+
+===== GATE: latency_rho =====
+trace    SWEEP kJ SWEEP v% |     best feasible baseline       kJ | headline
+--------------------------------------------------------------------------------
+T1          43.36     0.0% |                  dualscale    74.24 | HOLDS
+T2          42.10     0.0% |               hierarchical    77.88 | HOLDS

@@ -1,0 +1,14 @@
+Guard-band diagnostic summary
+
+Problematic supported bins:
+- l4/decode/500ms: false-safe 8->1, admit 69.3%->35.6%, chosen (p<0.01, rho<0.10)
+- l4/prefill/500ms: false-safe 3->0, admit 27.2%->30.2%, chosen (p<0.50, rho<0.40)
+- l40s/decode/200ms: false-safe 5->2, admit 89.2%->80.9%, chosen (p<0.02, rho<1.00)
+- l40s/prefill/200ms: false-safe 2->0, admit 38.2%->29.9%, chosen (p<0.20, rho<1.00)
+- l40s/prefill/1000ms: false-safe 4->0, admit 61.0%->52.3%, chosen (p<0.50, rho<0.40)
+
+Low-support bins kept at base thresholds:
+- l4/decode/1000ms: unsafe_support=1, kept base (p<0.10, rho<0.80)
+- l4/decode/2000ms: unsafe_support=0, kept base (p<0.05, rho<1.00)
+- l40s/decode/500ms: unsafe_support=1, kept base (p<0.05, rho<1.00)
+- l40s/decode/1000ms: unsafe_support=1, kept base (p<0.10, rho<0.70)

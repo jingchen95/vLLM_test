@@ -1,0 +1,2 @@
+l4_decode_500: diagnosis=weak_feature_separability_or_intrinsic_overlap, false-safe=1/12, admit=35.6%, prob_auc=0.572, rho_auc=0.460
+l40s_decode_200: diagnosis=moderate_boundary_issue, false-safe=2/13, admit=80.9%, prob_auc=0.908, rho_auc=0.748

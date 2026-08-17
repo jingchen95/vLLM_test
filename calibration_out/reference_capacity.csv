@@ -1,0 +1,11 @@
+phase,pool,freq_mhz,tp,shape_label,il,ol,per_gpu_max_tps,pool_total_tps_linear,n_instances_assumed,note
+prefill,l40s,2520,1,"il=128, ol=1",128,1,6278.0,25112.0,4,linear extrapolation from single-instance measurement
+prefill,l40s,2520,1,"il=256, ol=1",256,1,12604.3,50417.2,4,linear extrapolation from single-instance measurement
+prefill,l40s,2520,1,"il=512, ol=1",512,1,25114.3,100457.3,4,linear extrapolation from single-instance measurement
+prefill,l40s,2520,1,"il=1024, ol=1",1024,1,49954.1,199816.3,4,linear extrapolation from single-instance measurement
+prefill,l40s,2520,1,"il=2048, ol=1",2048,1,13728.0,54912.1,4,linear extrapolation from single-instance measurement
+decode,l4,2040,1,"il=2, ol=64",2,64,712.7,5701.5,8,linear extrapolation from single-instance measurement
+decode,l4,2040,1,"il=2, ol=128",2,128,714.2,5713.9,8,linear extrapolation from single-instance measurement
+decode,l4,2040,1,"il=2, ol=256",2,256,689.5,5515.6,8,linear extrapolation from single-instance measurement
+decode,l4,2040,1,"il=2, ol=512",2,512,638.6,5108.9,8,linear extrapolation from single-instance measurement
+decode,l4,2040,1,"il=2, ol=1024",2,1024,541.8,4334.7,8,linear extrapolation from single-instance measurement

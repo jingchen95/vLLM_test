@@ -1,0 +1,31 @@
+{
+  "experiment": "gate_sensitivity_pilot",
+  "timestamp_utc": "2026-06-23T12:21:23.855137+00:00",
+  "git_rev": "not-a-git-repo",
+  "command": "python paper/scripts/gate_sensitivity_pilot.py --traces T3 --duration 120 --out results/paper/analyses/gate_sensitivity",
+  "model_dir_l40s": "/Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l40s",
+  "model_dir_l4": "/Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l4",
+  "gates": [
+    "rho",
+    "classifier_rho",
+    "latency_rho"
+  ],
+  "traces": [
+    "T3"
+  ],
+  "trace_source": "synthetic generators in jsep_traces (generate_T{1..4}_*)",
+  "duration_s": 120.0,
+  "window_s": 5.0,
+  "seed": 42,
+  "ttft_slo_ms": 500,
+  "tpot_slo_ms": 200,
+  "tau_kv_ms_per_tok": 0.016,
+  "strategies": [
+    "sweep_llm",
+    "dynamollm",
+    "dualscale",
+    "greenllm",
+    "static",
+    "hierarchical"
+  ]
+}

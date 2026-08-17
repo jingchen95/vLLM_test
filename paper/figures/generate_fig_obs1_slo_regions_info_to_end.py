@@ -1,0 +1,1 @@
+../scripts/figures/generate_fig_obs1_slo_regions_info_to_end.py

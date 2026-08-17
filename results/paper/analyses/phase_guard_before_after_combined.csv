@@ -1,0 +1,15 @@
+gpu_type,phase,slo_ms,unsafe_support,safe_support,base_p_th,base_rho_th,chosen_p_th,chosen_rho_th,selection_reason,before_false_safe,before_false_unsafe,before_true_safe,before_true_unsafe,before_false_safe_rate_pct,before_false_unsafe_rate_pct,before_safe_precision_pct,before_admit_rate_pct,after_false_safe,after_false_unsafe,after_true_safe,after_true_unsafe,after_false_safe_rate_pct,after_false_unsafe_rate_pct,after_safe_precision_pct,after_admit_rate_pct,retuned,low_support_flag
+l40s,prefill,200,107,134,0.4,1.0,0.2,1.0,retuned_min_false_safe_max_admit,2,44,90,105,1.87,32.84,97.83,38.17,0,62,72,107,0.0,46.27,100.0,29.88,True,False
+l40s,prefill,500,51,190,0.05,1.0,0.2,0.8,retuned_min_false_safe_max_admit,0,80,110,51,0.0,42.11,100.0,45.64,0,55,135,51,0.0,28.95,100.0,56.02,True,False
+l40s,prefill,1000,34,207,0.1,0.7,0.5,0.4,retuned_min_false_safe_max_admit,4,64,143,30,11.76,30.92,97.28,61.0,0,81,126,34,0.0,39.13,100.0,52.28,True,False
+l40s,decode,200,13,228,0.4,1.0,0.02,1.0,retuned_min_false_safe_max_admit,5,18,210,8,38.46,7.89,97.67,89.21,2,35,193,11,15.38,15.35,98.97,80.91,True,False
+l40s,decode,500,1,240,0.05,1.0,0.05,1.0,low_support_keep_base,1,21,219,0,100.0,8.75,99.55,91.29,1,21,219,0,100.0,8.75,99.55,91.29,False,True
+l40s,decode,1000,1,240,0.1,0.7,0.1,0.7,low_support_keep_base,1,26,214,0,100.0,10.83,99.53,89.21,1,26,214,0,100.0,10.83,99.53,89.21,False,True
+l4,prefill,200,141,61,0.05,1.0,0.4,0.2,retuned_min_false_safe_max_admit,0,37,24,141,0.0,60.66,100.0,11.88,0,29,32,141,0.0,47.54,100.0,15.84,True,False
+l4,prefill,500,112,90,0.05,0.6,0.5,0.4,retuned_min_false_safe_max_admit,3,38,52,109,2.68,42.22,94.55,27.23,0,29,61,112,0.0,32.22,100.0,30.2,True,False
+l4,prefill,1000,77,125,0.1,0.8,0.3,1.0,retuned_min_false_safe_max_admit,0,43,82,77,0.0,34.4,100.0,40.59,0,21,104,77,0.0,16.8,100.0,51.49,True,False
+l4,prefill,2000,61,141,0.05,1.0,0.1,1.0,retuned_min_false_safe_max_admit,0,33,108,61,0.0,23.4,100.0,53.47,0,24,117,61,0.0,17.02,100.0,57.92,True,False
+l4,decode,200,63,139,0.05,1.0,0.15,1.0,retuned_min_false_safe_max_admit,0,43,96,63,0.0,30.94,100.0,47.52,0,28,111,63,0.0,20.14,100.0,54.95,True,False
+l4,decode,500,12,190,0.05,0.6,0.01,0.1,retuned_min_false_safe_max_admit,8,58,132,4,66.67,30.53,94.29,69.31,1,119,71,11,8.33,62.63,98.61,35.64,True,False
+l4,decode,1000,1,201,0.1,0.8,0.1,0.8,low_support_keep_base,1,33,168,0,100.0,16.42,99.41,83.66,1,33,168,0,100.0,16.42,99.41,83.66,False,True
+l4,decode,2000,0,202,0.05,1.0,0.05,1.0,low_support_keep_base,0,30,172,0,0.0,14.85,100.0,85.15,0,30,172,0,0.0,14.85,100.0,85.15,False,True

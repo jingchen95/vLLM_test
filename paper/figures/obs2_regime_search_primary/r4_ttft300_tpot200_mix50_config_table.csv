@@ -1,0 +1,13 @@
+state,policy,feasible,selection_status,route_map_json,l40s_freq_mhz,l4_freq_mhz,l40s_tp,l4_tp,l40s_active_gpus,l4_active_gpus,energy_j,worst_margin_ms
+prefill-heavy,static,False,best_infeasible,"{""long_long"": ""A->B"", ""long_short"": ""A->B"", ""short_short"": ""A->B""}",2520,2040,1,1,4,8,6782.0,-56.0
+prefill-heavy,route_only,True,feasible_best,"{""long_long"": ""A->A"", ""long_short"": ""A->A"", ""short_short"": ""A->A""}",2520,2040,1,1,4,8,5204.5,7.5
+prefill-heavy,route_dvfs,True,feasible_best,"{""long_long"": ""A->A"", ""long_short"": ""A->A"", ""short_short"": ""A->A""}",1500,780,1,1,4,8,4138.5,0.7
+prefill-heavy,route_dvfs_tp,True,feasible_best,"{""long_long"": ""A->B"", ""long_short"": ""A->B"", ""short_short"": ""A->B""}",990,780,4,4,4,8,3400.0,18.7
+prefill-heavy,full_joint,True,feasible_best,"{""long_long"": ""A->B"", ""long_short"": ""A->B"", ""short_short"": ""A->B""}",1245,780,2,4,2,4,2346.5,6.9
+prefill-heavy,sequential,True,feasible_best,"{""long_long"": ""A->A"", ""long_short"": ""A->A"", ""short_short"": ""A->A""}",1500,780,2,1,4,0,3190.0,51.8
+decode-heavy,static,False,best_infeasible,"{""long_long"": ""A->B"", ""short_long"": ""A->B"", ""short_short"": ""A->B""}",2520,2040,1,1,4,8,6614.0,-56.0
+decode-heavy,route_only,True,feasible_best,"{""long_long"": ""A->A"", ""short_long"": ""B->A"", ""short_short"": ""A->A""}",2520,2040,1,1,4,8,5287.0,35.9
+decode-heavy,route_dvfs,True,feasible_best,"{""long_long"": ""A->A"", ""short_long"": ""B->A"", ""short_short"": ""A->A""}",1500,1200,1,1,4,8,4084.0,21.2
+decode-heavy,route_dvfs_tp,True,feasible_best,"{""long_long"": ""A->B"", ""short_long"": ""A->B"", ""short_short"": ""A->B""}",1245,780,4,4,4,8,3196.0,18.7
+decode-heavy,full_joint,True,feasible_best,"{""long_long"": ""A->A"", ""short_long"": ""B->A"", ""short_short"": ""B->A""}",1245,1200,1,1,2,2,2199.5,0.1
+decode-heavy,sequential,True,feasible_best,"{""long_long"": ""A->A"", ""short_long"": ""B->A"", ""short_short"": ""A->A""}",1500,1200,1,1,4,2,3544.0,21.2

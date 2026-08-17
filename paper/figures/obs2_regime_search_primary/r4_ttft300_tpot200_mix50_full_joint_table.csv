@@ -1,0 +1,3 @@
+State,Route,f_L40S,f_L4,TP_L40S,TP_L4,Act_L40S,Act_L4
+Prefill-heavy,A->B,1245,780,2,4,2,4
+Decode-heavy,mixed,1245,1200,1,1,2,2

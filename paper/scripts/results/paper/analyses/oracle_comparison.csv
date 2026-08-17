@@ -1,0 +1,8 @@
+window_name,description,rate_rps,slo_ms,tau_kv_us,sweep_energy_j,sweep_slo_met,sweep_decision_ms,oracle_energy_j,oracle_slo_met,oracle_decision_ms,oracle_n_candidates,energy_gap_pct,sweep_route,oracle_route
+BOTH_LOW_pf_bias,"BOTH_LOW: prefill-biased, light load",5.0,500,16.0,828.5,True,310.3,660.5,True,11447.4,662400,25.44,B->B,B->B
+BOTH_LOW_dc_bias,"BOTH_LOW: decode-biased, light load",5.0,500,16.0,868.0,True,281.9,674.0,True,10858.6,662400,28.78,B->B,B->B
+BOTH_LOW_balanced,"BOTH_LOW: balanced, light load",6.0,500,16.0,828.5,True,506.5,827.5,True,14121.1,662400,0.12,B->B,B->B
+PREFILL_HEAVY,PREFILL_HEAVY: long inputs dominate (rate=20 rps),20.0,500,16.0,1638.0,True,1262.0,1534.0,True,9653.8,662400,6.78,B->B,A->B
+PREFILL_HEAVY_hi,PREFILL_HEAVY: all-long inputs (rate=25 rps),25.0,500,16.0,2131.5,True,954.4,1897.5,True,9445.7,662400,12.33,B->B,B->A
+DECODE_HEAVY,DECODE_HEAVY: long outputs dominate (rate=30 rps),30.0,500,16.0,2295.0,True,1033.7,2295.0,True,9120.8,662400,0.0,B->A,B->A
+BOTH_HEAVY,"BOTH_HEAVY: balanced, high load (rate=30 rps)",30.0,500,16.0,2741.5,True,831.4,2612.0,True,10579.4,662400,4.96,A->A,B->B

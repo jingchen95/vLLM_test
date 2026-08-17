@@ -1,0 +1,7 @@
+gpu_type,phase,slo_ms,unsafe_support,safe_support,base_p_th,base_rho_th,chosen_p_th,chosen_rho_th,selection_reason,before_false_safe,before_false_unsafe,before_true_safe,before_true_unsafe,before_false_safe_rate_pct,before_false_unsafe_rate_pct,before_safe_precision_pct,before_admit_rate_pct,after_false_safe,after_false_unsafe,after_true_safe,after_true_unsafe,after_false_safe_rate_pct,after_false_unsafe_rate_pct,after_safe_precision_pct,after_admit_rate_pct,retuned,low_support_flag
+l40s,prefill,200,326,211,0.4,1.0,0.2,1.0,retuned_min_false_safe_max_admit,2,131,80,324,0.61,62.09,97.56,15.27,0,155,56,326,0.0,73.46,100.0,10.43,True,False
+l40s,prefill,500,267,270,0.05,1.0,0.1,1.0,retuned_min_false_safe_max_admit,0,164,106,267,0.0,60.74,100.0,19.74,0,147,123,267,0.0,54.44,100.0,22.91,True,False
+l40s,prefill,1000,242,295,0.1,0.7,0.3,0.5,retuned_min_false_safe_max_admit,1,161,134,241,0.41,54.58,99.26,25.14,0,162,133,242,0.0,54.92,100.0,24.77,True,False
+l40s,decode,200,43,494,0.4,1.0,0.01,1.0,retuned_min_false_safe_max_admit,9,43,451,34,20.93,8.7,98.04,85.66,1,336,158,42,2.33,68.02,99.37,29.61,True,False
+l40s,decode,500,1,536,0.05,1.0,0.05,1.0,low_support_keep_base,1,36,500,0,100.0,6.72,99.8,93.3,1,36,500,0,100.0,6.72,99.8,93.3,False,True
+l40s,decode,1000,1,536,0.1,0.7,0.1,0.7,low_support_keep_base,1,44,492,0,100.0,8.21,99.8,91.81,1,44,492,0,100.0,8.21,99.8,91.81,False,True

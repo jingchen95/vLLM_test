@@ -1,0 +1,3902 @@
+[
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0174,
+    "n_points": 464
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.085,
+    "n_points": 464
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.2885,
+    "n_points": 464
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.085,
+    "n_points": 464
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.6922,
+    "n_points": 464
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 0.6922,
+    "n_points": 464
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 66
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.373,
+    "n_points": 66
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.373,
+    "n_points": 66
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.373,
+    "n_points": 66
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.3834,
+    "n_points": 66
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 12.8114,
+    "n_points": 66
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.2011,
+    "n_points": 105
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.2011,
+    "n_points": 105
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.424,
+    "n_points": 105
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.424,
+    "n_points": 105
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.4479,
+    "n_points": 105
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 26.4066,
+    "n_points": 105
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0143,
+    "n_points": 105
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.1161,
+    "n_points": 105
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.1161,
+    "n_points": 105
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.1161,
+    "n_points": 105
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.3714,
+    "n_points": 105
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 2040,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 18.0276,
+    "n_points": 105
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0426,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0426,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.2549,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.2549,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.2549,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 25.5263,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0449,
+    "n_points": 60
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.2064,
+    "n_points": 60
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.2691,
+    "n_points": 60
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.2691,
+    "n_points": 60
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.2691,
+    "n_points": 60
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 25.5263,
+    "n_points": 60
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0449,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0449,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.2725,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.2725,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.2725,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 25.7393,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 51
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0448,
+    "n_points": 51
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.2721,
+    "n_points": 51
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.2721,
+    "n_points": 51
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.2721,
+    "n_points": 51
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 25.5834,
+    "n_points": 51
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0571,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0571,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0571,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.4039,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.4039,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 25.5834,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 54
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0593,
+    "n_points": 54
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0593,
+    "n_points": 54
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0593,
+    "n_points": 54
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.4223,
+    "n_points": 54
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 25.548,
+    "n_points": 54
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0513,
+    "n_points": 57
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.2103,
+    "n_points": 57
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.2103,
+    "n_points": 57
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.2103,
+    "n_points": 57
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.2107,
+    "n_points": 57
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 10.1938,
+    "n_points": 57
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 54
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 54
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.1611,
+    "n_points": 54
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.1611,
+    "n_points": 54
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.1611,
+    "n_points": 54
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 0.1611,
+    "n_points": 54
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0415,
+    "n_points": 51
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0415,
+    "n_points": 51
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0415,
+    "n_points": 51
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0415,
+    "n_points": 51
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.126,
+    "n_points": 51
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 0.126,
+    "n_points": 51
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0174,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0268,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0268,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0268,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.416,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 14.4535,
+    "n_points": 45
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0183,
+    "n_points": 52
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.1541,
+    "n_points": 52
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.1541,
+    "n_points": 52
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.1541,
+    "n_points": 52
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.416,
+    "n_points": 52
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 15.6058,
+    "n_points": 52
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 3
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.9365,
+    "n_points": 3
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.9365,
+    "n_points": 3
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 3
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.9365,
+    "n_points": 3
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 0.9365,
+    "n_points": 3
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 3
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 3
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 3
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 3
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 1.4144,
+    "n_points": 3
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 1.4144,
+    "n_points": 3
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 21
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 21
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 21
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 21
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 21
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 0.3899,
+    "n_points": 21
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 30
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0735,
+    "n_points": 30
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0735,
+    "n_points": 30
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 30
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0735,
+    "n_points": 30
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 0.2605,
+    "n_points": 30
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 1.0219,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.0219,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.0219,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 1.0219,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1620,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 23.0307,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.9355,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.9355,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.9355,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 23.0503,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.5779,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.5779,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.5779,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 22.9732,
+    "n_points": 24
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 39
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 39
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 39
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 39
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.4148,
+    "n_points": 39
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 780,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 15.9067,
+    "n_points": 39
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 48
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0083,
+    "n_points": 48
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0083,
+    "n_points": 48
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0083,
+    "n_points": 48
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.4165,
+    "n_points": 48
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 15.8672,
+    "n_points": 48
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 42
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 42
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 42
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 42
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.5209,
+    "n_points": 42
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 360,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 16.0204,
+    "n_points": 42
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 36
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 36
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 36
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 36
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.4127,
+    "n_points": 36
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 16.0387,
+    "n_points": 36
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.4162,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 15.7361,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.413,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 15.8529,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 8,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.413,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 8,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 15.8529,
+    "n_points": 33
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1830,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 23.0307,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1410,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 23.2229,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1200,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 23.0822,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 23.0822,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 570,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 22.993,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l4",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 23.1406,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.067,
+    "n_points": 474
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.2619,
+    "n_points": 474
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.3126,
+    "n_points": 474
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.437,
+    "n_points": 474
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 2.319,
+    "n_points": 474
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 115.9485,
+    "n_points": 474
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.14,
+    "n_points": 69
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.1478,
+    "n_points": 69
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.1478,
+    "n_points": 69
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.4204,
+    "n_points": 69
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 3.0589,
+    "n_points": 69
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 6.5515,
+    "n_points": 69
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0935,
+    "n_points": 93
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.1549,
+    "n_points": 93
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.3373,
+    "n_points": 93
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.3373,
+    "n_points": 93
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 13.4014,
+    "n_points": 93
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 2520,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 13.4014,
+    "n_points": 93
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.2499,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.2499,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.6034,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.8963,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 0.8963,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.2527,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.2527,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.6088,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.9093,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 0.9093,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.2258,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.5335,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.5335,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.2851,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 1.9194,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 1.9194,
+    "n_points": 18
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.2344,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.3979,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.6012,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.2897,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 1.9272,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 1.9272,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.2491,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.4659,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.6949,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.6949,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 1.9302,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 1.9302,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.1239,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.5045,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.8315,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.3259,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 1.9795,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 1.9795,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0589,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.1781,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.4662,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.4662,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 2.0611,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 2.0611,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0685,
+    "n_points": 42
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.3833,
+    "n_points": 42
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.3833,
+    "n_points": 42
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.3833,
+    "n_points": 42
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.3833,
+    "n_points": 42
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 2.1746,
+    "n_points": 42
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 33
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.2427,
+    "n_points": 33
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 1,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.2427,
+    "n_points": 33
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.2427,
+    "n_points": 33
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.3559,
+    "n_points": 33
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 1,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 0.3559,
+    "n_points": 33
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.9304,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.9684,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.9684,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.9684,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 3.1527,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 4.5246,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.976,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 1.0003,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.0003,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.0003,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 3.2017,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 4.5309,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 1.0384,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.0384,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.0384,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 3.256,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 4.5282,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 1.0448,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.0448,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.0448,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 3.2558,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 4.5278,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.9015,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 1.0803,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.0803,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.0803,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 3.2509,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 4.521,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.078,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.3552,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.4972,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.4972,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 3.3784,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 4.5031,
+    "n_points": 30
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.2676,
+    "n_points": 27
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.2676,
+    "n_points": 27
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.6116,
+    "n_points": 27
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.6116,
+    "n_points": 27
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 3.3784,
+    "n_points": 27
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 4.5031,
+    "n_points": 27
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.9713,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 2.0614,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 3.3737,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 4.4973,
+    "n_points": 24
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 2,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.0,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 4.0651,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 2,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 5.3722,
+    "n_points": 21
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 1.1794,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 1.1794,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.5799,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.1794,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 5.3618,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 2265,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 5.3618,
+    "n_points": 48
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 1.2431,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 1.2431,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.5803,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.2431,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 5.4749,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 2010,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 13.3285,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 1.2599,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 1.2599,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.5793,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.2599,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 4.738,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1755,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 9.1193,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 1.2562,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 1.2562,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.5792,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.2562,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 5.3277,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1500,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 13.3193,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.8314,
+    "n_points": 57
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 1.2513,
+    "n_points": 57
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.2513,
+    "n_points": 57
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.2513,
+    "n_points": 57
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 13.3051,
+    "n_points": 57
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 1245,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 13.3051,
+    "n_points": 57
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.4932,
+    "n_points": 51
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.9824,
+    "n_points": 51
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.4524,
+    "n_points": 51
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.4524,
+    "n_points": 51
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 13.2522,
+    "n_points": 51
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 990,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 13.2522,
+    "n_points": 51
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 63
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.4657,
+    "n_points": 63
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.55,
+    "n_points": 63
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.55,
+    "n_points": 63
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 1.55,
+    "n_points": 63
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 735,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 13.2522,
+    "n_points": 63
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 66
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.1637,
+    "n_points": 66
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 0.818,
+    "n_points": 66
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 1.2222,
+    "n_points": 66
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 1.2222,
+    "n_points": 66
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 480,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 13.2903,
+    "n_points": 66
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 0.0,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 500,
+    "rho_max": 0.0,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "prefill",
+    "tp": 4,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 1000,
+    "rho_max": 1.6029,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 100,
+    "rho_max": 0.0,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 200,
+    "rho_max": 1.6029,
+    "n_points": 45
+  },
+  {
+    "gpu": "l40s",
+    "phase": "decode",
+    "tp": 4,
+    "freq_mhz": 210,
+    "shape": "all",
+    "slo_ms": 400,
+    "rho_max": 1.6029,
+    "n_points": 45
+  }
+]

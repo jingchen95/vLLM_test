@@ -1,0 +1,78 @@
+{
+  "model_id": "mistral_nemo_12b_pilot",
+  "hf_name": "mistralai/Mistral-Nemo-Instruct-2407",
+  "family": "mistral",
+  "param_count_b": 12.0,
+  "result_dir": "results/same_family_multisize_mistral_nemo12b_pilot_v2",
+  "smoke_mode": false,
+  "compact_defaults": {
+    "prefill_freq_l40s_mhz": [
+      1500,
+      2520
+    ],
+    "prefill_freq_l4_mhz": [
+      1410,
+      2040
+    ],
+    "decode_freq_l40s_mhz": [
+      1500,
+      2520
+    ],
+    "decode_freq_l4_mhz": [
+      1410,
+      2040
+    ],
+    "prefill_tp_l40s": [
+      1
+    ],
+    "prefill_tp_l4": [
+      2,
+      4
+    ],
+    "decode_tp_l40s": [
+      1
+    ],
+    "decode_tp_l4": [
+      2,
+      4
+    ],
+    "prefill_input_lens": [
+      1024,
+      3072
+    ],
+    "decode_input_lens": [
+      1024,
+      3072
+    ],
+    "decode_output_lens": [
+      256,
+      1024
+    ],
+    "prefill_request_rates": [
+      1,
+      5
+    ],
+    "decode_request_rates": [
+      1,
+      5
+    ]
+  },
+  "profiling_count": {
+    "prefill_l40s": 8,
+    "prefill_l4": 16,
+    "decode_l40s": 16,
+    "decode_l4": 32,
+    "total_runs": 72
+  },
+  "rationale": [
+    "The default pilot is decode-heavy: decode keeps low/mid/high DVFS points and TP={1,2,4}, while prefill is intentionally sampled more sparsely.",
+    "Prefill keeps only low/high DVFS points, TP={1,4}, and low/high request rates to verify whether zero-shot failure is primarily a decode-side problem.",
+    "Short/medium/long length points cover the dominant latency and KV-pressure regimes without a full sweep.",
+    "The pilot reuses phase-only profiling so failure modes can be attributed separately to prefill and decode before any end-to-end transfer claim is made.",
+    "Smoke mode exists only to validate collection, summarization, and Mode A/B/C evaluation plumbing before launching the real pilot."
+  ],
+  "notes": [
+    "If TP=4 is invalid on the new size for a specific GPU, drop it and regenerate the matrix rather than silently substituting another point.",
+    "This pilot is intended to diagnose same-family multi-size behavior, not to claim transfer is solved."
+  ]
+}

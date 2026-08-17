@@ -1,0 +1,14 @@
+l4/decode/200ms: top1=60.71%, top3=54.84%, mean_regret=60.405%, unsafe_admit=0.0%, oracle_rejected=45.16%, pruning=67.55%
+l4/decode/500ms: top1=53.33%, top3=14.29%, mean_regret=48.375%, unsafe_admit=0.0%, oracle_rejected=85.71%, pruning=80.09%
+l4/decode/1000ms: top1=79.49%, top3=51.67%, mean_regret=32.006%, unsafe_admit=0.0%, oracle_rejected=48.33%, pruning=40.51%
+l4/decode/2000ms: top1=82.05%, top3=53.33%, mean_regret=20.023%, unsafe_admit=0.0%, oracle_rejected=46.67%, pruning=39.4%
+l4/prefill/200ms: top1=83.33%, top3=40.0%, mean_regret=16.059%, unsafe_admit=0.0%, oracle_rejected=60.0%, pruning=92.07%
+l4/prefill/500ms: top1=78.95%, top3=57.14%, mean_regret=9.073%, unsafe_admit=0.0%, oracle_rejected=42.86%, pruning=80.45%
+l4/prefill/1000ms: top1=67.86%, top3=63.33%, mean_regret=29.91%, unsafe_admit=0.0%, oracle_rejected=36.67%, pruning=68.25%
+l4/prefill/2000ms: top1=64.29%, top3=60.0%, mean_regret=29.302%, unsafe_admit=0.0%, oracle_rejected=40.0%, pruning=64.2%
+l40s/decode/200ms: top1=79.49%, top3=64.0%, mean_regret=7.749%, unsafe_admit=0.0%, oracle_rejected=36.0%, pruning=38.88%
+l40s/decode/500ms: top1=91.49%, top3=73.33%, mean_regret=3.024%, unsafe_admit=0.0%, oracle_rejected=26.67%, pruning=23.27%
+l40s/decode/1000ms: top1=91.3%, top3=71.67%, mean_regret=3.9%, unsafe_admit=0.0%, oracle_rejected=28.33%, pruning=24.46%
+l40s/prefill/200ms: top1=43.75%, top3=40.0%, mean_regret=18.59%, unsafe_admit=0.0%, oracle_rejected=60.0%, pruning=71.76%
+l40s/prefill/500ms: top1=82.35%, top3=74.36%, mean_regret=5.12%, unsafe_admit=0.0%, oracle_rejected=25.64%, pruning=48.7%
+l40s/prefill/1000ms: top1=50.0%, top3=36.59%, mean_regret=14.685%, unsafe_admit=0.0%, oracle_rejected=63.41%, pruning=60.0%

@@ -1,0 +1,10 @@
+Selected T4 variant
+base_rate_rps=10.0
+spike_rate_rps=100.0
+spike_duration_s=20.0
+spike_period_s=60.0
+frac_both_low=0.4833
+frac_both_high=0.3333
+frac_prefill_heavy=0.1833
+frac_decode_heavy=0.0
+score=0.754125

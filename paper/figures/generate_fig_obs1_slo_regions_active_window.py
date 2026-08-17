@@ -1,0 +1,1 @@
+../scripts/figures/generate_fig_obs1_slo_regions_active_window.py

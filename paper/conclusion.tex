@@ -1,0 +1,7 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper presented \textbf{SWEEP-LLM}, a model-driven scheduler for energy-efficient LLM inference on heterogeneous phase-disaggregated GPU clusters.
+SWEEP-LLM treats per-class phase routing, tensor parallelism, GPU frequency, and active GPU allocation as one coupled control problem, using workload-state classification, state-specific joint search, and reconfiguration-aware execution to adapt to changing phase balance while respecting slow deployment changes.
+A measurement-calibrated evaluation shows that this joint control is necessary: under a common utilization-based feasibility gate, SWEEP-LLM is the lowest-energy zero-modeled-violation scheduler on all synthetic traces, saves $9.6$--$31.9\%$ over the best feasible non-SWEEP baseline, saves $27.9$--$35.5\%$ on production conversation-trace replays, and remains Pareto-best on the prefill-bound code trace where the cluster is capacity-limited.
+These results show that energy-efficient heterogeneous disaggregated serving requires coordinated runtime control across routing, parallelism, frequency, and capacity, rather than optimizing any one mechanism in isolation.

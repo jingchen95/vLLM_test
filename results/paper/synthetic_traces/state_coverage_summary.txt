@@ -1,0 +1,4 @@
+T1: dominant=PREFILL_HEAVY, prefill=1.00, decode=0.00, both_low=0.00, both_high=0.00, match=True
+T2: dominant=DECODE_HEAVY, prefill=0.00, decode=0.90, both_low=0.10, both_high=0.00, match=True
+T3: dominant=PREFILL_HEAVY, prefill=0.47, decode=0.42, both_low=0.00, both_high=0.10, match=True
+T4: dominant=BOTH_LOW, prefill=0.02, decode=0.00, both_low=0.65, both_high=0.33, match=True

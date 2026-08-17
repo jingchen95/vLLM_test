@@ -1,0 +1,841 @@
+% =================================================================
+% OLD EVALUATION STRUCTURE (commented out — replaced by revised structure below)
+% =================================================================
+% \section{Evaluation}
+% \label{sec:evaluation}
+%
+% This section answers four questions: \emph{(Q1)} How much energy can SWEEP-LLM save while meeting latency targets on the target heterogeneous deployment? \emph{(Q2)} Under controlled workload states, when and why do routing, TP, DVFS, and active-capacity control matter? \emph{(Q3)} Does SWEEP-LLM remain effective on production traces with realistic workload variation? \emph{(Q4)} How robust is the current model stack, and does same-family multi-size extension appear feasible with limited additional profiling?
+%
+% \subsection{Experimental Setup}
+% \label{sec:eval_setup}
+%
+% \textbf{Hardware and software.}
+% We evaluate SWEEP-LLM on a heterogeneous GPU deployment consisting of a node with four NVIDIA L40S GPUs and a node with eight NVIDIA L4 GPUs.
+% The serving stack is based on vLLM 0.15.1.
+% Unless otherwise stated, each active GPU hosts one serving instance, and SWEEP-LLM makes decisions every 5 seconds.
+% The current implementation uses the phase-specific model stack described in \S~\ref{sec:phase_a_models}.
+%
+% \textbf{Model and objectives.}
+% Our main evaluation uses Mistral 7B as the primary serving model.
+% The scheduler jointly controls routing, TP, GPU frequency, and active capacity to minimize GPU-side energy subject to latency constraints.
+% Unless otherwise stated, we use $\mathrm{TTFT}\leq 500$\,ms and $\mathrm{TPOT}\leq 200$\,ms as default interactive targets for our L40S/L4 deployment; these values are deployment- and application-dependent rather than universal production standards.
+%
+% \textbf{Baselines.}
+% We compare SWEEP-LLM against the following baselines:
+% \begin{itemize}
+%     \item \textbf{Static-disagg:} fixed prefill$\rightarrow$L40S, decode$\rightarrow$L4 placement with fixed TP, frequency, and active capacity.
+%     \item \textbf{Sequential:} staged control that optimizes routing, DVFS, TP, and active capacity one at a time.
+% \end{itemize}
+% Additional restricted-control ablations are introduced only in the corresponding subsections where they are needed.
+%
+% \textbf{Metrics.}
+% We report total energy, normalized energy, P99 TTFT, P99 TPOT, SLO violation rate, throughput, and selected control decisions.
+% For model validation, we additionally report false-safe, false-unsafe, admit rate, safe precision, and scheduler-facing decision-quality metrics such as top-1 match and regret.
+%
+% \subsection{Controlled Synthetic Traces}
+% \label{sec:eval_synth}
+%
+% We first use controlled synthetic traces to isolate how SWEEP-LLM reacts to different workload states.
+% Unlike production traces, these workloads are designed to emphasize specific scheduler behaviors and to expose when each control knob matters.
+% Unless otherwise stated, synthetic requests are drawn from four controlled classes: short-short $(\mathrm{il}=64, \mathrm{ol}=128)$, short-long $(\mathrm{il}=64, \mathrm{ol}=512)$, long-short $(\mathrm{il}=1024, \mathrm{ol}=128)$, and long-long $(\mathrm{il}=1024, \mathrm{ol}=512)$.
+%
+% \textbf{T1: Prefill-heavy ramp.}
+% Requests are drawn from a prefill-heavy mix: 50\% long-short, 25\% long-long, and 25\% short-short. The arrival rate ramps from 2 requests/s to 50 requests/s and then back to 2 requests/s over a 600-second trace.
+%
+% \textbf{T2: Decode-heavy ramp.}
+% Requests are drawn from a decode-heavy mix: 50\% short-long, 25\% long-long, and 25\% short-short. The arrival rate ramps from 2 requests/s to 50 requests/s and then back to 2 requests/s over a 600-second trace.
+%
+% \textbf{T3: Phase-shift trace.}
+% The first half of the trace uses the same prefill-heavy mix as T1, while the second half uses the same decode-heavy mix as T2. The arrival rate is held constant at 15 requests/s over a 600-second trace.
+%
+% \textbf{T4: Balanced-load overload trace.}
+% Requests are drawn from a balanced mix of short-short, short-long, long-short, and long-long classes (25\% each). The baseline arrival rate is 10 requests/s, with periodic overload spikes to 100 requests/s; each spike lasts 20 seconds and recurs every 60 seconds over a 600-second trace.
+%
+% \textbf{State coverage.}
+% T1 and T2 are designed to emphasize \textbf{PREFILL\_HEAVY} and \textbf{DECODE\_HEAVY} windows, respectively, while T3 is designed to force an explicit transition between these two states. T4 is retained as a balanced-load overload trace and is the main source of explicit \textbf{BOTH\_LOW} and \textbf{BOTH\_HIGH} coverage in the synthetic suite. We verify the realized window-level state distribution using the classifier in \S~\ref{sec:window_classifier} and report the resulting coverage when presenting the synthetic-trace results.
+%
+% \subsection{Production Traces}
+% \label{sec:eval_prod}
+%
+% We next evaluate SWEEP-LLM on production traces to test whether the gains observed on controlled workloads persist under realistic request variation.
+% These traces are not intended to isolate one specific mechanism; instead, they test robustness under mixed and time-varying request compositions.
+%
+% \textbf{Trace sources.}
+% Our preferred production-trace backbone is the public Azure LLM inference dataset released with recent serving studies. In particular, we use the \emph{Conversation} trace as the primary mixed interactive-chat workload and the \emph{Code} trace as the primary long-generation/coding-style workload. If a third production-style workload is needed, we derive a long-context analysis/RAG-style replay variant by filtering or resampling requests to emphasize larger input contexts while preserving the temporal structure of the original trace. For all production traces, we preserve request ordering, burst structure, and input/output token counts, but scale the overall replay rate to match the serving capacity of our L40S/L4 deployment. This avoids traces that are uniformly overloaded or uniformly trivial on the target hardware while retaining realistic variation in both arrival process and request composition. Any identifiers and user-specific content are removed during preprocessing; only timing and request-shape statistics are replayed.
+%
+% \textbf{Role in the paper.}
+% The production traces complement the synthetic traces: synthetic traces explain \emph{why} SWEEP-LLM helps under specific workload states, while production traces test whether the controller remains effective under realistic nonstationary demand.
+%
+% \subsection{Model Validation and Scheduler-Facing Accuracy}
+% \label{sec:eval_models}
+%
+% Before evaluating end-to-end scheduling results, we validate the phase-specific model stack used by SWEEP-LLM.
+% We examine not only prediction error, but also whether the models are conservative enough for safe pruning and accurate enough to guide scheduling decisions.
+%
+% \textbf{Feasibility diagnostics.}
+% We report false-safe, false-unsafe, admit rate, and safe precision for prefill and decode separately, per GPU type and SLO.
+% These metrics are particularly important because unsafe admissions can directly harm scheduling quality.
+%
+% \textbf{Latency and power prediction.}
+% We report MAPE, $R^2$, and Spearman correlation for TTFT, TPOT, and power.
+% Because SWEEP-LLM uses these predictors for ranking rather than for standalone forecasting, we emphasize conservative feasibility behavior and ranking utility over minimizing a single regression metric.
+%
+% \textbf{Decision quality.}
+% We additionally report scheduler-facing metrics such as top-1 match, regret relative to the measured best feasible configuration, and oracle rejection rate. These results show whether the model stack is accurate enough for decision making, not just for prediction in isolation.
+%
+% \subsection{Same-Family Multi-Size Pilot}
+% \label{sec:eval_multisize}
+%
+% Finally, we include a limited same-family multi-size pilot to assess whether the current deployment-specific model stack can be extended beyond the main model size with limited additional profiling.
+% This pilot is \emph{not} part of the paper's main claim; rather, it is an exploratory extension that helps assess the practicality of same-family scaling.
+%
+% \textbf{Pilot setup.}
+% We use a same-family larger-variant pilot based on Mistral Nemo 12B. The pilot is staged: we first run a smoke test to validate the end-to-end pipeline, then, if successful, a decode-focused intermediate pilot before considering any larger profiling run.
+% We compare three modes:
+% \begin{itemize}
+%     \item \textbf{Zero-shot:} reuse the current size-trained stack directly on the larger model.
+%     \item \textbf{Oracle:} retrain the same phase-specific stack on pilot data from the larger model.
+%     \item \textbf{Threshold-adapt:} keep the original stack but retune only the feasibility thresholds.
+% \end{itemize}
+%
+% \textbf{Interpretation.}
+% The goal of this pilot is to determine where zero-shot reuse fails, whether decode-side behavior degrades first, and whether limited adaptation is sufficient to recover meaningful quality.
+% Unless otherwise stated, we use the pilot only as supporting evidence and keep the main paper narrative centered on the current single-family, single-size deployment.
+%
+% \subsection{Evaluation Roadmap}
+% \label{sec:eval_roadmap}
+%
+% The remainder of this section proceeds as follows.
+% \S~\ref{sec:eval_synth_results} evaluates SWEEP-LLM on controlled synthetic traces and explains when each control dimension matters.
+% \S~\ref{sec:eval_prod_results} reports results on production traces.
+% \S~\ref{sec:eval_ablation_results} studies the contribution of individual design choices and baselines.
+% \S~\ref{sec:eval_multisize_results} summarizes the same-family multi-size pilot if included.
+%
+% % -----------------------------------------------------------------
+% % Result subsections to be filled after experiments complete
+% % -----------------------------------------------------------------
+%
+% \subsection{Results on Controlled Synthetic Traces}
+% \label{sec:eval_synth_results}
+%
+% \textbf{[To be filled after experiments complete.]}
+%
+% \subsection{Results on Production Traces}
+% \label{sec:eval_prod_results}
+%
+% \textbf{[To be filled after experiments complete.]}
+%
+% \subsection{Ablation and Baseline Comparison}
+% \label{sec:eval_ablation_results}
+%
+% \textbf{[To be filled after experiments complete.]}
+%
+% \subsection{Same-Family Multi-Size Pilot Results}
+% \label{sec:eval_multisize_results}
+%
+% \textbf{[To be filled after pilot results are available.]}
+
+
+% =================================================================
+% REVISED EVALUATION STRUCTURE
+% =================================================================
+
+\section{Evaluation}
+\label{sec:evaluation}
+
+After describing the experimental setup (\S~\ref{sec:eval_setup}), we evaluate SWEEP-LLM on controlled synthetic traces to isolate when each control knob matters (\S~\ref{sec:eval_synth}), then on production traces to test robustness under realistic workload variation (\S~\ref{sec:eval_prod}).
+\S~\ref{sec:eval_ablation} ablates individual design components, \S~\ref{sec:eval_models} validates the predictive model stack, and \S~\ref{sec:eval_overhead} reports scheduler overhead.
+
+
+% -----------------------------------------------------------------
+\subsection{Experimental Setup}
+\label{sec:eval_setup}
+% -----------------------------------------------------------------
+
+We evaluate SWEEP-LLM on a two-pool heterogeneous GPU deployment: four NVIDIA L40S GPUs in pool~A and eight NVIDIA L4 GPUs in pool~B.
+The serving stack is based on vLLM 0.15.1, and all main experiments serve Mistral-7B-v0.1.
+Unless otherwise stated, the simulator advances in $W{=}5$-second control windows, and active GPUs are partitioned into serving instances according to the selected TP degree.
+Schedulers with fixed or coarse-grained policies retain their placement according to the reconfiguration cadence specified in Table~\ref{tab:baselines}.
+
+\textbf{Trace replay and oracle caveat.}
+In deployment, SWEEP-LLM would form each decision from a trailing or predicted workload summary for the upcoming window, and request classification would use an admission-time output-length estimate (\S\ref{sec:overview}, \S\ref{sec:request_classes}).
+In the trace-driven simulator, the main results instantiate both quantities from realized trace data: each decision uses that window's realized workload summary, and $\widehat{\mathrm{ol}}$ is set to the request's recorded output length.
+This isolates scheduling quality from forecasting and output-length-prediction error, but gives the scheduler a mild same-window oracle advantage.
+A deployment would instead form the summary from recent history or a short-horizon forecast and supply $\widehat{\mathrm{ol}}$ from an output-length predictor or a requested generation budget; we leave a full rolling-prediction sensitivity study to future work.
+
+\textbf{SLOs and modeled feasibility.}
+We define three SLO tightness levels: Tight ($\mathrm{TTFT}\leq 200$\,ms, $\mathrm{TPOT}\leq 100$\,ms), Moderate ($\mathrm{TTFT}\leq 500$\,ms, $\mathrm{TPOT}\leq 200$\,ms), and Loose ($\mathrm{TTFT}\leq 1000$\,ms, $\mathrm{TPOT}\leq 400$\,ms).
+The Moderate level is the default unless otherwise stated.
+These values are deployment- and application-dependent rather than universal production standards.
+For the main cross-strategy comparison, all six strategies use the same utilization-based feasibility gate.
+A window is \emph{modeled feasible} if every active prefill and decode phase has predicted load intensity $\rho\leq 1$ under the calibrated capacity model; otherwise, the window counts toward the \emph{modeled violation rate}.
+This is a scheduler-facing utilization screen, not a request-level latency guarantee.
+The TTFT/TPOT regressors are logged for diagnostics and candidate ordering (\S\ref{sec:eval_models}), but they are not the main admission rule because tail-latency predictions are noisier than utilization estimates.
+Using one gate for every strategy ensures that no scheduler is held to a stricter or looser feasibility standard than another.
+
+\textbf{Metrics.}
+The primary metrics are total GPU-side energy and modeled violation rate.
+We report normalized energy, P99 TTFT, P99 TPOT, throughput, and selected control decisions as diagnostics.
+For model validation, \S\ref{sec:eval_models} reports false-safe rate, false-unsafe rate, admit rate, safe precision, top-1 match, and regret.
+
+\textbf{Baselines.}
+We compare SWEEP-LLM against five baselines ordered by the breadth of control they exercise.
+Table~\ref{tab:baselines} summarizes the control knobs of each strategy.
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\caption{Control space exercised by each strategy.}
+\label{tab:baselines}
+\begin{tabular}{@{}llllll@{}}
+\toprule
+Strategy & Routing & TP & Freq.\ & Act.\ GPUs & Reconfig. \\
+\midrule
+Static-Disagg        & fixed AB  & fixed      & max        & all        & none \\
+GreenLLM-OracleDVFS  & fixed AB  & fixed      & oracle     & all        & freq only \\
+DynamoLLM-Mono       & AA/BB     & joint      & joint      & joint      & per window \\
+Hierarchical-Disagg  & per-class & sequential & sequential & sequential & per window \\
+DualScale-Ext        & per-class & coarse     & fine       & coarse     & 5-min placement \\
+\textbf{SWEEP-LLM}   & per-class & joint      & joint      & joint      & fast/slow \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Static-Disagg is a no-scheduling reference with fixed disaggregated placement, maximum frequency, and all GPUs active.
+GreenLLM-OracleDVFS~\cite{ye2025greenllm} keeps Static-Disagg's placement but receives an oracle exhaustive frequency sweep, making it a generous DVFS-only upper bound rather than a reproduction of GreenLLM's TPS heuristic.
+DynamoLLM-Mono~\cite{stojkovic2024dynamollm} captures DynamoLLM's monolithic-routing restriction by allowing only same-pool routes ($A{\to}A$ or $B{\to}B$) on SWEEP-LLM's joint backend; it is a strong restriction baseline, not a reproduction of DynamoLLM's full multi-timescale system.
+Hierarchical-Disagg receives the same per-class routes as SWEEP-LLM but chooses routing, TP, frequency, and active capacity in fixed greedy stages, isolating joint search from mere routing access.
+DualScale-Ext~\cite{biscale2025} follows DualScale's coarse/fine structure: placement, TP, and active capacity are locked for each $5$-minute block, while frequency is swept within each control window; it is extended to heterogeneous routing but is not a reproduction.
+SWEEP-LLM replaces the sequential or coarse-grained control in these baselines with one state-specific joint search and a fast/slow actuation policy.
+
+\textbf{Simulation and cross-pool transfer.}
+Per-pool latency, throughput, and power are measured directly on the L40S and L4 pools and used to fit the predictive model stack (\S\ref{sec:phase_a_models}).
+The two pools in our testbed are connected by commodity Ethernet, which is slower than the interconnects typically assumed in disaggregated-serving deployments.
+We therefore evaluate scheduling decisions in simulation: same-pool behavior comes from hardware-calibrated models, while cross-pool KV-cache transfer is modeled analytically.
+A cross-pool route incurs an additional TTFT term $\tau_{\mathrm{kv}}\cdot \mathrm{il}$, where $\tau_{\mathrm{kv}}$ is the per-token transfer cost and $\mathrm{il}$ is the prompt length.
+We sweep $\tau_{\mathrm{kv}}\in\{5,16,41\}\,\mu$s/tok, corresponding approximately to InfiniBand HDR, PCIe~4.0 with NCCL overhead, and 25\,GbE, to bound sensitivity to plausible production-fabric assumptions~\cite{patel2024splitwise,zhong2024distserve}.
+
+\textbf{Parameter settings.}
+Table~\ref{tab:eval_params} lists the scheduler parameters used in the evaluation.
+Reference capacities $C_{\mathrm{pf}}^{\mathrm{ref}}$ and $C_{\mathrm{dc}}^{\mathrm{ref}}$ are measured offline from the calibration corpus.
+Optional stricter thresholds for classifier, latency, and throughput-saturation gates are calibrated and validated separately in \S\ref{sec:eval_models}; the main cross-strategy comparison uses the common $\rho$-gate above.
+
+\begin{table}[t]
+    \centering
+\caption{Scheduler parameters used in the evaluation.}
+    \label{tab:eval_params}
+    \small
+    \begin{tabular}{@{}lll@{}}
+        \toprule
+        Parameter & Value & Description \\
+        \midrule
+        $W$ & 5\,s & Scheduling window duration \\
+        $K$ & 4 & Number of request classes \\
+        $\theta_{\mathrm{il}}$ & 512 tokens & Input-length class threshold \\
+        $\theta_{\mathrm{ol}}$ & 512 tokens & Output-length class threshold \\
+        $\tau_{\mathrm{imb}}$ & 1.5 & Phase imbalance threshold \\
+        $\tau_{\mathrm{load}}$ & 0.7 & Low-load threshold \\
+        $\tau_{\mathrm{burst}}$ & 1.5 & Burst multiplicative threshold \\
+        $\Delta_{\lambda}$ & 5\,req/s & Burst additive threshold \\
+        $H_A, H_B$ & 2, 2 & Bundle stability thresholds (windows) \\
+        $\delta_{\mathrm{hyst}}$ & 0.10 & State-classifier hysteresis margin \\
+        $\eta$ & 0.8 & Capacity uncertainty margin \\
+        $C_{\mathrm{pf}}^{\mathrm{ref}}$ & 2.0$\times 10^{5}$\,tok/s & Reference prefill capacity \\
+        $C_{\mathrm{dc}}^{\mathrm{ref}}$ & 5.7$\times 10^{3}$\,tok/s & Reference decode capacity \\
+        $\tau_{\mathrm{kv}}$ & 5--41\,$\mu$s/tok & KV-transfer cost sweep \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+
+\iffalse  % OLD Controlled Synthetic Traces subsection, kept for reference; replaced by the shorter version below.
+
+% -----------------------------------------------------------------
+\subsection{Controlled Synthetic Traces}
+\label{sec:eval_synth}
+% -----------------------------------------------------------------
+
+% MOVED TO APPENDIX (Appendix~\ref{sec:synth_traces_appendix}, Figure~\ref{fig:synth_traces}): synthetic-trace overview figure.
+
+We use controlled synthetic traces to isolate how SWEEP-LLM reacts to different workload states and to expose when each control knob matters.
+Synthetic requests are drawn from four controlled classes: short-short (SS: $\mathrm{il}=64, \mathrm{ol}=128$), short-long (SL: $\mathrm{il}=64, \mathrm{ol}=512$), long-short (LS: $\mathrm{il}=1024, \mathrm{ol}=128$), and long-long (LL: $\mathrm{il}=1024, \mathrm{ol}=512$).
+The realized rate, class mix, and per-window state of all four traces match the design intent (Appendix~\ref{sec:synth_traces_appendix}, Figure~\ref{fig:synth_traces}).
+
+% \underline{\textbf{CONCERN:} Verify the feasible rate range on the L40S/L4 cluster with Mistral-7B before committing to trace parameters.
+% At il=1024, even L40S TP=1 may saturate around 10--15 req/s. Ramping to 50 req/s with long prompts is likely infeasible, making the top half of the ramp uninteresting.
+% Consider scaling the ramp range to match the cluster's actual capacity (e.g., 1--20 req/s instead of 2--50 req/s).
+% Similarly, T4's 100 req/s spikes may be completely infeasible. Adjust after profiling.}
+
+\textbf{T1: Prefill-heavy ramp.}
+Requests are drawn from a prefill-heavy mix: 50\% LS, 25\% LL, and 25\% SS. The arrival rate ramps linearly from 2 to 34 requests/s and then back to 2 requests/s over a 600-second trace, targeting \textbf{PREFILL\_HEAVY} windows.
+
+\textbf{T2: Decode-heavy ramp.}
+Requests are drawn from a decode-heavy mix: 50\% SL, 25\% LL, and 25\% SS. The arrival rate ramps linearly from 2 to 24 requests/s and then back to 2 requests/s over a 600-second trace, targeting \textbf{DECODE\_HEAVY} windows.
+
+\textbf{T3: Gradual phase-shift trace.}
+The trace begins with the prefill-heavy mix of T1 and transitions to the decode-heavy mix of T2 over a 120-second ramp centered at the midpoint, with LL (25\%) and SS (25\%) constant. The arrival rate is held at 24 requests/s. 
+T3 forces a smooth \textbf{PREFILL\_HEAVY}-to-\textbf{DECODE\_HEAVY} transition and tests SWEEP-LLM's adaptation to gradual workload shifts.
+
+\textbf{T4: Balanced-load burst trace.}
+Requests are drawn from a balanced mix (25\% each of SS, SL, LS, LL). 
+The baseline arrival rate is 10 requests/s, with periodic overload spikes to 34 requests/s; each spike lasts 20 seconds and recurs every 60 seconds over a 600-second trace. 
+T4 is the main source of explicit \textbf{BOTH\_LOW} and \textbf{BOTH\_HEAVY} coverage and exercises the \textbf{BURST} overlay.
+
+% \textbf{Sweep configuration.}
+% Each strategy is evaluated on every trace at SLO levels $\{200, 500, 1000\}$\,ms TTFT (with $\{100, 200, 400\}$\,ms TPOT) and KV-transfer cost $\tau_{kv} \in \{5, 16, 41\}$\,$\mu$s/tok, yielding $144$ runs in total. The simulator replays each $600$-second trace through the strategy at $W{=}5$\,s windows using the parameters in Table~\ref{tab:eval_params} and the phase-specific predictive stack of \S~\ref{sec:phase_a_models}. We report total GPU-side energy, mean P99 TTFT, mean P99 TPOT, and the fraction of windows that meet the SLO. Cross-pool prefill-to-decode handoff incurs a transfer latency of $\tau_{kv}\cdot \mathrm{il}$, which the strategy honors during candidate evaluation.
+
+% TODO(figure): regenerate figures/section42/energy_by_strategy_per_trace.pdf from
+% results/paper/section42_frozen_main (frozen baselines). The previous PDF showed the
+% pre-overhaul 4-scheduler data and is superseded by Table~\ref{tab:section42_main}.
+
+\begin{table}[t]
+\centering
+\caption{Frozen synthetic results: per-trace energy (kJ) and modeled violation rate (\%v, common $\rho$-gate) at the representative setting (TTFT$\leq$500\,ms, TPOT$\leq$200\,ms, $\tau_{kv}{=}16\,\mu$s/tok), and the mean over all $36$ runs per strategy ($4$ traces $\times$ $3$ SLO $\times$ $3\,\tau_{kv}$). Nonzero-violation strategies are not feasible operating points.}
+\label{tab:section42_main}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+ & \multicolumn{4}{c}{Per-trace kJ / \%v (SLO=500, $\tau_{kv}{=}16$)} & Mean \\
+\cmidrule(lr){2-5}
+Strategy & T1 & T2 & T3 & T4 & kJ \\
+\midrule
+Static-Disagg          & 830 / 0.0 & 794 / 0.0 & 830 / 0.0 & 817 / 0.0 & 818 \\
+GreenLLM-OracleDVFS    & 572 / 0.0 & 505 / 0.0 & 592 / 0.0 & 557 / 0.0 & 556 \\
+DynamoLLM-Mono         & 218 / 9.2 & 233 / 0.0 & 331 / 4.2 & 481 / 3.3 & 316 \\
+DualScale-Ext          & 167 / 44.2 & 165 / 39.2 & 286 / 68.3 & 402 / 0.8 & 255 \\
+Hierarchical-Disagg    & 315 / 0.0 & 256 / 0.0 & 378 / 0.0 & 315 / 0.0 & 316 \\
+\textbf{SWEEP-LLM}     & \textbf{215 / 0.0} & \textbf{192 / 0.0} & \textbf{319 / 0.0} & \textbf{285 / 0.0} & \textbf{253} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Feasible energy frontier.}
+Throughout, ``modeled violation'' denotes the fraction of windows the common $\rho$-gate
+rejects: a configuration is feasible iff the calibrated $\rho$ model predicts no overloaded
+prefill or decode phase ($\rho{\leq}1$); all six schedulers are evaluated under this same
+gate (\S\ref{sec:eval_setup}), and it is a utilization-based feasibility screen, not a
+request-level SLO guarantee. We therefore compare schedulers on the \emph{feasible energy
+frontier}: only $0\%$-modeled-violation configurations are valid operating points.
+Table~\ref{tab:section42_main} shows that among the $0\%$-violation strategies, SWEEP-LLM
+attains the lowest energy on all four traces. Relative to the best feasible non-SWEEP
+baseline on each trace---Hierarchical-Disagg on T1/T3/T4 and DynamoLLM-Mono on T2---SWEEP-LLM
+saves $31.9\%$, $17.5\%$, $15.7\%$, and $9.6\%$ ($18.6\%$ on average).
+
+% OLD (compressed to 2 sentences per trim plan E1):
+\textbf{Raw energy alone is misleading.}
+The baselines that reach lower or comparable \emph{raw} energy do so only by accepting modeled violations: DualScale-Ext's T1/T2/T3 energy ($167$--$286$\,kJ) is the table's lowest but carries $39$--$68\%$ violations (\S\ref{sec:cadence}), and DynamoLLM-Mono matches SWEEP-LLM's T1 energy ($218$ vs.\ $215$\,kJ) only at $9.2\%$ violations---neither is a valid operating point.
+We therefore compare on the feasible frontier, where SWEEP-LLM is the lowest-energy $0\%$-violation scheduler (also $54$--$69\%$ below the fixed Static-Disagg and GreenLLM-OracleDVFS references).
+
+\textbf{Mechanism: per-class joint routing.}
+SWEEP-LLM's advantage comes from per-class joint routing, not from a uniform
+prefill/decode split. At the representative setting its request-weighted route mix is
+dominated by the two monolithic routes (L4-only ROUTE\_BB and L40S-only ROUTE\_AA), with
+cross-pool routes used selectively: $\approx$$20\%$ ROUTE\_BA on T1, $21\%$ ROUTE\_BA plus
+$2\%$ ROUTE\_AB on T4, and $\leq$$1\%$ cross-pool on T2/T3. DynamoLLM-Mono is restricted to
+the monolithic routes, so on the prefill-heavy T1 and burst T4 traces it cannot use the
+cross-pool capacity split that lets SWEEP-LLM keep all four L40S GPUs active while
+separating prefill and decode duties---inflating its T4 energy to $481$\,kJ (vs.\ $285$ for
+SWEEP-LLM) and producing its T1/T4 violations. On T2/T3, where SWEEP-LLM and DynamoLLM-Mono
+use similar monolithic mixes, the residual gap comes instead from SWEEP-LLM's \emph{joint}
+TP/DVFS/capacity search, which we isolate against the sequential Hierarchical-Disagg
+baseline in \S\ref{sec:eval_ablation}.
+
+% MOVED TO APPENDIX (Appendix~\ref{sec:eval_taukv}, Figure~\ref{fig:section42_tau_kv}): the tau_kv-sensitivity figure (flat lines). Result kept in text below.
+Under the common $\rho$-gate, SWEEP-LLM's energy is identical across the three SLO levels and
+across the tested KV-transfer costs $\tau_{kv}\in\{5,16,41\}\,\mu$s/tok
+(a relative spread of $0.00\%$ on all four traces; Appendix~\ref{sec:eval_taukv}, Figure~\ref{fig:section42_tau_kv}).
+Because the $\rho$-gate screens utilization rather than latency, the
+KV-transfer term does not change the chosen configuration in the tested range (for these
+output lengths $\tau_{kv}{=}41\,\mu$s/tok adds at most $5$\,ms of transfer time), so
+SWEEP-LLM's energy and routing decisions are robust to interconnect assumptions.
+
+\textbf{Feasibility-gate sensitivity.}
+\label{sec:gate_sensitivity}
+To test whether the conclusion depends on the common $\rho$-gate, we reran a reduced pilot on all four synthetic traces (T1--T4) with two stricter gates: \emph{classifier+$\rho$} (the trained guard-band SLO classifier in addition to $\rho{\le}1$) and \emph{latency+$\rho$} (predicted P99 TTFT/TPOT $\le$ SLO in addition to $\rho{\le}1$).
+Under all three gates, SWEEP-LLM remains a $0\%$-violation, lowest-energy feasible scheduler on every trace; its selected energy rises by at most about $17\%$ under the stricter gates and it never loses feasibility, so SWEEP-LLM is not exploiting a loose utilization gate.
+The stricter gates are, however, too conservative for the main cross-strategy comparison: classifier+$\rho$ rejects \emph{all} baseline operating points on every trace, and latency+$\rho$ does so on the bursty trace~(T4), which would degenerate the comparison into ``SWEEP-LLM wins because the gate rejects every alternative'' rather than on energy.
+We therefore retain the common $\rho$-gate as the primary fair-comparison gate and report the stricter gates only as a sensitivity check.
+The pilot uses a reduced $120$\,s excerpt of each trace rather than the full evaluation horizon.
+\fi
+
+% -----------------------------------------------------------------
+\subsection{Controlled Synthetic Traces}
+\label{sec:eval_synth}
+% -----------------------------------------------------------------
+
+We first use four controlled synthetic traces to isolate how SWEEP-LLM behaves under different bottleneck states.
+Requests are drawn from four token-shape classes: short-short (SS: $\mathrm{il}=64$, $\mathrm{ol}=128$), short-long (SL: $\mathrm{il}=64$, $\mathrm{ol}=512$), long-short (LS: $\mathrm{il}=1024$, $\mathrm{ol}=128$), and long-long (LL: $\mathrm{il}=1024$, $\mathrm{ol}=512$).
+T1 is a prefill-heavy ramp with 50\% LS, 25\% LL, and 25\% SS requests, ramping from 2 to 34 requests/s and back over 600 seconds.
+T2 is a decode-heavy ramp with 50\% SL, 25\% LL, and 25\% SS requests, ramping from 2 to 24 requests/s and back.
+T3 keeps the arrival rate at 24 requests/s but shifts over 120 seconds from the T1 mix to the T2 mix, creating a gradual prefill-heavy to decode-heavy transition.
+T4 is a balanced burst trace with 25\% of each class, a 10 requests/s baseline, and 20-second spikes to 34 requests/s every 60 seconds.
+The realized rate, class mix, and per-window state distribution match the intended coverage (Appendix~\ref{sec:synth_traces_appendix}, Figure~\ref{fig:synth_traces}).
+
+\begin{table}[t]
+\centering
+\caption{Synthetic-trace energy (kJ) and modeled violations (\%v). Per-trace columns use the Moderate-SLO, $\tau_{\mathrm{kv}}{=}16\,\mu$s/tok setting; Mean averages all $36$ runs per strategy.}
+\label{tab:section42_main}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+ & \multicolumn{4}{c}{Per-trace kJ / \%v (SLO=500, $\tau_{\mathrm{kv}}{=}16$)} & Mean \\
+\cmidrule(lr){2-5}
+Strategy & T1 & T2 & T3 & T4 & kJ \\
+\midrule
+Static-Disagg          & 830 / 0.0 & 794 / 0.0 & 830 / 0.0 & 817 / 0.0 & 818 \\
+GreenLLM-OracleDVFS    & 572 / 0.0 & 505 / 0.0 & 592 / 0.0 & 557 / 0.0 & 556 \\
+DynamoLLM-Mono         & 218 / 9.2 & 233 / 0.0 & 331 / 4.2 & 481 / 3.3 & 316 \\
+DualScale-Ext          & 167 / 44.2 & 165 / 39.2 & 286 / 68.3 & 402 / 0.8 & 255 \\
+Hierarchical-Disagg    & 315 / 0.0 & 256 / 0.0 & 378 / 0.0 & 315 / 0.0 & 316 \\
+\textbf{SWEEP-LLM}     & \textbf{215 / 0.0} & \textbf{192 / 0.0} & \textbf{319 / 0.0} & \textbf{285 / 0.0} & \textbf{253} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:section42_main} shows that SWEEP-LLM is the lowest-energy scheduler among the $0\%$-modeled-violation strategies on all four traces.
+Relative to the best feasible non-SWEEP baseline on each trace---Hierarchical-Disagg on T1/T3/T4 and DynamoLLM-Mono on T2---SWEEP-LLM saves $31.9\%$, $17.5\%$, $15.7\%$, and $9.6\%$, respectively, or $18.6\%$ on average.
+Raw energy alone is misleading: DualScale-Ext is cheaper on T1--T3 only by accepting $39$--$68\%$ modeled violations, and DynamoLLM-Mono nearly matches SWEEP-LLM's T1 energy only at $9.2\%$ violations.
+These points are not valid feasible operating points under the common gate defined in \S\ref{sec:eval_setup}.
+A sweep of DualScale-Ext's coarse provisioning cadence ($20$\,s--$5$\,min) also finds no setting that reaches a lower-energy $0\%$-violation point than SWEEP-LLM (Appendix~\ref{sec:cadence_detail}).
+
+SWEEP-LLM's advantage comes from coordinating per-class routing with TP, frequency, and active capacity rather than using a fixed disaggregated split.
+At the representative setting, its route mix is dominated by same-pool routes, but it still uses cross-pool routes selectively: about $20\%$ ROUTE\_BA on T1, $21\%$ ROUTE\_BA plus $2\%$ ROUTE\_AB on T4, and at most $1\%$ cross-pool routing on T2/T3.
+DynamoLLM-Mono is restricted to the two same-pool routes (AA/BB) and cannot express these selective cross-pool capacity splits, which contributes to its T1/T4 violations and high T4 energy.
+On T2/T3, where the two schedulers choose similar same-pool routes, the energy gap narrows.
+The value of \emph{joint} rather than sequential control is isolated separately against Hierarchical-Disagg, which has the same per-class route set as SWEEP-LLM but optimizes the controls sequentially (\S\ref{sec:eval_ablation}).
+
+Under the common $\rho$-gate, SWEEP-LLM's energy and routing decisions are unchanged across $\tau_{\mathrm{kv}}\in\{5,16,41\}\,\mu$s/tok and across the three SLO levels (Appendix~\ref{sec:eval_taukv}, Figure~\ref{fig:section42_tau_kv}).
+This occurs because the main gate screens utilization rather than latency; even the largest tested transfer penalty adds only tens of milliseconds for the longest synthetic prompts and does not change the utilization-gated candidate choice.
+We therefore report the main results at the representative Moderate-SLO / $\tau_{\mathrm{kv}}{=}16\,\mu$s/tok setting, and treat request-level latency-SLO sensitivity as a modeling limitation (\S\ref{sec:eval_models}) rather than a result.
+Energy is likewise insensitive to the powered-idle assumption for every scheduler except DynamoLLM-Mono, where charging idle power only widens SWEEP-LLM's advantage (Appendix~\ref{sec:eval_idle}).
+To check that the conclusion is not an artifact of the common $\rho$-gate, we reran a reduced 120-second excerpt of each synthetic trace with two stricter gates: classifier+$\rho$ and latency+$\rho$.
+SWEEP-LLM remains feasible and lowest-energy under all three gates, but the stricter gates reject all baseline operating points on every trace for classifier+$\rho$ and on T4 for latency+$\rho$.
+We therefore keep the common $\rho$-gate as the main fair-comparison gate and report stricter gates only as a sensitivity check.
+
+% -----------------------------------------------------------------
+% REMOVED AS A MAIN-TEXT SUBSECTION (Evaluation restructuring): cadence is supporting sensitivity; full sweep is in Appendix~\ref{sec:cadence_detail}, and a one-sentence pointer is folded into \S\ref{sec:eval_synth}. Block kept in \iffalse for reference.
+\iffalse
+\subsection{Two-Tier Provisioning Cadence Sensitivity}
+\label{sec:cadence}
+% -----------------------------------------------------------------
+
+% MOVED TO APPENDIX (Appendix~\ref{sec:cadence_detail}, Table~\ref{tab:cadence}): full cadence sweep + detailed prose. Summary + stress-test caveat kept below.
+Sweeping DualScale-Ext's coarse provisioning cadence over $\{20\,\text{s}, 1, 2, 5\}$\,min at the representative setting (SLO=500\,ms, $\tau_{kv}{=}16\,\mu$s/tok; full sweep in Appendix~\ref{sec:cadence_detail}, Table~\ref{tab:cadence}) shows that \emph{no} cadence reaches a $0\%$-modeled-violation point below SWEEP-LLM: every DualScale-Ext configuration cheaper than SWEEP-LLM carries $28$--$68\%$ modeled violations, while SWEEP-LLM stays on the feasible energy frontier without depending on a fixed coarse interval (it re-evaluates placement every window while gating slow actuation).
+We emphasize that these $600$\,s non-stationary synthetic traces span only two of DualScale-Ext's $5$-min provisioning blocks and are a deliberate stress test of a fixed-cadence provisioner, not a setting it was designed for; they establish only that SWEEP-LLM's advantage does not hinge on a cadence choice. A longer, more stationary production workload---whose $5$-min cadence is well matched---is the fairer comparison for two-tier provisioning, which we turn to next.
+\fi
+
+% -----------------------------------------------------------------
+\subsection{Production Traces}
+\label{sec:eval_prod}
+% -----------------------------------------------------------------
+
+We replay the Azure LLM Inference traces~\cite{patel2024splitwise} while preserving their temporal burstiness and request-length distributions, scaling only the mean arrival rate.
+For the conversation trace, the replay rate is set to $50/70/85\%$ of the highest mean rate at which the fixed Static-Disagg deployment remains feasible under the common $\rho$-gate ($10$\,rps), so the anchor is independent of SWEEP-LLM.
+The resulting conversation replays span $\approx$$7$--$12$ of DualScale-Ext's $5$-minute provisioning blocks.
+All strategies use the same windowizer, common $\rho$-gate, and representative Moderate-SLO / $\tau_{\mathrm{kv}}{=}16\,\mu$s/tok setting as in the synthetic evaluation.
+
+\begin{table}[t]
+\centering
+\caption{Azure conversation replay: energy (kJ) and modeled violations (\%v).}
+\label{tab:prod_conv}
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Strategy & 50\% (kJ/\%v) & 70\% (kJ/\%v) & 85\% (kJ/\%v) \\
+\midrule
+Static-Disagg        & 4691 / 0.0 & 3417 / 0.0 & 2856 / 0.0 \\
+GreenLLM-OracleDVFS  & 2920 / 0.0 & 2179 / 0.0 & 1857 / 0.0 \\
+DynamoLLM-Mono       & 1220 / 0.1 & 1104 / 2.8 & 883 / 9.3 \\
+DualScale-Ext        & 1030 / 6.5 & 800 / 20.4 & 727 / 26.6 \\
+Hierarchical-Disagg  & 1332 / 0.0 & 1053 / 0.0 & 935 / 0.0 \\
+\textbf{SWEEP-LLM}   & \textbf{860 / 0.0} & \textbf{741 / 0.0} & \textbf{674 / 0.0} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+On the conversation trace (Table~\ref{tab:prod_conv}), SWEEP-LLM holds $0\%$ modeled violations at all three utilizations and is the lowest-energy $0\%$-violation strategy.
+It saves $35.5/29.6/27.9\%$ over the best feasible baseline (Hierarchical-Disagg) at $50/70/85\%$ utilization, exceeding the synthetic feasible-frontier gap.
+Even though these replays span $7$--$12$ provisioning blocks, DualScale-Ext still under-provisions the bursty arrivals, with violations rising from $6.5\%$ to $26.6\%$.
+DynamoLLM-Mono also degrades with load ($0.1\%{\to}9.3\%$), while the remaining feasible baselines keep $0\%$ modeled violations only at $1.4$--$5.5\times$ SWEEP-LLM's energy.
+
+\textbf{Code workload: a prefill-bound, cluster-limited regime.}
+We repeat the experiment on the Azure code trace (median input $\approx$$1{,}595$ tokens, short outputs) using a $2$\,rps capacity anchor.
+Code is prefill-bound: its long prompts saturate the $4$-GPU L40S prefill pool.
+The testbed is therefore undersized for this trace, and \emph{no} strategy is perfectly feasible across all utilizations (Table~\ref{tab:prod_code}), not even Static-Disagg ($0.1$--$0.4\%$).
+The strict $0\%$ frontier does not apply, so we compare strategies at the achievable violation floor.
+
+\begin{table}[t]
+\centering
+\caption{Azure code replay: energy (kJ) and modeled violations (\%v).}
+\label{tab:prod_code}
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Strategy & 50\% (kJ/\%v) & 70\% (kJ/\%v) & 85\% (kJ/\%v) \\
+\midrule
+Static-Disagg        & 5877 / 0.1 & 4353 / 0.3 & 3652 / 0.4 \\
+GreenLLM-OracleDVFS  & 4876 / 0.1 & 3594 / 0.3 & 3014 / 0.4 \\
+DynamoLLM-Mono       & 3627 / 1.3 & 2682 / 2.5 & 2226 / 3.6 \\
+DualScale-Ext        & 3818 / 3.0 & 2736 / 4.3 & 2141 / 10.6 \\
+Hierarchical-Disagg  & 3728 / 0.1 & 2737 / 0.1 & 2321 / 0.2 \\
+\textbf{SWEEP-LLM}   & \textbf{3442 / 0.1} & \textbf{2550 / 0.0} & \textbf{2159 / 0.1} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At the $\approx$$0.1\%$ violation floor the cluster permits, SWEEP-LLM is the lowest-energy strategy.
+It saves $6.8$--$7.7\%$ over Hierarchical-Disagg and $\approx$$41\%$ over Static-Disagg; the smaller margin than on conversation traffic ($28$--$35\%$) reflects that the prefill-bound code workload pins most work to L40S.
+The only lower raw-energy point is DualScale-Ext at $85\%$ load ($2141$\,kJ vs.\ SWEEP-LLM's $2159$\,kJ), but it comes at $10.6\%$ rather than $0.1\%$ modeled violations.
+SWEEP-LLM is therefore Pareto-best among the near-feasible strategies.
+
+On a longer non-stationary $3$\,h trough-to-peak segment derived from the one-week Azure trace ($36$ five-minute blocks), SWEEP-LLM remains the lowest-energy $0\%$-violation scheduler at every load, saving $4.3$--$25.0\%$ over Hierarchical-Disagg.
+DualScale-Ext under-provisions throughout ($17.6$--$23.9\%$ violations) despite $36$ reconfiguration opportunities, further indicating that fixed coarse provisioning struggles on non-stationary traffic (Appendix~\ref{sec:prod_diurnal}, Table~\ref{tab:prod_diurnal}).
+
+\iffalse  % STALE pre-overhaul content (600s Azure + old DynamoLLM naming/ROUTE_AB), kept for reference; superseded by Table~\ref{tab:prod_conv}.
+
+% ==== conv_1week (n=14,098,196) ====
+% il range           count  % of trace   cumul %
+%     1- 2048    9,520,754      67.53%    67.53%
+%  2049- 3072    2,406,631      17.07%    84.60%
+%  3073- 4096      884,898       6.28%    90.88%
+%  4097- 5120      642,466       4.56%    95.44%
+%  5121- 6144      393,126       2.79%    98.22%
+%  6145- 7168      173,942       1.23%    99.46%
+%  7169- 8192       76,379       0.54%   100.00%
+%  8193-  max            0       0.00%   100.00%
+
+% ==== code_1week (n=618,649) ====
+% il range           count  % of trace   cumul %
+%     1- 2048      329,304      53.23%    53.23%
+%  2049- 3072      112,689      18.22%    71.44%
+%  3073- 4096       60,143       9.72%    81.17%
+%  4097- 5120       32,180       5.20%    86.37%
+%  5121- 6144       18,578       3.00%    89.37%
+%  6145- 7168       15,021       2.43%    91.80%
+%  7169- 8192       50,734       8.20%   100.00%
+%  8193-  max            0       0.00%   100.00%
+
+We next evaluate SWEEP-LLM on production traces to test whether the gains observed on controlled workloads persist under realistic request variation.
+These traces are not intended to isolate one specific mechanism; instead, they test robustness under mixed and time-varying request compositions.
+
+\textbf{Trace sources.}
+We use the public Azure LLM inference dataset~\cite{azure_llm_trace} as the production-trace backbone.
+We select the \emph{Conversation} trace as the primary mixed interactive-chat workload and the \emph{Code} trace as the primary long-generation/coding-style workload.
+For all production traces, we preserve request ordering, burst structure, and input/output token counts.
+
+\textbf{Replay scaling.}
+% \underline{\textbf{CONCERN:} ``Scale the overall replay rate to match serving capacity'' is vague. Specify the target utilization and consider testing at multiple utilization levels.}
+We scale the overall replay rate to target three utilization levels on our L40S/L4 deployment:
+\begin{itemize}
+    \item \textbf{Low (50\% of peak):} consolidation-dominated regime.
+    \item \textbf{Medium (70\% of peak):} moderate pressure, mixed opportunities.
+    \item \textbf{High (85\% of peak):} near-saturation, routing and DVFS dominate.
+\end{itemize}
+Peak capacity is determined from the cluster's measured maximum sustainable throughput under the default deployment.
+This avoids traces that are uniformly overloaded or uniformly trivial while exposing how SWEEP-LLM behaves across different load regimes.
+
+\textbf{Role in the paper.}
+The production traces complement the synthetic traces: synthetic traces explain \emph{why} SWEEP-LLM helps under specific workload states, while production traces test whether the controller remains effective under realistic nonstationary demand.
+
+\label{sec:eval_prod_results}
+\textbf{SWEEP-LLM consistently outperforms DynamoLLM on production traces.}
+Table~\ref{tab:prod_trace_results} summarizes energy and modeled violation rates (common $\rho$-gate) for both schedulers across all six trace--utilization combinations at two SLO levels.
+At the moderate SLO (TTFT$\leq$500\,ms), SWEEP-LLM reduces energy relative to DynamoLLM by $2.9\%$ (conv-50\%), $10.1\%$ (conv-70\%), $30.5\%$ (conv-85\%), $29.3\%$ (code-50\%), $29.6\%$ (code-70\%), and $27.4\%$ (code-85\%).
+Both schedulers achieve $0\%$ modeled violations across all six configurations at both SLO levels.
+
+\begin{table}[t]
+\centering
+\caption{Energy (kJ) and modeled violation rate (\%, common $\rho$-gate) for SWEEP-LLM vs.\ DynamoLLM on the Azure conversation and code traces ($\tau_{kv}{=}5\,\mu$s/tok). Savings $=$ (DynamoLLM $-$ SWEEP-LLM)/DynamoLLM.}
+\label{tab:prod_trace_results}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llrrrrrr@{}}
+\toprule
+ & & \multicolumn{3}{c}{TTFT $\leq$ 500\,ms} & \multicolumn{3}{c}{TTFT $\leq$ 1000\,ms} \\
+\cmidrule(lr){3-5}\cmidrule(lr){6-8}
+Trace & Util & SWEEP & Dynamo & Savings & SWEEP & Dynamo & Savings \\
+ & & kJ / \%v & kJ / \%v & & kJ / \%v & kJ / \%v & \\
+\midrule
+Conv & 50\% & 453 / 0.0 & 466 / 0.0 &  2.9\% & 449 / 0.0 & 455 / 0.0 &  1.3\% \\
+Conv & 70\% & 319 / 0.0 & 354 / 0.0 & 10.1\% & 293 / 0.0 & 336 / 0.0 & 12.7\% \\
+Conv & 85\% & 216 / 0.0 & 310 / 0.0 & 30.5\% & 216 / 0.0 & 293 / 0.0 & 26.2\% \\
+\midrule
+Code & 50\% & 291 / 0.0 & 412 / 0.0 & 29.3\% & 288 / 0.0 & 398 / 0.0 & 27.7\% \\
+Code & 70\% & 224 / 0.0 & 318 / 0.0 & 29.6\% & 222 / 0.0 & 283 / 0.0 & 21.7\% \\
+Code & 85\% & 188 / 0.0 & 259 / 0.0 & 27.4\% & 186 / 0.0 & 243 / 0.0 & 23.5\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Savings grow with utilization on Conversation; stable on Code.}
+On the Conversation trace, savings increase from $3\%$ at 50\% utilization to $30\%$ at 85\%.
+At low utilization, both schedulers converge on the all-L4 configuration with L40S power-gated to 0\,W, leaving little margin between them.
+As utilization grows, DynamoLLM is forced into ROUTE\_AA mode to serve long-input Conv requests on L40S for both prefill and decode, keeping L40S at $360$\,W between requests; SWEEP-LLM uses ROUTE\_AB to offload decode to L4, enabling L40S to power-gate sooner.
+On the Code trace, savings remain stable at $22$--$30\%$ across all utilization levels: the long input lengths (median $\mathrm{il}{=}1{,}595$ tokens) consistently require L40S for prefill, but SWEEP-LLM's ROUTE\_AB handoff offloads decode to L4 while DynamoLLM's ROUTE\_AA keeps L40S occupied through the short decode phase.
+Both schedulers achieve $0\%$ modeled violations across all conditions.
+
+\textbf{SLO budget has modest effect on savings.}
+At the loose SLO (TTFT$\leq$1000\,ms), savings range from $1$--$26\%$ on Conv and $22$--$28\%$ on Code.
+The routing-based savings on Code are largely SLO-independent: the long-input Code workload requires L40S prefill regardless of SLO budget, so the ROUTE\_AB advantage (offloading decode to L4) persists across both SLO levels.
+Conv savings at 50\% utilization approach zero at both SLOs, confirming that the two schedulers are nearly equivalent when traffic is low enough for all-L4 routing.
+
+\textbf{Production energy gap: routing structure across workload types.}
+On Code traces, the $22$--$30\%$ energy gap arises from routing structure rather than feasibility differences---both schedulers achieve $0\%$ modeled violations.
+The Code workload's long prompts (median $\mathrm{il}{=}1{,}595$ tokens) require L40S prefill capacity, but its trivial decode ($\mathrm{ol}{\leq}23$ tokens on average) means the decode phase contributes minimally to latency.
+DynamoLLM's ROUTE\_AA assignment keeps L40S active through this short decode phase; SWEEP-LLM's ROUTE\_AB hands decode off to L4 immediately after prefill, allowing L40S to power-gate.
+The L40S idle power ($360$\,W) during DynamoLLM's decode-phase occupancy, aggregated over thousands of scheduling windows, accounts for the majority of the energy gap.
+
+\textbf{Structural advantage: disaggregated routing.}
+The core mechanism behind SWEEP-LLM's remaining gains on production traces is its disaggregated ROUTE\_AB assignment: long-input prefill is directed to the high-compute L40S pool while decode is offloaded to the energy-efficient L4 pool.
+For short-input, decode-heavy request classes, SWEEP-LLM may also select the inverse ROUTE\_BA (L4 prefill, L40S decode), routing the cheap short prefill through L4 while reserving L40S for a long decode phase that would violate a tight TPOT budget on L4; this route appears primarily on the synthetic T2 trace and has negligible impact on the production traces studied here.
+Both schedulers now model server-level power-gating (L40S powered off to 0\,W when the pool carries no traffic); the residual gap reflects SWEEP-LLM's ability to shorten L40S active time by decoupling prefill and decode phases.
+DynamoLLM's ROUTE\_AA/BB routing must keep L40S active for the full duration of any request routed there, including the decode phase, whereas ROUTE\_AB frees L40S after prefill and lets the cheaper L4 pool absorb decode---reducing L40S utilization and enabling earlier power-gating.
+
+\fi  % end STALE production content
+
+% REMOVED AS A MAIN-TEXT SUBSECTION (Evaluation restructuring): SLO-insensitivity under the common $\rho$-gate is a modeling-gate consequence, not a main result; the caveat and idle-power robustness are folded into \S\ref{sec:eval_synth}. Block kept in \iffalse for reference.
+\iffalse
+% -----------------------------------------------------------------
+\subsection{SLO Sensitivity}
+\label{sec:eval_slo}
+% -----------------------------------------------------------------
+
+We characterize how energy and feasibility vary with the nominal SLO using the same frozen sweep as \S~\ref{sec:eval_synth} (Table~\ref{tab:section42_main}).
+
+\textbf{Energy and feasibility are SLO-insensitive under the common $\rho$-gate.}
+On all four traces, every scheduler's energy \emph{and} modeled-violation rate are identical across SLO $\in\{200,500,1000\}$\,ms (and across $\tau_{kv}\in\{5,16,41\}\,\mu$s/tok).
+This follows directly from the common feasibility gate (\S\ref{sec:eval_setup}): the $\rho$-gate screens utilization overload ($\rho{\leq}1$), which does not depend on the TTFT/TPOT budget, so the energy-optimal feasible configuration is the same at every SLO.
+We therefore treat request-level latency-SLO sensitivity as a modeling limitation rather than a result (\S\ref{sec:eval_models}), and report all other experiments at the representative SLO$=500$\,ms, $\tau_{kv}{=}16\,\mu$s/tok setting.
+
+\textbf{Feasibility under the $\rho$-gate.}
+Static-Disagg, GreenLLM-OracleDVFS, Hierarchical-Disagg, and SWEEP-LLM all hold $0\%$ modeled violations on every trace: the fixed baselines are utilization-feasible---merely energy-wasteful, not overloaded.
+Only two schedulers incur modeled violations, both structural and SLO-independent: DynamoLLM-Mono ($9.2\%$/$0\%$/$4.2\%$/$3.3\%$ on T1--T4), whose monolithic-routing restriction cannot supply enough prefill/decode capacity at the burst windows, and DualScale-Ext ($39$--$68\%$ on T1--T3), whose locked $5$-min placement under-provisions the non-stationary traffic (\S\ref{sec:cadence}).
+The differentiator among schedulers is therefore energy on the feasible frontier (\S\ref{sec:eval_synth}), not the SLO level.
+
+\textbf{T4: SWEEP-LLM vs.\ DynamoLLM-Mono.}
+On T4, SWEEP-LLM ($285$\,kJ) uses $41\%$ less energy than DynamoLLM-Mono ($481$\,kJ) at $0\%$ vs.\ $3.3\%$ modeled violations.
+DynamoLLM-Mono is restricted to monolithic routes, forcing it to activate the full L40S pool during burst windows (${\sim}34$\,rps); SWEEP-LLM instead mixes monolithic routes with cross-pool placements (${\approx}21\%$ ROUTE\_BA on T4) that DynamoLLM-Mono cannot express, keeping the high-power pool active only when needed.
+
+% MOVED TO APPENDIX (Appendix~\ref{sec:eval_idle}): full "Idle power sensitivity" paragraph. Summary kept below.
+\textbf{Idle power sensitivity.}
+Sweeping the powered-idle assumption (zero to high) leaves five of six schedulers---including SWEEP-LLM---completely insensitive; only DynamoLLM-Mono is affected (on T3/T4, where monolithic routing leaves a pool partially idle), which only \emph{widens} SWEEP-LLM's advantage (Appendix~\ref{sec:eval_idle}).
+\fi
+
+% -----------------------------------------------------------------
+\subsection{Ablation Study}
+\label{sec:eval_ablation}
+% -----------------------------------------------------------------
+
+We ablate each SWEEP-LLM control dimension in turn, using the same common $\rho$-gate setup as \S\ref{sec:eval_synth}.
+Starting from the full system, we disable one knob while leaving the other three under joint search.
+Each ablation runs on the four synthetic traces at all three SLO levels with $\tau_{\mathrm{kv}}{=}16$\,$\mu$s/tok:
+\begin{itemize}[leftmargin=*,itemsep=0pt,topsep=0pt]
+    \item \textbf{No routing:} fix all classes to the default $A{\to}B$ route.
+    \item \textbf{No DVFS:} pin both pools to maximum frequency, representing deployments without per-window GPU-frequency control.
+    \item \textbf{No TP:} fix $\mathrm{TP}_A{=}\mathrm{TP}_B{=}1$.
+    \item \textbf{No capacity:} keep every GPU in each pool active.
+\end{itemize}
+The full SWEEP-LLM is the energy baseline, and each ablation is reported as the mean marginal energy increase over the $36$ runs per variant.
+
+% TODO(figure): regenerate figures/section45/ablation_energy.pdf from
+% results/paper/section42_frozen_ablation (frozen baselines); superseded for now by
+% Table~\ref{tab:ablation}.
+
+\begin{table}[t]
+\centering
+\caption{Marginal energy increase when removing one control knob.}
+\label{tab:ablation}
+\small
+\begin{tabular}{@{}lrl@{}}
+\toprule
+Variant & Mean energy increase & Note \\
+\midrule
+$-$TP        & $+11\%$ & largest marginal knob \\
+$-$Capacity  & $+6\%$  & active-GPU / power-gating control \\
+$-$DVFS      & $+4\%$  & overlaps with capacity control \\
+$-$Routing   & $+3\%$  & cross-pool phase placement \\
+SWEEP-LLM    & baseline & all four knobs \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:ablation} reports the mean energy increase when each control is removed while the other three remain under joint search.
+Removing any one knob raises modeled GPU-side energy by $3$--$11\%$.
+Tensor parallelism has the largest marginal cost ($+11\%$), while routing and DVFS have smaller marginal costs ($+3$--$4\%$) because the remaining controls can partly compensate.
+These are \emph{marginal} losses conditioned on the other knobs, not standalone contributions.
+
+The small $-$DVFS marginal does not mean frequency scaling is ineffective: SWEEP-LLM selects the minimum frequency in many windows.
+Rather, once active-capacity control can power-gate idle GPUs, much of the energy that DVFS would save in isolation has already been removed.
+The standalone value of DVFS is visible in the fixed-placement setting, where GreenLLM-OracleDVFS reduces energy by $32\%$ over Static-Disagg (Table~\ref{tab:section42_main}).
+This overlap is why SWEEP-LLM optimizes routing, TP, DVFS, and active capacity \emph{jointly}: the controller combines partially substitutable controls and selects the cheapest feasible operating point for each window.
+
+% REMOVED FROM MAIN TEXT (Evaluation restructuring): SLO-insensitivity is already stated in \S\ref{sec:eval_synth} and is not an ablation result. Kept in \iffalse for reference.
+\iffalse
+\textbf{Synthetic SLO-insensitivity is a modeling boundary.}
+Under the common $\rho$-gate, the configurations SWEEP-LLM selects are insensitive to the
+nominal TTFT/TPOT budget in this synthetic sweep---energy is identical at
+SLO$\in\{200,500,1000\}$\,ms---because the gate screens utilization overload and the latency
+budget does not bind the chosen configurations. We therefore report ablations at the
+representative setting (SLO$=500$\,ms, $\tau_{kv}{=}16\,\mu$s/tok) and interpret them as
+utilization-feasibility results, not request-level latency-SLO sensitivity, which remains a
+modeling limitation (\S\ref{sec:eval_models}).
+\fi
+
+\textbf{Joint search outperforms sequential control.}
+A complementary question is whether optimizing all four controls jointly is better than optimizing them in sequence.
+Hierarchical-Disagg isolates this comparison: it has the same per-class route set as SWEEP-LLM, but assigns routing, TP, frequency, and active GPU count in four sequential greedy stages (\S\ref{sec:eval_setup}).
+Across the synthetic sweep, SWEEP-LLM reduces modeled GPU-side energy by $31.9\%$ (T1), $24.9\%$ (T2), $15.6\%$ (T3), and $9.6\%$ (T4) relative to this sequential-control baseline, about $20\%$ on average, with both at $0\%$ modeled violations.
+This is consistent with the controlled motivation study (\S\ref{sec:motivation_joint}), where sequential control can miss the lower-energy feasible point when routing and TP decisions are coupled.
+The gain is largest on the bursty prefill-heavy T1, where routing and active-capacity choices interact most strongly.
+
+% -----------------------------------------------------------------
+\subsection{Model Validation}
+\label{sec:eval_models}
+% -----------------------------------------------------------------
+
+\iffalse  % OLD Model Validation subsection --- replaced by the shorter, self-contained version below (Evaluation now owns validation; validation tables moved here from the Models section).
+We validate the phase-specific model stack on grouped cross-validation splits over the calibration corpus described in Section~\ref{sec:phase_a_models}. The evaluation answers two questions: (i) do the predictors and feasibility classifiers produce useful outputs in isolation, and (ii) does the stack support online scheduling without admitting unsafe candidates?
+
+% OLD (stale pre-overhaul numbers; duplicated Table~\ref{tab:model_validation}):
+% \textbf{Prediction error.} Power per GPU is predicted accurately on both pools and both phases, with cross-validated MAPE $4.4$--$5.5\%$, $R^{2}$ $0.90$--$0.94$, and Spearman rank correlation $0.93$--$0.97$. Latency MAPE is higher ($28\%$ for L40S decode TPOT, $40\%$ for L40S prefill TTFT, $46\%$ for L4 decode TPOT, and $87\%$ for L4 prefill TTFT), but Spearman rank correlation remains $0.86$--$0.91$ across all four pool--phase combinations. The high absolute MAPE on L4 prefill TTFT reflects large variance in P99 measurements at extreme input lengths, where a single outlier can dominate the error metric; the rank correlation of $0.86$ indicates that the relative ordering of candidate configurations is preserved.
+\textbf{Prediction error.} The per-configuration accuracy of the power and latency models is reported in Table~\ref{tab:model_validation} (\S\ref{sec:phase_a_models}) and is not repeated here: power is accurate (MAPE $6$--$8\%$), while latency has higher absolute error but strong rank correlation (Spearman $0.94$--$0.97$). This is consistent with design intent: the latency regressors are used only for \emph{ranking} among already-feasible candidates, where a single outlier in the P99 tail can inflate MAPE without disturbing the ordering.
+% OLD (redundant with the revised Prediction-error sentence above):
+% Importantly, the latency regressors are used only for \emph{ranking} among already-feasible candidates; they are not the feasibility admission rule.
+In the cross-strategy comparison, feasibility is decided by the common utilization gate ($\rho \le 1$, \S\ref{sec:eval_setup}), applied identically to every strategy; the latency regressors are not the admission rule.
+The model stack additionally provides a trained guard-band feasibility classifier (Stage~2), validated next; it is used as an optional stricter admission mode (e.g.\ the DualScale-Ext sensitivity in Appendix~\ref{sec:cadence_detail}), while the frozen cross-strategy comparison uses the common $\rho$-gate so that all strategies face the same feasibility standard.
+% OLD (redundant with the revised Prediction-error sentence above):
+% The contrast with power accuracy is consistent with design intent: rank correlation is the operative metric for the latency regressors, not MAPE.
+
+\textbf{Feasibility.} The phase-specific guard-band classifiers are tuned to minimise false-safe admissions before maximising admit rate. False-safe rate is $0\%$ (safe precision $100\%$) across all pool--phase--SLO combinations with unsafe-support count exceeding $40$ samples; a few combinations (L40S decode at $500$ and $1000$\,ms; L4 decode at $1000$\,ms) have unsafe support of $\leq 1$ example, so a single misclassification inflates the reported rate. Admit rates after retuning range from $6.8\%$ (L4 prefill, $200$\,ms) to $90\%$ (L40S decode, $500$\,ms), reflecting that prefill is harder to admit at tight SLOs on L4 while decode admits more freely on L40S.
+The dominant residual failure mode is throughput saturation on low-support short-prompt shapes; adding the throughput-saturation gate to the screen cuts the decision-level false-safe rate (over all workload shapes) from $34.5\%$ to $6.5\%$---and saturated false-safe selections from $91$ to $2$---at a modest cost in candidate coverage and energy regret.
+
+\textbf{Decision quality.} For each measured workload we compare the candidate the model selects to the measured-best feasible candidate (the oracle). Top-1 match rates are $79.5\%$, $91.5\%$, and $91.3\%$ for L40S decode at the tight, moderate, and loose SLOs, with mean regret $7.7\%$, $3.0\%$, and $3.9\%$. L4 prefill lands at $64$--$83\%$ top-1 across SLOs. The hardest case is L4 decode at the moderate SLO ($53\%$ top-1, $48\%$ mean regret), where many configurations sit close to the TPOT boundary and small mis-rankings become significant. The classifier component's unsafe-admission rate is $0\%$ wherever unsafe support exceeds $40$ samples (the few low-support combinations noted above aside): the model stack does not trade feasibility for energy in its admission decisions. Combined with useful top-1 match rates, this supports using the stack to drive online scheduling, though the frozen cross-strategy comparison still gates feasibility through the common $\rho$-gate (\S\ref{sec:eval_setup}).
+
+\textbf{Cross-model robustness.} To rule out model self-consistency as a confounder, we train two independent model stacks on non-overlapping calibration splits (runs $\{1,2\}$ for Model-A, run $\{3\}$ for Model-B) and run simulations in which the scheduler uses Model-A for decisions while outcomes are scored by Model-B.
+This experiment isolates the within-pool DVFS and TP decisions on a single-pool monolithic setup, where the baseline is all-max-frequency on one pool; it does not replicate the full disaggregated evaluation, whose feasible-frontier savings (\S\ref{sec:eval_synth}) additionally draw on cross-pool routing and capacity consolidation. Here we isolate only the model-split sensitivity of the within-pool decisions.
+Under this cross-model protocol, SWEEP-LLM's energy savings over the na\"ive all-max-frequency baseline are $5.9\%$, $5.2\%$, and $7.8\%$ at SLO$\,{=}\,200$, $500$, and $1000$\,ms respectively, compared to $7.0\%$, $5.6\%$, and $8.5\%$ in the co-model baseline---a degradation of at most $1.1$\,pp. The policy ordering (SWEEP-LLM $<$ all single-knob ablations $<$ na\"ive) is preserved at every SLO level. These results indicate that SWEEP-LLM's relative energy advantage reflects genuine scheduling decisions rather than overfitting to the calibration model.
+
+% MOVED TO APPENDIX (Appendix~\ref{sec:eval_oracle}): full "Search Quality vs.\ a Uniform-Route
+% Exhaustive Oracle" subsection + Table~\ref{tab:oracle_gap}. Main text keeps the one-sentence summary below.
+A uniform-route exhaustive sanity check (Appendix~\ref{sec:eval_oracle}) shows SWEEP-LLM is within $0$--$12\%$ of the oracle on the binding states (PREFILL\_HEAVY, BOTH\_HEAVY) and never misses a feasible configuration the oracle finds, while searching far fewer candidates.
+\fi
+
+Because the scheduler acts on model predictions, validation must establish two things: the predictors are accurate enough to guide decisions, and the optional feasibility screens reduce unsafe admissions without being needed for the main cross-strategy comparison.
+We evaluate both on grouped cross-validation over the calibration corpus (\S\ref{sec:phase_a_models}), holding out whole $(\mathrm{il},\mathrm{ol},\mathrm{TP},f)$ configurations.
+
+\textbf{Prediction accuracy.}
+Power---the regressor used to score energy for candidate configurations---is accurate (MAPE $6$--$8\%$; Table~\ref{tab:model_validation}).
+Latency has higher absolute error but strong rank correlation (Spearman $0.94$--$0.97$), which is the property the scheduler needs for ordering candidates.
+The latency regressors are used for candidate ordering and diagnostics after utilization screening, not as the admission rule.
+In the cross-strategy comparison, feasibility is decided by the common utilization gate ($\rho\le1$, \S\ref{sec:eval_setup}) applied identically to every strategy.
+
+\textbf{Feasibility and the saturation gate.}
+The model stack also includes optional guard-band feasibility classifiers for a stricter admission mode (Table~\ref{tab:feasibility_classifier}); these classifiers are not used in the main cross-strategy comparison.
+The dominant residual failure mode is throughput saturation on low-support short-prompt shapes.
+Adding the throughput-saturation gate cuts the decision-level false-safe rate, measured over all workload shapes, from $34.5\%$ to $6.5\%$ and reduces saturated false-safe selections from $91$ to $2$.
+This safety gain reduces candidate coverage from $24.5\%$ to $18.4\%$ and raises median feasible-choice energy regret from $6.1\%$ to $11.1\%$.
+
+\textbf{Decision quality and robustness.}
+For candidate ranking, top-1 match with the measured-best feasible configuration is generally useful but uneven across pool/phase/SLO cells: $79$--$92\%$ for L40S decode and $64$--$83\%$ for L4 prefill.
+The hardest case is L4 decode at the moderate SLO ($53\%$ top-1, $48\%$ mean regret), where many configurations sit near the TPOT boundary.
+To rule out self-consistency, a cross-model check---decisions made with one calibration split and outcomes scored by an independent split---preserves the policy ordering and reduces SWEEP-LLM's within-pool savings by at most $1.1$ percentage points.
+Thus, the gains are not an artifact of evaluating decisions on the same fitted model.
+
+A uniform-route exhaustive sanity check (Appendix~\ref{sec:eval_oracle}) shows that SWEEP-LLM is within $0$--$12\%$ of this oracle on the binding states and never misses a feasible configuration it finds, while searching far fewer candidates.
+This oracle is restricted to uniform-route policies and is not a global optimum over SWEEP-LLM's per-class routing space.
+
+\input{validation_tables}
+
+\subsection{Scheduler Overhead}
+\label{sec:eval_overhead}
+% -----------------------------------------------------------------
+
+We instrument the simulator harness to record the wall-clock time of each \texttt{decide\_window} call across the $72$ strategy--trace--SLO runs (six strategies $\times$ four synthetic traces $\times$ three SLO levels) at $\tau_{\mathrm{kv}}{=}16$\,$\mu$s/tok.
+Table~\ref{tab:section47_overhead} reports a decision-time summary per strategy.
+These are unoptimized Python search times in the simulator, not request-serving latencies.
+
+\begin{table}[!t]
+\centering
+\caption{Per-window simulator decision time (ms). Mean and $p50$ are averaged over $12$ runs; $p99$ and Max are worst per-run values.}
+\label{tab:section47_overhead}
+\begin{tabular}{lrrrr}
+\toprule
+Strategy & Mean & $p50$ & $p99$ & Max \\
+\midrule
+Static-Disagg        & $8.6$    & $8.5$    & $16$    & $20$ \\
+GreenLLM-OracleDVFS  & $73.2$   & $73.8$   & $128$   & $132$ \\
+DualScale-Ext        & $72.9$   & $61.7$   & $1137$  & $3279$ \\
+Hierarchical-Disagg  & $287.3$  & $279.8$  & $687$   & $752$ \\
+DynamoLLM-Mono       & $404.1$  & $113.6$  & $3887$  & $4387$ \\
+SWEEP-LLM            & $870.8$  & $799.6$  & $4152$  & $5511$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The reported times are from an \emph{unoptimized Python simulator controller}, not a production scheduler.
+SWEEP-LLM's joint search has an average per-run median of $0.80$\,s and a worst per-run $p99$ of $4.15$\,s.
+The window-state classifier (\S~\ref{sec:window_classifier}) prunes route-map and bundle enumeration before model evaluation, keeping the search space smaller than full enumeration.
+The worst observed window reaches $5.5$\,s, slightly exceeding the $5$\,s control period.
+This occurs on only $3$ of the $1{,}440$ SWEEP windows ($0.21\%$), all during T3 phase-transition windows where the rescue search expands the candidate set.
+No other scheduler exceeds the period on any window.
+We therefore do \emph{not} claim the current Python prototype is a hard real-time controller at $5$\,s granularity.
+A production implementation should run the search asynchronously and reuse the previous feasible bundle if a new plan is not ready by the next window boundary.
+Our evaluation does not implement this fallback; it applies the computed decision and reports simulator overhead as a limitation rather than as a claim of online readiness.
+The table also shows the expected ordering: no-search and frequency-only baselines are fastest, the sequential Hierarchical-Disagg baseline is intermediate, and SWEEP-LLM is slowest.
+
+% OLD pre-overhaul timing numbers --- NOT used in Table~\ref{tab:section47_overhead}; kept only for reference.
+% strategy                 n_runs   mean(ms)      p50        p99        max
+% ----------------------------------------------------------------------
+% static_disagg                12       7.68     7.52      18.01      25.85
+% greenllm                     12      68.37    71.36     100.86     105.87
+% dynamollm                    12     539.92   139.63    3096.57    3499.46
+% sweep_llm                    12     177.22    63.75    3088.46    3107.69
+% sweep_llm_no_routing         12     164.55    58.87    2098.19    2160.89
+% sweep_llm_no_dvfs            12      61.80    17.46     964.54    1157.61
+% sweep_llm_no_tp              12     809.48   157.42    6727.30    6955.30
+% sweep_llm_no_capacity        12     237.61    76.75    5676.28    5701.99
+
+% SWEEP-LLM per-trace breakdown:
+% trace    slo     mean      p50        p99        max
+% T1       200    371.1   63.126    1744.12   1753.621
+% T1       500   69.895   51.805    200.523    215.235
+% T1      1000   70.647   52.779     209.64    229.374
+% T2       200  104.637   64.364    453.123   1589.769
+% T2       500  196.794  142.301   1084.596    1120.09
+% T2      1000  129.784  120.549    435.503    436.827
+% T3       200   80.006   48.205    533.266    924.906
+% T3       500    56.34   42.073    236.898    242.336
+% T3      1000   55.346   41.192    230.436    235.229
+% T4       200  602.402  308.132   3088.462   3107.692
+% T4       500  177.133  122.205    792.809   1253.136
+% T4      1000  212.595  151.409    658.151   1099.705
+
+
+
+% -----------------------------------------------------------------
+% NOTE: Same-family multi-size pilot moved to appendix.
+% If space permits or results are strong, it can be promoted back.
+% -----------------------------------------------------------------
+% \subsection{Same-Family Multi-Size Pilot}
+% \label{sec:eval_multisize}
+%
+% Finally, we include a limited same-family multi-size pilot to assess whether the current deployment-specific model stack can be extended beyond the main model size with limited additional profiling.
+% This pilot is \emph{not} part of the paper's main claim; rather, it is an exploratory extension that helps assess the practicality of same-family scaling.
+%
+% \textbf{Pilot setup.}
+% We use a same-family larger-variant pilot based on Mistral Nemo 12B. The pilot is staged: we first run a smoke test to validate the end-to-end pipeline, then, if successful, a decode-focused intermediate pilot before considering any larger profiling run.
+% We compare three modes:
+% \begin{itemize}
+%     \item \textbf{Zero-shot:} reuse the current size-trained stack directly on the larger model.
+%     \item \textbf{Oracle:} retrain the same phase-specific stack on pilot data from the larger model.
+%     \item \textbf{Threshold-adapt:} keep the original stack but retune only the feasibility thresholds.
+% \end{itemize}
+%
+% \textbf{Interpretation.}
+% The goal of this pilot is to determine where zero-shot reuse fails, whether decode-side behavior degrades first, and whether limited adaptation is sufficient to recover meaningful quality.
+% Unless otherwise stated, we use the pilot only as supporting evidence and keep the main paper narrative centered on the current single-family, single-size deployment.

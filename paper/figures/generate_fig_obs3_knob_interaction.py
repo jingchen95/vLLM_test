@@ -1,0 +1,1 @@
+../scripts/figures/generate_fig_obs3_knob_interaction.py

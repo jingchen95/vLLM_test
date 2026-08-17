@@ -1,0 +1,13 @@
+phase,metric_type,target,n_rows,cv_mape_pct,cv_r2,spearman_r,slo_ms,false_safe,false_unsafe,true_safe,true_unsafe,false_safe_rate_pct,false_unsafe_rate_pct,safe_precision_pct,admit_rate_pct
+prefill,latency,p99_ttft,144.0,52.54,0.521,0.8318,,,,,,,,,
+prefill,power,power_per_gpu,202.0,5.73,0.9395,0.9566,,,,,,,,,
+prefill,feasibility,p99_ttft,,,,,200.0,0.0,37.0,24.0,141.0,0.0,60.66,100.0,11.88
+prefill,feasibility,p99_ttft,,,,,500.0,3.0,38.0,52.0,109.0,2.68,42.22,94.55,27.23
+prefill,feasibility,p99_ttft,,,,,1000.0,0.0,42.0,83.0,77.0,0.0,33.6,100.0,41.09
+prefill,feasibility,p99_ttft,,,,,2000.0,0.0,33.0,108.0,61.0,0.0,23.4,100.0,53.47
+decode,latency,p99_tpot,144.0,43.18,0.5738,0.8716,,,,,,,,,
+decode,power,power_per_gpu,202.0,5.28,0.9463,0.9621,,,,,,,,,
+decode,feasibility,p99_tpot,,,,,200.0,0.0,43.0,96.0,63.0,0.0,30.94,100.0,47.52
+decode,feasibility,p99_tpot,,,,,500.0,8.0,61.0,129.0,4.0,66.67,32.11,94.16,67.82
+decode,feasibility,p99_tpot,,,,,1000.0,1.0,33.0,168.0,0.0,100.0,16.42,99.41,83.66
+decode,feasibility,p99_tpot,,,,,2000.0,0.0,29.0,173.0,0.0,0.0,14.36,100.0,85.64

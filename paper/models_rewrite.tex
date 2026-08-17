@@ -1,0 +1,30 @@
+% ---------------------------------------------------------------
+\section{Models}
+\label{sec:phase_a_models}
+% ---------------------------------------------------------------
+
+SWEEP-LLM does not rely on a universal analytical model of LLM serving.
+It uses lightweight empirical models, trained offline and separately for each GPU type on the target L40S/L4 stack (for a single model family and size), and queries them online only to screen unsafe candidates and to estimate energy for ranking.
+Reprofiling and refitting are deployment-specific offline steps; the scheduler's runtime model-query path stays lightweight and unchanged during scheduling.
+The stack should therefore be read as a calibrated, scheduler-enabling layer for the target platform, not a transfer model for arbitrary deployments.
+The predictors are fit from dense workload, tensor-parallel, and DVFS sweeps, with additional mixed configurations held out for validation.
+
+For each candidate configuration, the scheduler forms phase-aware load features and queries phase-specific predictors.
+For each GPU type $g$, a shared capacity stage estimates the sustainable per-configuration token throughput $\widehat{C}_g(\mathrm{il},\mathrm{ol},\mathrm{TP},f)$ from measured saturation points, applying a conservative margin $\eta<1$ where saturation is not directly observed.
+Combining this capacity with the estimated next-window prefill and decode demand (Eq.~\ref{eq:token_demands}) yields normalized phase-load intensities $\rho_{\mathrm{pf}}$ and $\rho_{\mathrm{dc}}$.
+Feasibility is decided by a \emph{utilization envelope}: a candidate is admissible when both phases stay within safe utilization, $\rho_{\mathrm{pf}}\le\rho^{\max}_{\mathrm{pf}}$ and $\rho_{\mathrm{dc}}\le\rho^{\max}_{\mathrm{dc}}$, and, for a cross-pool route, its analytical KV-transfer term fits within the TTFT budget.
+Our evaluation uses the conservative, SLO-independent bound $\rho^{\max}{=}1$; a tighter SLO-conditioned envelope $\rho^{\max}(g,\phi,\mathrm{TP},f,\mathrm{SLO})$ calibrated from profiling---so that a tight TTFT admits a lower prefill utilization than a loose one---is the natural refinement for the hardware deployment. The same envelope is applied to every strategy, so no scheduler faces a stricter feasibility standard than another.
+Among admissible candidates, the \emph{power} model supplies the per-window energy that the search minimizes; this energy estimate, not latency, ranks candidates.
+Separate per-GPU-type, per-phase latency regressors (P99 TTFT, P99 TPOT) serve as diagnostics, as an overload sentinel, and as the basis of \emph{optional} stricter admission modes (classifier$+\rho$, latency$+\rho$); they are not the deployed admission rule, since tail-latency predictions are noisier than the utilization estimate.
+The stack also supports a stricter screen that additionally gates on a predicted violation probability and a throughput-saturation probability (the chance that achieved throughput falls below $95\%$ of the offered rate), calibrated safety-first; the saturation gate most reduces false-safe admissions in validation (\S\ref{sec:eval_models}). This stricter screen is optional and is not used in the main cross-strategy comparison.
+
+The predictors are trained on single-pool measurements, but a candidate may route prefill and decode to different pools.
+For a route with prefill pool $u$ and decode pool $v$, the scheduler queries the prefill model on $u$ and the decode model on $v$: predicted TTFT is the prefill TTFT plus a KV-cache transfer penalty $T_{\mathrm{KV}}(\tilde{\mathrm{il}})$, parameterized by $\tau_{\mathrm{kv}}$, when $u\neq v$, and predicted TPOT is the decode TPOT.
+A KV handoff may be needed whenever prefill and decode are served by different instances; SWEEP-LLM charges an analytical transfer term only for inter-pool routes that cross the L40S/L4 boundary, and treats any intra-pool handoff (same-pool routes) as part of the pool-local serving path rather than a separate analytical term.
+Power is aggregated once per \emph{active pool} from the per-GPU power model, the TP degree, and the active-instance count, plus idle power for powered-on but unused GPUs.
+The reported energy is therefore window-level GPU-side serving and idle power only: cross-pool KV transfer enters as a latency penalty, and we do not separately charge interconnect or KV-transfer energy (under continuous batching the decode pool runs at high utilization, so a transfer overlaps in-flight decoding rather than idling GPUs).
+Because the testbed's commodity network is unrepresentative of disaggregated deployments, the cross-pool model is not hardware-validated; we instead sweep $\tau_{\mathrm{kv}}$ analytically and report results per assumption (\S\ref{sec:evaluation}).
+
+The stack is intentionally deployment-specific: it targets the L40S/L4 platform for a single model family and size, so reprofiling or refitting for a new deployment is an offline step rather than part of the online scheduler.
+Decode-side feasibility remains harder than prefill near tight TPOT bounds, and transfer across model sizes and families, together with explicit interconnect/KV-transfer energy modeling, is left to future work.
+We validate the same-pool feasibility, latency, and power models---and the scheduler-facing decision quality they support---against the L40S/L4 hardware measurements in \S\ref{sec:eval_models}; that validation isolates the model \emph{components} rather than performing an end-to-end hardware trace replay.

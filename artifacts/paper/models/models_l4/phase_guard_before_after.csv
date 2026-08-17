@@ -1,0 +1,9 @@
+gpu_type,phase,slo_ms,unsafe_support,safe_support,base_p_th,base_rho_th,chosen_p_th,chosen_rho_th,selection_reason,before_false_safe,before_false_unsafe,before_true_safe,before_true_unsafe,before_false_safe_rate_pct,before_false_unsafe_rate_pct,before_safe_precision_pct,before_admit_rate_pct,after_false_safe,after_false_unsafe,after_true_safe,after_true_unsafe,after_false_safe_rate_pct,after_false_unsafe_rate_pct,after_safe_precision_pct,after_admit_rate_pct,retuned,low_support_flag
+l4,prefill,200,448,146,0.05,1.0,0.15,0.5,retuned_min_false_safe_max_admit,1,101,45,447,0.22,69.18,97.83,7.74,0,86,60,448,0.0,58.9,100.0,10.1,True,False
+l4,prefill,500,402,192,0.05,0.6,0.05,1.0,retuned_min_false_safe_max_admit,0,116,76,402,0.0,60.42,100.0,12.79,0,113,79,402,0.0,58.85,100.0,13.3,True,False
+l4,prefill,1000,365,229,0.1,0.8,0.1,1.0,retuned_min_false_safe_max_admit,0,106,123,365,0.0,46.29,100.0,20.71,0,105,124,365,0.0,45.85,100.0,20.88,True,False
+l4,prefill,2000,337,257,0.05,1.0,0.05,1.0,base_dominates_frontier,0,126,131,337,0.0,49.03,100.0,22.05,0,126,131,337,0.0,49.03,100.0,22.05,False,False
+l4,decode,200,238,356,0.05,1.0,0.02,1.0,retuned_min_false_safe_max_admit,1,203,153,237,0.42,57.02,99.35,25.93,0,249,107,238,0.0,69.94,100.0,18.01,True,False
+l4,decode,500,26,568,0.05,0.6,0.02,0.1,retuned_min_false_safe_max_admit,3,108,460,23,11.54,19.01,99.35,77.95,0,235,333,26,0.0,41.37,100.0,56.06,True,False
+l4,decode,1000,1,593,0.1,0.8,0.1,0.8,low_support_keep_base,1,64,529,0,100.0,10.79,99.81,89.23,1,64,529,0,100.0,10.79,99.81,89.23,False,True
+l4,decode,2000,0,594,0.05,1.0,0.05,1.0,low_support_keep_base,0,54,540,0,0.0,9.09,100.0,90.91,0,54,540,0,0.0,9.09,100.0,90.91,False,True

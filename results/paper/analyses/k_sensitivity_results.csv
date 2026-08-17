@@ -1,0 +1,7 @@
+trace,scheme,K,energy_kj,slo_violation_pct,wall_s,delta_energy_pct
+steady,2x2,4,11.35,0.0,146.9,
+steady,3x3,9,11.85,0.0,421.8,+4.41
+bursty,2x2,4,18.45,0.0,60.2,
+bursty,3x3,9,18.81,0.0,78.2,+1.95
+diurnal,2x2,4,22.77,0.0,104.3,
+diurnal,3x3,9,22.26,16.7,236.5,-2.24

@@ -1,0 +1,5 @@
+trace_name,windows,frac_prefill_heavy,frac_decode_heavy,frac_both_low,frac_both_high,dominant_state,first_half_dominant_state,second_half_dominant_state,intended_role_match
+T1,120,1.0,0.0,0.0,0.0,PREFILL_HEAVY,PREFILL_HEAVY,PREFILL_HEAVY,True
+T2,120,0.0,0.9,0.1,0.0,DECODE_HEAVY,DECODE_HEAVY,DECODE_HEAVY,True
+T3,120,0.475,0.425,0.0,0.1,PREFILL_HEAVY,PREFILL_HEAVY,DECODE_HEAVY,True
+T4,120,0.0167,0.0,0.65,0.3333,BOTH_LOW,BOTH_LOW,BOTH_LOW,True

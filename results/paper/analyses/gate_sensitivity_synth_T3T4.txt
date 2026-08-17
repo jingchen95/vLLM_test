@@ -1,0 +1,50 @@
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l40s
+  Config space: TP=[1, 2, 4], Freq=[210..2520] (10 levels)
+  SLO thresholds: [200, 500, 1000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l4
+  Config space: TP=[1, 2, 4, 8], Freq=[210..2040] (10 levels)
+  SLO thresholds: [200, 500, 1000, 2000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l40s
+  Config space: TP=[1, 2, 4], Freq=[210..2520] (10 levels)
+  SLO thresholds: [200, 500, 1000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l4
+  Config space: TP=[1, 2, 4, 8], Freq=[210..2040] (10 levels)
+  SLO thresholds: [200, 500, 1000, 2000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l40s
+  Config space: TP=[1, 2, 4], Freq=[210..2520] (10 levels)
+  SLO thresholds: [200, 500, 1000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l4
+  Config space: TP=[1, 2, 4, 8], Freq=[210..2040] (10 levels)
+  SLO thresholds: [200, 500, 1000, 2000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l40s
+  Config space: TP=[1, 2, 4], Freq=[210..2520] (10 levels)
+  SLO thresholds: [200, 500, 1000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l4
+  Config space: TP=[1, 2, 4, 8], Freq=[210..2040] (10 levels)
+  SLO thresholds: [200, 500, 1000, 2000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l40s
+  Config space: TP=[1, 2, 4], Freq=[210..2520] (10 levels)
+  SLO thresholds: [200, 500, 1000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l4
+  Config space: TP=[1, 2, 4, 8], Freq=[210..2040] (10 levels)
+  SLO thresholds: [200, 500, 1000, 2000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l40s
+  Config space: TP=[1, 2, 4], Freq=[210..2520] (10 levels)
+  SLO thresholds: [200, 500, 1000]
+  Phase-specific stack: prefill + decode
+Loaded models from /Users/chjing/Downloads/vLLM_test/artifacts/paper/models/models_l4
+  Config space: TP=[1, 2, 4, 8], Freq=[210..2040] (10 levels)
+  SLO thresholds: [200, 500, 1000, 2000]
+  Phase-specific stack: prefill + decode
+
+SLO TTFT<=500 TPOT<=200 | tau_kv=16us/tok | dur=120s win=5s seed=42

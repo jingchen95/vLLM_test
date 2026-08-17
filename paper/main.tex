@@ -1,0 +1,93 @@
+% OLD: \documentclass[conference]{IEEEtran}
+\documentclass[sigconf]{acmart}
+%% \BibTeX command to typeset BibTeX logo in the docs
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    Bib\TeX}}}
+
+\def\code#1{\texttt{#1}}
+
+\setcopyright{none}
+\settopmatter{printacmref=false} % Removes citation information below abstract
+\renewcommand\footnotetextcopyrightpermission[1]{} % removes footnote with conference information in first column
+
+% ============================================================
+% Packages
+% ============================================================
+% Note: acmart already loads amsmath, hyperref, xcolor, booktabs, graphicx
+% \usepackage{cite}         % not needed with acmart (uses natbib)
+\usepackage{amsfonts}
+\usepackage{textcomp}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{subcaption}
+\usepackage{comment}
+\usepackage{tikz}
+\usepackage{enumitem}
+
+% \usepackage{titlesec}
+% \titleformat{\subsubsection}[hang]{\normalfont\normalsize\bfseries}{\thesubsubsection}{1em}{}
+
+\newcommand{\circlednum}[1]{%
+  \tikz[baseline=(char.base)]{
+    \node[shape=circle,fill=black,inner sep=1pt] (char) {\color{white}\small #1};
+  }%
+}
+% Editing helpers (remove for camera-ready)
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+\newcommand{\rev}[1]{\textcolor{blue}{#1}}
+
+% ============================================================
+% ACM metadata (fill in for submission)
+% ============================================================
+\copyrightyear{2026}
+\acmYear{2026}
+%\acmDOI{XXXXXXX.XXXXXXX}
+%\acmConference[Conference'26]{Conference}{Month 00--00, 2026}{City, Country}
+%\acmISBN{978-1-4503-XXXX-X/26/XX}
+
+% ============================================================
+\begin{document}
+
+\title{Joint Energy-Performance Optimization for LLM Inference on Heterogeneous GPU Clusters}
+
+% \author{Jing Chen}
+% \affiliation{%
+%   \institution{Chalmers University of Technology}
+%   \city{Gothenburg}
+%   \country{Sweden}
+% }
+% \email{chjing@chalmers.se}
+
+% Add more authors as needed:
+% \author{Second Author}
+% \affiliation{\institution{...}}
+% \email{...}
+\input{abstract}
+\maketitle
+% ============================================================
+
+\input{Introduction}
+\input{background}
+\input{motivation_rewrite.tex}
+\input{design_rewrite.tex}
+\input{models_rewrite.tex}
+\input{evaluation_rewrite.tex}
+\input{related}
+\input{conclusion}
+
+% ============================================================
+% References
+% ============================================================
+% OLD: \bibliographystyle{IEEEtran}
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+
+% ============================================================
+% Appendix (supplementary material moved out of the main text for length)
+% ============================================================
+\appendix
+\input{appendix}
+
+\end{document}

@@ -1,0 +1,30 @@
+{
+  "duration_s": 600.0,
+  "seed": 42,
+  "traces": [
+    {
+      "trace_name": "T1",
+      "path": "results/paper/synthetic_traces/T1.csv",
+      "requests": 10821,
+      "duration_s": 600.0
+    },
+    {
+      "trace_name": "T2",
+      "path": "results/paper/synthetic_traces/T2.csv",
+      "requests": 7820,
+      "duration_s": 600.0
+    },
+    {
+      "trace_name": "T3",
+      "path": "results/paper/synthetic_traces/T3.csv",
+      "requests": 14373,
+      "duration_s": 600.0
+    },
+    {
+      "trace_name": "T4",
+      "path": "results/paper/synthetic_traces/T4.csv",
+      "requests": 10817,
+      "duration_s": 600.0
+    }
+  ]
+}

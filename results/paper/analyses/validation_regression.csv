@@ -1,0 +1,9 @@
+gpu,metric,n,mape,r2,spearman
+L40S,P99 TTFT,237,24.5\%,0.593,0.967
+L40S,P99 TPOT,237,16.3\%,0.536,0.939
+L40S,Prefill power/GPU,537,7.2\%,0.936,0.963
+L40S,Decode power/GPU,537,7.5\%,0.930,0.964
+L4,P99 TTFT,289,22.8\%,0.775,0.938
+L4,P99 TPOT,289,18.4\%,0.638,0.973
+L4,Prefill power/GPU,594,5.9\%,0.867,0.947
+L4,Decode power/GPU,594,5.9\%,0.866,0.951

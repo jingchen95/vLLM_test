@@ -1,0 +1,238 @@
+\section{Introduction}
+\label{sec:intro}
+% ============================================================
+
+% ---------------------------------------------------------------
+% P1 — Energy scale: establish why this matters, with concrete numbers
+% ---------------------------------------------------------------
+
+% Large language model (LLM) inference is emerging as a significant contributor to data-centre electricity demand.
+Large language model (LLM) inference is rapidly becoming one of the fastest-growing components of data-centre electricity demand.
+% Data centres already account for a non-trivial share of global electricity consumption, and that demand is projected to rise substantially as AI services continue to expand~\cite{iea2024electricity}.
+% This matters because data centres already account for a non-trivial share of global electricity consumption, and that demand is projected to rise substantially as AI services continue to expand~\cite{iea2024electricity}.
+% Unlike traditional online workloads, LLM inference sustains compute-intensive execution across many model layers; a single LLM query can consume roughly $10\times$ the energy of a conventional web search~\cite{deVries2023growing}.
+% Compared with traditional online services, LLM inference sustains compute-intensive execution across many model layers, and a single LLM query can consume roughly $10\times$ the energy of a conventional web search~\cite{deVries2023growing}.
+% As LLM-powered services move into production at scale, improving inference energy efficiency has become both an operational necessity and an environmental concern.
+As LLM-powered services move into large-scale deployment, improving inference energy efficiency has become both an operational necessity and an environmental concern.
+% ---------------------------------------------------------------
+% P2 — Phase structure: prefill vs. decode, TTFT vs. TPOT
+% ---------------------------------------------------------------
+The structure of LLM inference presents both opportunities and challenges for energy optimization.
+% LLM inference also has a phase structure that creates both opportunities and challenges for energy optimization.
+Each request proceeds through two distinct phases: a compute-intensive \emph{prefill} phase that processes the input prompt in a single forward pass, followed by a memory-intensive \emph{decode} phase that generates output tokens autoregressively.
+% Each request passes through two distinct phases: a compute-intensive \emph{prefill} phase that processes the input prompt in a single forward pass, followed by a memory-intensive \emph{decode} phase that generates output tokens autoregressively.
+% During prefill, the model processes the entire prompt sequence with large, batched matrix multiplications, enabling high arithmetic intensity and efficient utilization of GPU compute units.
+% In contrast, decode generates one token at a time, where each step involves relatively small matrix operations and frequent access to the key–value (KV) cache, resulting in low arithmetic intensity and performance that is primarily constrained by memory bandwidth~\cite{kwon2023vllm}.
+% As a result, prefill primarily determines \emph{time to first token} (TTFT) and is sensitive to compute capacity and clock frequency, while decode primarily determines \emph{time per output token} (TPOT) and is more sensitive to memory system performance.
+Consequently, prefill primarily determines time to first token (TTFT) and is most sensitive to compute capacity and clock frequency, whereas decode primarily determines time per output token (TPOT) and is more sensitive to memory-system performance.
+% Meanwhile, real workloads vary widely in prompt length, output length, and arrival rate, making any fixed hardware configuration suboptimal for energy efficiency across the workload space.
+% Meanwhile, real workloads vary widely in prompt length, output length, and arrival rate, so any fixed hardware assignment or operating point becomes suboptimal for energy efficiency across the workload space.
+Because real workloads vary widely in prompt length, output length, and arrival rate, any fixed hardware assignment or operating point is inherently suboptimal across the workload space.
+% LLM inference has a two-phase execution structure that is central to energy optimization.
+% Each request first enters a compute-intensive \emph{prefill} phase, which processes the full prompt in a single forward pass, and then a memory-intensive \emph{decode} phase, which generates output tokens autoregressively.
+% These phases drive different latency objectives: prefill largely determines \emph{time to first token} (TTFT) and depends mainly on available compute throughput, whereas decode largely determines \emph{time per output token} (TPOT) and is more constrained by memory-system performance.
+% Because production workloads vary widely in prompt length, output length, and arrival rate, the most energy-efficient hardware configuration can shift substantially across serving conditions.
+
+% ---------------------------------------------------------------
+% P3 — Heterogeneous clusters + phase disaggregation as energy opportunity
+% ---------------------------------------------------------------
+
+% Modern inference clusters compound this complexity through hardware heterogeneity and architectural specialization.
+% Production systems commonly combine GPU types with markedly different power--performance tradeoffs.
+% Operators increasingly deploy mixtures of GPU types with distinct power–performance characteristics (e.g., high-throughput, high-TDP GPUs alongside lower-power inference-oriented GPUs) to balance throughput and cost~\cite{griggs2024melange,patel2024splitwise}.
+% At the same time, many systems adopt \emph{phase disaggregation}, assigning prefill and decode to separate GPU pools to improve system utilization and throughput~\cite{agrawal2024taming,zhong2024distserve,patel2024splitwise}.
+% This separation exposes a key opportunity for energy optimization: because prefill and decode exhibit fundamentally different resource bottlenecks, the hardware configuration that is optimal for one phase can be significantly suboptimal for the other.
+% However, existing systems largely treat phase disaggregation as a throughput optimization mechanism and do not leverage it as a first-class primitive for energy-aware scheduling.
+% Modern inference clusters further complicate this picture through both hardware heterogeneity and hardware-level configurability.
+Modern inference clusters introduce additional dimensions of control through both hardware heterogeneity and hardware-level configurability.
+% This phase asymmetry becomes more consequential in modern inference clusters, where both hardware heterogeneity and hardware-level configurability are increasingly common.
+Operators increasingly deploy mixtures of GPU types with distinct power--performance characteristics (e.g., high-throughput, high-TDP GPUs alongside lower-power inference-oriented GPUs) to balance throughput, latency, and cost~\cite{griggs2024melange,patel2024splitwise}.
+% In addition, modern GPUs can operate at fine-grained frequency points, exposing further power--performance tradeoffs within each hardware pool.
+At the same time, modern GPUs expose fine-grained frequency control, creating additional power--performance trade-offs within each hardware pool.
+Many serving systems adopt phase disaggregation, assigning prefill and decode to separate GPU pools to improve utilization and throughput~\cite{agrawal2024taming,zhong2024distserve,patel2024splitwise}.
+% This separation creates an energy-optimization opportunity: because prefill and decode are bottlenecked by different resources, the GPU type and operating point that are efficient for one phase may be inefficient for the other.
+This separation creates an additional degree of freedom for energy optimization: 
+% instead of choosing one hardware assignment and operating point for an entire request, the system can choose them separately for prefill and decode.
+% phase disaggregation decouples the placement and operating-point decision for prefill and decode, so the system can optimize them separately instead of forcing both phases onto one hardware choice.
+phase disaggregation decouples the placement and operating-point decisions for prefill and decode. 
+This enables the system to optimize each phase's hardware assignment and frequency independently, rather than forcing both phases onto a single GPU type and operating point.
+% Because the two phases are bottlenecked by different resources, the GPU type and operating point that are energy-efficient for one phase may differ substantially from those for the other.
+% Yet existing systems largely treat phase disaggregation as a mechanism for improving throughput, rather than as a first-class primitive for energy-aware scheduling.
+% Yet existing systems largely treat disaggregation as a throughput-oriented serving architecture, rather than as a first-class energy control problem over \emph{which GPU type should serve which phase under which operating point}.
+
+% ---------------------------------------------------------------
+% P4 — Knob interaction: routing / TP / frequency / active capacity must be tuned jointly
+% ---------------------------------------------------------------
+
+% Exploiting this opportunity requires coordinated control across multiple system dimensions.
+% In particular, four decisions are central: (1)~how requests are \emph{routed} across heterogeneous pools, including how load is distributed and dynamically shifted between pools under varying resource pressure, (2)~the \emph{tensor-parallelism} (TP) degree of each pool, (3)~the GPU \emph{frequency} of each pool, and (4)~the number of \emph{active} GPUs in each pool.
+% These decisions are tightly coupled and interact in non-trivial ways.
+% Routing determines the load on each pool, which in turn shapes the parallelism and frequency required to meet latency targets.
+% For example, under decode-heavy conditions, load may need to be redistributed from a saturated low-power pool to a higher-performance pool, trading energy efficiency for latency headroom.
+% Parallelism affects resource utilization and shifts the frequency regime that is energy efficient; for example, higher TP can increase memory pressure, causing performance to become bandwidth-limited at lower frequencies.
+% Conversely, reducing frequency lowers throughput, which may necessitate changes in routing or active capacity to avoid queueing delays and service-level objectives (SLOs) violations.
+% As a result, the energy-efficient operating point depends on jointly optimizing these decisions rather than treating them in isolation, motivating a unified control framework that can reason across routing, parallelism, frequency, and capacity.
+Exploiting this opportunity requires coordinated control across four interacting decisions:
+(1)~how the \emph{prefill} and \emph{decode} phases of requests are routed across heterogeneous pools, (2)~the \emph{tensor-parallelism} (TP) degree of each pool, i.e., how many GPUs cooperate to serve one model instance, (3)~the GPU \emph{frequency} of each pool, and (4)~the number of \emph{active} GPUs assigned to each phase in each pool.
+These decisions are tightly coupled because each one reshapes the feasible and energy-efficient region of the others.
+% In a disaggregated heterogeneous cluster, routing is not merely a load-balancing decision: it is simultaneously a \emph{phase-placement} decision, a \emph{GPU-type selection} decision, and a choice about whether a request incurs cross-pool KV transfer. 
+% TP determines the service capacity of each instance but also how many GPUs each instance consumes, directly constraining the number of concurrent instances the pool can host.
+% The number of active GPUs then determines how much concurrency the system can provide for each phase.
+% Frequency further changes both latency and power, and its effect depends on whether a pool is compute-bound or memory-bound under the current routing and TP configuration.
+% The energy-efficient operating point therefore depends on selecting routing, TP, frequency, and active capacity jointly within each scheduling window rather than tuning any one of them in isolation.
+Routing determines both phase placement and whether a request incurs cross-pool KV transfer. 
+TP changes per-instance service capacity but also consumes more GPUs per instance, constraining how many concurrent instances a pool can host. 
+Active GPU allocation determines phase-level concurrency, while frequency changes both latency and power in a way that depends on whether the current workload is compute- or memory-bound. 
+Conversely, lowering frequency or reducing active capacity may require changing routing or TP to avoid queueing delays and service-level objective (SLO) violations.
+The key challenge is therefore not the availability of these knobs individually, but that their energy-minimizing feasible setting is non-separable across workload states.
+
+% ---------------------------------------------------------------
+% P5 — Workload dynamics: token-aware, not just request-aware
+% ---------------------------------------------------------------
+
+% These interactions are further complicated by workload dynamics.
+% Two scheduling windows with similar request arrival rates can impose very different system demands: long prompts with short outputs create \emph{prefill-heavy} pressure, while short prompts with long outputs create \emph{decode-heavy} pressure.
+%  (high $D_\mathrm{pref} = \lambda \cdot \bar{L}_\mathrm{in}$, low $D_\mathrm{dec} = \lambda \cdot \bar{L}_\mathrm{out}$)
+% These shifts directly change which resources are on the critical path,
+%  (compute for prefill versus memory bandwidth for decode), 
+%  and therefore which configurations are energy-efficient.
+% As a result, a configuration that is optimal under one workload mix can become inefficient or even violate SLOs under another.
+% In addition, bursty arrivals can introduce transient overloads that require rapid adaptation.
+% An effective scheduler must therefore be \emph{token-aware}, capturing variations in prompt and generation lengths, and dynamically adjust system configuration to maintain both TTFT and TPOT SLOs while minimizing energy.
+% These interactions are further complicated by workload dynamics over time.
+% These interactions are further complicated by temporal workload variation.
+% Two scheduling windows with similar request arrival rates can nevertheless impose very different system demands: long prompts with short outputs create \emph{prefill-heavy} pressure, whereas short prompts with long outputs create \emph{decode-heavy} pressure.
+% Two scheduling windows with similar arrival rates can nevertheless induce very different system pressures: long prompts with short outputs create prefill-heavy pressure, whereas short prompts with long outputs create decode-heavy pressure.
+% Such shifts change which phase is on the critical path, and therefore which routing, TP, frequency, and capacity settings are energy-efficient.
+% Such shifts change not only the overall load level but also which phase is bottlenecked in a given window, and therefore which routing, TP, frequency, and active-capacity settings are energy-efficient.
+% As a result, a configuration that is effective under one workload state can become inefficient, or even violate TTFT or TPOT SLOs, under another.
+% A configuration that is energy-efficient in one workload state can therefore become inefficient, or even violate TTFT or TPOT SLOs, in another.
+% Bursty arrivals compound this challenge by creating transient overload conditions that require rapid adaptation rather than one static operating point.
+% An effective scheduler must therefore be \emph{token-aware} in how it characterizes workload demand, and \emph{state-aware} in how it adjusts the system configuration in response.
+% An effective scheduler must therefore be \emph{token-aware} in how it characterizes workload demand, and \emph{state-aware} in how it distinguishes prefill-dominated, decode-dominated, and balanced, and burst windows when choosing the system operating point.
+
+Temporal workload variation further makes this a dynamic scheduling problem rather than a one-time configuration problem. 
+Two windows with similar arrival rates can induce very different pressure: long prompts with short outputs create prefill-heavy load, while short prompts with long outputs create decode-heavy load. 
+Bursty arrivals add transient overload conditions that require rapid adaptation. An effective scheduler must therefore be \emph{token-aware} in how it characterizes demand, \emph{state-aware} in how it distinguishes prefill-dominated, decode-dominated, balanced, and burst windows, and reconfiguration-aware in how it applies controls with different actuation costs.
+
+% ---------------------------------------------------------------
+% P6 — Related work limitations and gap statement
+% ---------------------------------------------------------------
+
+% Existing approaches fall short of providing the coordinated, token- and phase-aware control required for energy-efficient LLM inference on heterogeneous, disaggregated hardware.
+% DVFS-based methods~\cite{huang2026reducing,ye2025greenllm,wang2025asplos} demonstrate that running GPUs at maximum frequency is often suboptimal, but treat frequency as the only control knob.
+% , ignoring routing, parallelism, and active-capacity decisions.
+% In contrast, heterogeneous serving systems~\cite{patel2024splitwise,zhong2024distserve,liu2025hetis,griggs2024melange} optimize request placement or parallelism to improve throughput or cost, without explicitly targeting energy efficiency.
+% DynamoLLM~\cite{stojkovic2024dynamollm} comes closest by combining multiple control knobs, but focuses on homogeneous deployments and adopts a hierarchical design in which instance scaling, parallelism configuration, and frequency tuning operate on separate time scales. It neither explicitly exploits phase disaggregation nor allows these decisions to be coordinated within a single optimization step.
+% This reveals a key gap: no existing system jointly optimizes routing, parallelism, GPU frequency, and active capacity for energy-efficient LLM inference on heterogeneous, disaggregated hardware in a token- and phase-aware manner.
+% Existing approaches still do not provide the kind of coordinated control required here.
+% DVFS-based methods~\cite{huang2026reducing,ye2025greenllm,wang2025asplos} show that maximum GPU frequency is often energy-inefficient, but they treat frequency as the main control knob.
+% Heterogeneous and disaggregated serving systems~\cite{patel2024splitwise,zhong2024distserve,liu2025hetis,griggs2024melange} improve throughput, goodput, or cost through request placement and parallelism decisions, but do not explicitly optimize energy through joint control of routing, TP, frequency, and active capacity.
+% BiScale~\cite{biscale2025} is the closest recent system to our setting: it targets energy-efficient disaggregated serving and jointly reasons about phase-aware placement and DVFS, but it does not optimize TP or active capacity within the same joint decision.
+% DynamoLLM~\cite{stojkovic2024dynamollm} is also closely related in its use of multiple control knobs, but it targets homogeneous deployments and separates scaling, parallelism, and frequency control across different timescales.
+% As a result, existing systems do not offer a unified, token- and state-aware framework for energy-efficient scheduling on heterogeneous, phase-disaggregated clusters.
+% Existing approaches still do not provide the kind of coordinated control required here.
+% DVFS-based methods~\cite{huang2026reducing,ye2025greenllm,wang2025asplos} show that maximum GPU frequency is often energy-inefficient, but they treat frequency as the main control knob.
+% Heterogeneous and disaggregated serving systems~\cite{patel2024splitwise,zhong2024distserve,liu2025hetis,griggs2024melange} improve throughput, goodput, or cost through request placement and parallelism decisions, but do not explicitly optimize energy through joint control of routing, TP, frequency, and active capacity.
+% BiScale~\cite{biscale2025} is the closest recent system to our setting: it targets energy-efficient disaggregated serving and jointly reasons about phase-aware placement and DVFS, but it does not optimize TP or active capacity within the same joint decision.
+% DynamoLLM~\cite{stojkovic2024dynamollm} is also closely related in its use of multiple control knobs, but it targets homogeneous deployments and separates scaling, parallelism, and frequency control across different timescales.
+% As a result, existing systems do not offer a unified, token- and state-aware framework for energy-efficient scheduling on heterogeneous, phase-disaggregated clusters.
+% Existing approaches still do not provide the coordinated control required here.
+% DVFS-based methods~\cite{huang2026reducing,ye2025greenllm,wang2025asplos} treat frequency as the only control knob, while heterogeneous and disaggregated serving systems~\cite{patel2024splitwise,zhong2024distserve,liu2025hetis,griggs2024melange} optimize placement or parallelism for throughput, goodput, or cost.
+% BiScale~\cite{biscale2025} moves closest to our setting by jointly reasoning about phase-aware placement and DVFS in disaggregated serving, but it is evaluated on a homogeneous cluster, while DynamoLLM~\cite{stojkovic2024dynamollm} shows the value of multi-knob control but likewise targets homogeneous deployments and separates decisions across timescales.
+% Still, 
+Several recent LLM serving systems~\cite{huang2026reducing,ye2025greenllm,wang2025asplos} have explored DVFS as the primary control knob for reducing energy consumption, while heterogeneous and disaggregated serving systems~\cite{patel2024splitwise,zhong2024distserve,liu2025hetis,griggs2024melange} primarily optimize placement or parallelism for throughput, goodput, or cost.
+% Existing approaches do not provide the coordinated control required by this setting.
+% DVFS-based methods treat frequency as the primary control knob, while heterogeneous and disaggregated serving systems~\cite{patel2024splitwise,zhong2024distserve,liu2025hetis,griggs2024melange} optimize placement or parallelism for throughput, goodput, or cost. 
+% Single-knob DVFS methods~\cite{huang2026reducing,ye2025greenllm,wang2025asplos} treat frequency as the primary control lever, while heterogeneous and disaggregated serving systems~\cite{patel2024splitwise,zhong2024distserve,liu2025hetis,griggs2024melange} primarily optimize placement or parallelism for throughput, goodput, or cost.
+% DynamoLLM~\cite{stojkovic2024dynamollm} shows the value of multi-knob control, but focuses on non-disaggregated architecture, targets homogeneous deployments and separates pool formation, scaling, and frequency tuning across different timescales. 
+DynamoLLM~\cite{stojkovic2024dynamollm} controls pool formation, instance scaling, and frequency knobs across different timescales on a homogeneous, monolithic serving cluster.
+% ptimizes multiple knobs but assumes homogeneous hardware and a monolithic serving architecture. 
+% Moreover, it separates pool formation, scaling, and frequency tuning across different timescales rather than solving them jointly.
+% DualScale~\cite{biscale2025} is the closest recent work, which jointly reasons about phase-aware placement and DVFS for disaggregated serving, but it is evaluated on a homogeneous cluster and does not address heterogeneous GPU-type selection. 
+DualScale~\cite{biscale2025} optimizes phase-aware placement, TP, instance count, and frequency on homogeneous clusters through a two-tier design in which coarse placement decisions are fixed for multi-minute blocks. 
+These systems leave open the problem of token- and state-aware joint control over routing, TP, frequency, and active capacity for heterogeneous phase-disaggregated clusters.
+
+% : a coarse tier fixes placement, TP, and instance count for fixed multi-minute blocks, while only frequency adapts per scheduling window. 
+% but it assumes homogeneous hardware and does not incorporate token-aware workload classification or state-specific control.
+% As a result, existing systems do not provide a unified, token- and state-aware framework that jointly optimizes routing, TP, frequency, and active capacity for heterogeneous, phase-disaggregated clusters.
+
+% ---------------------------------------------------------------
+% P7 — SWEEP-LLM structuring it as: what it is → how it works → what is new → why it matters.
+% ---------------------------------------------------------------
+
+% This paper presents \textbf{SWEEP-LLM}, a token- and phase-aware, model-driven scheduling framework for energy-efficient LLM inference on heterogeneous, disaggregated GPU clusters.
+% SWEEP-LLM operates over discrete scheduling windows and jointly optimizes four interacting control dimensions: request routing across GPU pools, the TP degree of each pool, GPU frequency, and the number of active GPUs, solving them in a single coordinated optimization step using lightweight power and latency models derived from offline characterization.
+% The framework explicitly captures the interaction between prefill and decode placement, incorporating the cost of KV transfer across pools, and enables flexible routing decisions such as decode spillover when resource pressure shifts across phases.  
+% To handle workload dynamics, SWEEP-LLM classifies each window into one of four states (burst, prefill-heavy, decode-heavy, balanced), and applies state-specific control strategies to adapt system configuration while maintaining TTFT and TPOT SLOs.  
+% Under high-pressure conditions, it prioritizes SLO-compliant performance across resources, while under balanced, low-pressure conditions, it consolidates load and power-gates idle GPUs to reduce the cluster power floor.
+This paper presents \textbf{SWEEP-LLM}, an energy-efficient scheduling framework for phase-disaggregated LLM inference on heterogeneous GPU clusters.
+% Its central challenge is to choose one state-aware operating point across GPU types, rather than merely tune a single knob within a fixed serving architecture.
+% SWEEP-LLM jointly reasons about four coupled control dimensions: phase routing, tensor parallelism (TP), GPU frequency, and GPU allocation, using lightweight latency and power models to evaluate candidate configurations under TTFT and TPOT SLOs.
+% Unlike prior systems that assume homogeneous pools or optimize knobs hierarchically in largely separate stages, 
+SWEEP-LLM performs state-aware joint selection of phase routing, tensor parallelism, GPU frequency, and GPU allocation across heterogeneous pools. 
+The goal is to minimize energy while satisfying TTFT and TPOT SLOs. 
+When no feasible operating point exists at the current load, it prioritizes the configuration with the lowest modeled infeasibility under the admission rule. 
+For each scheduling window, SWEEP-LLM groups requests by input and output length, summarizes token-level demand, classifies the window into a bottleneck state, and runs a state-guided search to identify one joint operating point across all four control dimensions. 
+It then applies fast controls such as routing and frequency immediately, while promoting slower TP and GPU-allocation changes only when their targets remain stable across windows.
+% instead selects the lowest-energy configuration with the smallest modeled violation.
+% At runtime, SWEEP-LLM first groups requests into a small number of classes based on input and output length, since the energy-efficient routing decision depends on the token profile of the request.
+% For each scheduling window, SWEEP-LLM first groups requests into a small number of classes based on input and output length, since the energy-efficient routing decision depends directly on the token profile of the request.
+% For each scheduling window, it summarizes the token-level workload statistics of these classes, classifies the window into a small number of bottleneck states, and uses a state-specific search policy to efficiently identify the best joint configuration for that regime, including the routing of each request class.
+% For each scheduling window, it summarizes token-level workload statistics for these classes, classifies the window into a small number of bottleneck states, and uses a state-specific search policy to identify one joint operating point for that regime, including the routing of each request class. 
+% It summarizes token-level workload statistics for these classes, classifies the window into a small number of bottleneck states, and uses a state-specific search policy to identify one joint operating point across all four control dimensions for the current workload state.
+% SWEEP-LLM then applies the chosen decision in a reconfiguration-aware manner: fast controls such as routing and frequency are updated immediately, while slower controls such as TP and GPU allocation are changed only when their targets remain stable across windows.
+% This combination of heterogeneity, phase disaggregation, and state-dependent knob interaction makes SWEEP-LLM different from prior homogeneous or single-knob designs.
+
+% ---------------------------------------------------------------
+% Contributions
+% ---------------------------------------------------------------
+
+In summary, this paper makes the following contributions:
+\begin{itemize}
+    \item We formulate energy-efficient heterogeneous disaggregated LLM serving as a joint optimization problem over phase routing, tensor parallelism, GPU frequency, and GPU allocation under TTFT and TPOT SLOs, making explicit the coupling among phase placement, capacity provisioning, and energy control.
+
+    \item We design SWEEP-LLM, a runtime scheduling framework that combines workload classification, state-specific search, and reconfiguration-aware execution to jointly optimize the four control dimensions in a window-based manner. 
+
+    \item We develop predictive models for route-level latency, power, and disaggregation overhead, enabling the scheduler to evaluate heterogeneous configurations efficiently while accounting for cross-pool KV-transfer effects.
+
+    \item We evaluate SWEEP-LLM using a measurement-calibrated simulator built from real L40S and L4 hardware profiles, reporting modeled GPU-side energy under a common utilization-based feasibility gate. Across synthetic and Azure trace replays, SWEEP-LLM stays on the feasible/Pareto frontier: it is the lowest-energy $0\%$-modeled-violation scheduler on all synthetic traces, saving $18.6\%$ on average, and saves $27.9$–$35.5\%$ on Azure conversation traffic and $6.8$–$7.7\%$ on Azure code traffic over the strongest feasible or near-feasible baseline.
+    % We evaluate SWEEP-LLM using a \emph{measurement-calibrated simulation} framework: same-pool latency and power models are trained on real L40S and L4 hardware measurements (MAPE $\approx$5\% for power, classifier precision $\geq$94\% for SLO feasibility), and cross-pool KV-transfer cost is swept analytically across a range of interconnect assumptions.
+    % On controlled synthetic traces, evaluated under a common utilization-based feasibility gate, SWEEP-LLM is the lowest-energy scheduler among those holding $0\%$ modeled violations under that gate on all four traces, saving $9.6$--$31.9\%$ ($18.6\%$ on average) in modeled GPU-side energy over the best feasible non-SWEEP baseline (a routing-aware sequential controller, Hierarchical-Disagg, or a monolithic-routing DynamoLLM variant, DynamoLLM-Mono, depending on the trace).
+    % Baselines that report lower raw energy reach it only by incurring $9$--$68\%$ modeled violations and are not valid operating points; DynamoLLM-Mono in particular cannot use disaggregated cross-pool allocation at burst windows.
+    % On Azure conversation- and code-trace replays, SWEEP-LLM stays on the feasible/Pareto frontier: it saves $27.9$--$35.5\%$ over the best feasible baseline on conversation traffic (at $0\%$ modeled violations), and on prefill-bound code traffic---where the testbed is undersized and no scheduler is fully feasible---it is Pareto-best, saving $6.8$--$7.7\%$ over the strongest near-feasible baseline at the lowest violation rate ($\le$$0.1\%$). The fixed $5$-minute two-tier provisioner instead under-provisions the bursty conversation traffic ($6.5$--$26.6\%$ violations).
+\end{itemize}
+
+% The remainder of this paper is organized as follows.
+% Section~\ref{sec:background} provides background on LLM inference and GPU energy management.
+% Section~\ref{sec:motivation} presents our characterization study and quantifies the optimization opportunity.
+% Section~\ref{sec:design} describes the SWEEP-LLM design.
+% Section~\ref{sec:evaluation} evaluates SWEEP-LLM against baselines.
+% Section~\ref{sec:related} discusses related work, and Section~\ref{sec:conclusion} concludes.
+
+
+% \section{Introduction}
+% \label{sec:intro}
+
+% Large language model (LLM) inference is becoming a major source of data-centre electricity demand. As LLM-powered services move into large-scale deployment, improving inference energy efficiency is both an operational necessity and an environmental concern. This problem is difficult because LLM inference has a two-phase execution structure. Each request first enters a compute-intensive \emph{prefill} phase that processes the prompt in one forward pass, followed by a memory-intensive \emph{decode} phase that generates tokens autoregressively. Prefill primarily determines time to first token (TTFT) and is sensitive to compute capacity and clock frequency, whereas decode primarily determines time per output token (TPOT) and is more sensitive to memory-system performance. Because real workloads vary widely in prompt length, output length, and arrival rate, a fixed hardware assignment or operating point is inherently inefficient across the workload space.
+
+% Modern inference clusters create both an opportunity and a challenge for exploiting this phase structure. Operators increasingly deploy heterogeneous GPU pools with different power--performance trade-offs, such as high-throughput GPUs alongside lower-power inference-oriented GPUs~\cite{griggs2024melange,patel2024splitwise}. Modern GPUs also expose fine-grained frequency control, adding another power--performance dimension within each pool. At the same time, many serving systems adopt phase disaggregation, assigning prefill and decode to separate GPU pools to improve utilization and throughput~\cite{agrawal2024taming,zhong2024distserve,patel2024splitwise}. Disaggregation decouples the placement and operating-point decisions for the two phases, allowing the system to choose different GPU types, frequencies, and capacities for prefill and decode instead of forcing an entire request onto one operating point.
+
+% Exploiting this opportunity requires coordinated control across four interacting decisions: (1) how the prefill and decode phases are routed across heterogeneous pools, (2) the tensor-parallelism (TP) degree used in each pool, (3) the GPU frequency of each pool, and (4) the number of active GPUs assigned to each phase in each pool. These decisions are tightly coupled. Routing determines both phase placement and whether a request incurs cross-pool KV transfer. TP changes per-instance service capacity but also consumes more GPUs per instance, constraining how many concurrent instances a pool can host. Active GPU allocation determines phase-level concurrency, while frequency changes both latency and power in a way that depends on whether the current workload is compute- or memory-bound. Consequently, lowering frequency or reducing active capacity may require changing routing or TP to avoid queueing and modeled infeasibility. The key challenge is therefore not the availability of these knobs individually, but that their energy-minimizing feasible setting is non-separable across workload states.
+
+% Temporal workload variation further makes this a dynamic scheduling problem rather than a one-time configuration problem. Two windows with similar arrival rates can induce very different pressure: long prompts with short outputs create prefill-heavy load, while short prompts with long outputs create decode-heavy load. Bursty arrivals add transient overload conditions that require rapid adaptation. An effective scheduler must therefore be \emph{token-aware} in how it characterizes demand, \emph{state-aware} in how it distinguishes prefill-dominated, decode-dominated, balanced, and burst windows, and reconfiguration-aware in how it applies controls with different actuation costs.
+
+% Existing systems do not provide this combination. DVFS-based LLM-serving methods~\cite{huang2026reducing,ye2025greenllm,wang2025asplos} show that maximum GPU frequency is often energy-inefficient, but treat frequency as the primary control knob. Heterogeneous and disaggregated serving systems~\cite{patel2024splitwise,zhong2024distserve,liu2025hetis,griggs2024melange} primarily optimize placement or parallelism for throughput, goodput, or cost. DynamoLLM~\cite{stojkovic2024dynamollm} controls pool formation, instance scaling, and frequency across different timescales, but targets homogeneous monolithic serving. DualScale~\cite{biscale2025} optimizes phase-aware placement, TP, instance count, and frequency on homogeneous clusters through a two-tier design in which coarse placement decisions are fixed for multi-minute blocks. These systems leave open the problem of token- and state-aware joint control over routing, TP, frequency, and active capacity for heterogeneous phase-disaggregated clusters.
+
+% This paper presents \textbf{SWEEP-LLM}, an energy-efficient scheduling framework for phase-disaggregated LLM inference on heterogeneous GPU clusters. SWEEP-LLM performs state-aware joint selection of phase routing, tensor parallelism, GPU frequency, and GPU allocation across heterogeneous pools. Its conceptual objective is to minimize energy while satisfying TTFT and TPOT SLOs; in our trace-based evaluation, feasibility is reported under a common utilization-based gate applied identically to all strategies. When no feasible operating point exists at the current load, SWEEP-LLM prioritizes the configuration with the lowest modeled infeasibility under that admission rule. For each scheduling window, SWEEP-LLM groups requests by input and output length, summarizes token-level demand, classifies the window into a bottleneck state, and runs a state-guided search to identify one joint operating point across all four control dimensions. It then applies fast controls such as routing and frequency immediately, while promoting slower TP and GPU-allocation changes only when their targets remain stable across windows.
+
+% In summary, this paper makes the following contributions:
+% \begin{itemize}
+%     \item We formulate energy-efficient heterogeneous disaggregated LLM serving as a joint optimization problem over phase routing, tensor parallelism, GPU frequency, and GPU allocation under TTFT and TPOT SLOs, making explicit the coupling among phase placement, capacity provisioning, and energy control.
+
+%     \item We design SWEEP-LLM, a runtime scheduling framework that combines workload classification, state-guided joint search, and reconfiguration-aware execution to optimize the four control dimensions in a window-based manner.
+
+%     \item We develop predictive models for route-level latency, power, and disaggregation overhead, enabling the scheduler to evaluate heterogeneous configurations efficiently while accounting for cross-pool KV-transfer effects.
+
+%     \item We evaluate SWEEP-LLM using a measurement-calibrated simulator built from real L40S and L4 hardware profiles, reporting modeled GPU-side energy under a common utilization-based feasibility gate. Across synthetic and Azure trace replays, SWEEP-LLM stays on the feasible/Pareto frontier: it is the lowest-energy $0\%$-modeled-violation scheduler on all synthetic traces, saving $18.6\%$ on average, and saves $27.9$--$35.5\%$ on Azure conversation traffic and $6.8$--$7.7\%$ on prefill-bound Azure code traffic over the strongest feasible or near-feasible baseline.
+% \end{itemize}

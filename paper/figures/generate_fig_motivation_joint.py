@@ -1,0 +1,1 @@
+../scripts/figures/generate_fig_motivation_joint.py

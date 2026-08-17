@@ -1,0 +1,1 @@
+../scripts/figures/generate_fig_obs4_static_vs_disagg.py

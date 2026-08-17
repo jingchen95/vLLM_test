@@ -1,0 +1,164 @@
+{
+  "batch_id": "batch1_l4_il1024_ol512_tp1",
+  "purpose": "Highest-value first hardware batch: decode safe-capacity for L4 IL=1024 OL=512 TP=1 across all 10 clocks (top-10 missing scheduler cells; 6.9%->56.4% lookup coverage).",
+  "gpu": "l4",
+  "input_len": 1024,
+  "output_len": 512,
+  "tp_degree": 1,
+  "model": "mistralai/Mistral-7B-v0.1",
+  "mem_freq_mhz": 6251,
+  "max_model_len": 9216,
+  "port": 8000,
+  "slo_tpot_buckets_ms": [
+    50,
+    100,
+    200,
+    500
+  ],
+  "stability": {
+    "PRIMARY": "steady-state backlog from vLLM /metrics: vllm:num_requests_waiting slope<=eps over the steady-state window (after warmup ramp, before injection ends); KV not pinned ~100% with growing queue; run_ok (no OOM/preemption/timeout).",
+    "SECONDARY": "coarse drain-corrected served ratio over the INJECTION window only; NEVER gate on whole-run aggregate throughput.",
+    "WARNING": "served_ratio ~= 1/duration_ratio (one signal, not two) and both are biased low by finite-batch tail drain (tail ~ OL*p99_tpot); do NOT threshold served_ratio>=0.95 on benchmark_duration.",
+    "slo_filter": "p99_tpot<=bucket applied per-SLO post-hoc in calibrate_decode_capacity."
+  },
+  "search": {
+    "min_rate": 0.5,
+    "max_rate": 32.0,
+    "bracket_factor": 1.5,
+    "refine_rel_width": 0.1,
+    "max_runs_per_freq": 12,
+    "on_max_rate_stable": "record C as lower bound, confirmed_knee=false",
+    "on_min_rate_unstable": "record C=served@min_rate as lower bound, confirmed_knee=false, flag shape_infeasible_below_min"
+  },
+  "run": {
+    "warmup_requests": 10,
+    "steady_target_s": 90,
+    "num_prompts_min": 100,
+    "num_prompts_max": 1000,
+    "inter_run_sleep_s": 3,
+    "settle_after_clock_change_s": 15,
+    "max_concurrency": "PENDING: set from vLLM reported KV blocks after dry run; dry_run uses 32; unified across all capacity runs",
+    "dry_run_max_concurrency": 32
+  },
+  "replication": {
+    "final_highest_stable_reps": 3,
+    "first_lowest_unstable_reps": 2,
+    "tiebreak_extra_rep_if_disagree": true,
+    "aggregate": "a point is STABLE only if ALL reps stable; C_point = MIN achieved output_token_throughput over stable reps (conservative); never average a stable with an unstable outcome."
+  },
+  "order_rationale": "Descending freq, server stays up, clocks set live via nvidia-smi -ac. Descending avoids the flagged strictly-increasing order and puts the hottest (max-freq) runs first while the GPU is coolest; each freq reuses the previous freq's converged boundary scaled by freq ratio as its seed. Temperature is logged per run for post-hoc thermal-bias check.",
+  "frequency_order": [
+    2040,
+    1830,
+    1620,
+    1410,
+    1200,
+    990,
+    780,
+    570,
+    360,
+    210
+  ],
+  "output_dir": "Phase2_Results_L4/batch1_il1024_ol512_tp1",
+  "master_csv": "Phase2_Results_L4/master_results.csv",
+  "step_label": "batch1",
+  "frequencies": [
+    {
+      "gpu_freq_mhz": 2040,
+      "initial_rate": 3.0,
+      "min_rate": 0.5,
+      "max_rate": 32.0,
+      "seed_note": "static fallback = 3.0*f/2040 clamped; runtime prefers previous-freq boundary * (f/prev_f)"
+    },
+    {
+      "gpu_freq_mhz": 1830,
+      "initial_rate": 2.69,
+      "min_rate": 0.5,
+      "max_rate": 32.0,
+      "seed_note": "static fallback = 3.0*f/2040 clamped; runtime prefers previous-freq boundary * (f/prev_f)"
+    },
+    {
+      "gpu_freq_mhz": 1620,
+      "initial_rate": 2.38,
+      "min_rate": 0.5,
+      "max_rate": 32.0,
+      "seed_note": "static fallback = 3.0*f/2040 clamped; runtime prefers previous-freq boundary * (f/prev_f)"
+    },
+    {
+      "gpu_freq_mhz": 1410,
+      "initial_rate": 2.07,
+      "min_rate": 0.5,
+      "max_rate": 32.0,
+      "seed_note": "static fallback = 3.0*f/2040 clamped; runtime prefers previous-freq boundary * (f/prev_f)"
+    },
+    {
+      "gpu_freq_mhz": 1200,
+      "initial_rate": 1.76,
+      "min_rate": 0.5,
+      "max_rate": 32.0,
+      "seed_note": "static fallback = 3.0*f/2040 clamped; runtime prefers previous-freq boundary * (f/prev_f)"
+    },
+    {
+      "gpu_freq_mhz": 990,
+      "initial_rate": 1.46,
+      "min_rate": 0.5,
+      "max_rate": 32.0,
+      "seed_note": "static fallback = 3.0*f/2040 clamped; runtime prefers previous-freq boundary * (f/prev_f)"
+    },
+    {
+      "gpu_freq_mhz": 780,
+      "initial_rate": 1.15,
+      "min_rate": 0.5,
+      "max_rate": 32.0,
+      "seed_note": "static fallback = 3.0*f/2040 clamped; runtime prefers previous-freq boundary * (f/prev_f)"
+    },
+    {
+      "gpu_freq_mhz": 570,
+      "initial_rate": 0.84,
+      "min_rate": 0.5,
+      "max_rate": 32.0,
+      "seed_note": "static fallback = 3.0*f/2040 clamped; runtime prefers previous-freq boundary * (f/prev_f)"
+    },
+    {
+      "gpu_freq_mhz": 360,
+      "initial_rate": 0.53,
+      "min_rate": 0.5,
+      "max_rate": 32.0,
+      "seed_note": "static fallback = 3.0*f/2040 clamped; runtime prefers previous-freq boundary * (f/prev_f)"
+    },
+    {
+      "gpu_freq_mhz": 210,
+      "initial_rate": 0.5,
+      "min_rate": 0.5,
+      "max_rate": 32.0,
+      "seed_note": "static fallback = 3.0*f/2040 clamped; runtime prefers previous-freq boundary * (f/prev_f)"
+    }
+  ],
+  "metrics_scrape": {
+    "endpoint": "/metrics",
+    "interval_s": 1.0,
+    "series": [
+      "vllm:num_requests_waiting",
+      "vllm:num_requests_running",
+      "vllm:gpu_cache_usage_perc"
+    ],
+    "steady_state_window": "after warmup ramp and before injection end (exclude tail drain)"
+  },
+  "dry_run": {
+    "purpose": "pipeline validation ONLY, no stability conclusion",
+    "max_concurrency": 32,
+    "checks": [
+      "Output token throughput (tok/s) present",
+      "p99 TPOT + duration parseable",
+      "monitor CSV non-empty and covers the run",
+      "actual clock == 2040 MHz",
+      "no OOM/preemption/timeout/failed requests",
+      "random dataset lengths ~= IL=1024/OL=512",
+      "row writable in master_results schema"
+    ]
+  },
+  "blockers_p0": [
+    "finite-batch drain: switch stability to /metrics steady-state queue-slope before capacity search",
+    "calibrate_decode_capacity inherits aggregate-throughput drain bias; reconcile (drain-corrected throughput or per-run stable flag)"
+  ]
+}
