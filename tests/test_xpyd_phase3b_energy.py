@@ -11,6 +11,7 @@ import unittest
 
 from xpyd.nvml_readonly import NVMLReadOnlyError, ReadOnlyNVMLSource
 from xpyd.phase3b_energy import (
+    AsyncFlushingStream,
     FixedPeriodEnergySampler,
     WindowSpec,
     add_idle_adjustment,
@@ -95,6 +96,24 @@ class FakeNVML:
 
     def nvmlDeviceGetUtilizationRates(self, handle):
         return self.Utilization()
+
+
+class FakeFieldPowerNVML(FakeNVML):
+    NVML_SUCCESS = 0
+    NVML_FI_DEV_POWER_AVERAGE = 185
+
+    class FieldValue:
+        nvmlReturn = 0
+
+        def __init__(self):
+            self.value = type("FieldUnion", (), {"uiVal": 52500})()
+
+    def nvmlDeviceGetPowerUsage(self, handle):
+        raise FakeNotSupported("direct power unsupported")
+
+    def nvmlDeviceGetFieldValues(self, handle, fields):
+        self.asserted_fields = fields
+        return [self.FieldValue()]
 
 
 def capability(*, counter=True, unsupported=False, uuid="GPU-fixture-0", pci="00000000:01:00.0"):
@@ -183,6 +202,18 @@ class ReadOnlyNVMLTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(NVMLReadOnlyError, "one unambiguous"):
             ReadOnlyNVMLSource("P0", "prefill", "0,1", binding=FakeNVML())
+
+    def test_power_average_field_is_read_only_compatibility_source(self):
+        binding = FakeFieldPowerNVML(energy_supported=False)
+        with ReadOnlyNVMLSource("P0", "prefill", "0", binding=binding) as source:
+            self.assertTrue(source.capabilities.power_supported)
+            self.assertEqual(
+                source.capabilities.power_query_source,
+                "nvmlFieldValue_power_average",
+            )
+            self.assertEqual(source.query()["power_w"], 52.5)
+            self.assertEqual(binding.asserted_fields, [185])
+        self.assertFalse(binding.setter_accessed)
 
 
 class WindowAnalysisTests(unittest.TestCase):
@@ -346,6 +377,23 @@ class SamplerTests(unittest.TestCase):
             records = [json.loads(line) for line in path.read_text().splitlines()]
             self.assertGreaterEqual(len(records), 2)
             self.assertFalse(thread.is_alive())
+
+    def test_slow_shared_file_flush_does_not_shift_sampling_deadlines(self):
+        class SlowStream(io.StringIO):
+            def flush(self):
+                time.sleep(0.025)
+                return super().flush()
+
+        raw = SlowStream()
+        stream = AsyncFlushingStream(raw)
+        try:
+            sampler = FixedPeriodEnergySampler("D0", self.Source(), 0.01, 0.003)
+            sampler.run(stream, duration_s=0.055)
+        finally:
+            stream.close()
+        records = [json.loads(line) for line in raw.getvalue().splitlines()]
+        self.assertGreaterEqual(len(records), 5)
+        self.assertFalse(any(item["missed"] for item in records))
 
 
 class RuntimeGuardTests(unittest.TestCase):

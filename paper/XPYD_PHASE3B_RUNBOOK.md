@@ -65,7 +65,9 @@ request/token deltas audit cleanly, both physical identities match, both raw
 streams are non-empty, workload windows are valid, and the tiny smoke has no
 measurement errors or missed slots. Explicit energy-counter non-support is not
 a hardware failure if the labelled power-integral window passes its coverage
-rules. Any other counter error is not eligible for fallback.
+rules. The power source is recorded as the direct NVML getter or, when that
+getter is explicitly unsupported, NVIDIA's read-only averaged-power field. Any
+other counter error is not eligible for energy fallback.
 
 Raw `results/xpyd_energy/**` and the new raw Phase 3A run remain ignored and
 must not be staged. Do not use this preflight as a comparison and do not proceed

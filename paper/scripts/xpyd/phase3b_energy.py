@@ -9,6 +9,7 @@ import json
 import math
 import os
 from pathlib import Path
+import queue
 import signal
 import socket
 import subprocess
@@ -41,6 +42,46 @@ def _write_json(path: Path, value: Any) -> None:
 def _append_jsonl(stream: Any, record: Mapping[str, Any]) -> None:
     stream.write(json.dumps(record, sort_keys=True) + "\n")
     stream.flush()
+
+
+class AsyncFlushingStream:
+    """Keep shared-filesystem flush latency off the sampling deadline path."""
+
+    def __init__(self, stream: Any) -> None:
+        self.stream = stream
+        self.items: queue.Queue[Optional[str]] = queue.Queue()
+        self.error: Optional[BaseException] = None
+        self.thread = threading.Thread(
+            target=self._write_loop, name="xpyd-energy-writer", daemon=True
+        )
+        self.thread.start()
+
+    def _write_loop(self) -> None:
+        try:
+            while True:
+                item = self.items.get()
+                if item is None:
+                    break
+                self.stream.write(item)
+                self.stream.flush()
+        except BaseException as exc:
+            self.error = exc
+
+    def write(self, text: str) -> None:
+        if self.error is not None:
+            raise Phase3BEnergyError("energy writer failed: %s" % self.error)
+        self.items.put(text)
+
+    def flush(self) -> None:
+        # The dedicated writer flushes every record. Sampling never waits for
+        # shared-filesystem latency merely to satisfy the stream API.
+        return None
+
+    def close(self) -> None:
+        self.items.put(None)
+        self.thread.join()
+        if self.error is not None:
+            raise Phase3BEnergyError("energy writer failed: %s" % self.error)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -144,13 +185,16 @@ class FixedPeriodEnergySampler:
                 "error_type": type(error).__name__ if error else None,
                 "error_message": str(error) if error else None,
                 "measurement_source": (
-                    "hardware_counter_and_power"
+                    "hardware_counter"
                     if self.source.capabilities.total_energy_supported
                     else (
-                        "power_only_energy_counter_unsupported"
+                        "power_integral_estimate"
                         if (self.source.capabilities.total_energy_error or {}).get("not_supported")
-                        else "power_available_energy_counter_probe_error"
+                        else "invalid_energy_counter_probe_error"
                     )
+                ),
+                "power_query_source": getattr(
+                    self.source.capabilities, "power_query_source", None
                 ),
                 "capability_total_energy": self.source.capabilities.total_energy_supported,
                 "capability_power": self.source.capabilities.power_supported,
@@ -184,13 +228,16 @@ class FixedPeriodEnergySampler:
                     "power_w": None,
                     "total_energy_mj": None,
                     "measurement_source": (
-                        "hardware_counter_and_power"
+                        "hardware_counter"
                         if self.source.capabilities.total_energy_supported
                         else (
-                            "power_only_energy_counter_unsupported"
+                            "power_integral_estimate"
                             if (self.source.capabilities.total_energy_error or {}).get("not_supported")
-                            else "power_available_energy_counter_probe_error"
+                            else "invalid_energy_counter_probe_error"
                         )
+                    ),
+                    "power_query_source": getattr(
+                        self.source.capabilities, "power_query_source", None
                     ),
                     "capability_total_energy": self.source.capabilities.total_energy_supported,
                     "capability_power": self.source.capabilities.power_supported,
@@ -456,11 +503,32 @@ def _monitor_command(args: argparse.Namespace) -> int:
     previous = {}
     for signum in (signal.SIGINT, signal.SIGTERM):
         previous[signum] = signal.signal(signum, request_stop)
+    watcher_stop = threading.Event()
+
+    def watch_stop_file() -> None:
+        if not args.stop_file:
+            return
+        stop_path = Path(args.stop_file)
+        while not watcher_stop.wait(min(0.05, args.period_s / 4.0)):
+            if stop_path.exists():
+                sampler.stop()
+                return
+
+    watcher = threading.Thread(
+        target=watch_stop_file, name="xpyd-energy-stop-watcher", daemon=True
+    )
+    watcher.start()
     try:
         _write_json(capability_path, source.capability_record())
-        with output.open("x", encoding="utf-8", buffering=1) as stream:
-            sampler.run(stream, duration_s=args.duration_s)
+        with output.open("x", encoding="utf-8", buffering=1) as raw_stream:
+            stream = AsyncFlushingStream(raw_stream)
+            try:
+                sampler.run(stream, duration_s=args.duration_s)
+            finally:
+                stream.close()
     finally:
+        watcher_stop.set()
+        watcher.join()
         source.close()
         for signum, handler in previous.items():
             signal.signal(signum, handler)
@@ -521,12 +589,12 @@ def _request_token_audit(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]
         expected = {
             "P0": {
                 "delta_completed_requests": requests,
-                "delta_prompt_tokens": int(client["input_tokens_total"]),
+                "delta_prompt_tokens": int(client["input_tokens_total"]) + requests,
                 "delta_generation_tokens": requests,
             },
             "D0": {
                 "delta_completed_requests": requests,
-                "delta_prompt_tokens": requests,
+                "delta_prompt_tokens": int(client["input_tokens_total"]) + requests,
                 "delta_generation_tokens": int(client["output_tokens_total"]),
             },
         }
@@ -779,6 +847,7 @@ def _monitor_argv(
         "--late-tolerance-s", str(sampling["late_tolerance_s"]),
         "--output", (endpoint_dir / "samples.jsonl").as_posix(),
         "--capability-output", (endpoint_dir / "capability.json").as_posix(),
+        "--stop-file", (endpoint_dir / "stop.requested").as_posix(),
     ]
     if endpoint.get("expected_uuid"):
         command += ["--expected-uuid", str(endpoint["expected_uuid"])]
@@ -835,15 +904,29 @@ def _wait_capabilities(
 def _stop_monitors(
     processes: Mapping[str, subprocess.Popen[Any]],
     logs: Iterable[Any],
+    stop_files: Mapping[str, Path],
 ) -> list[str]:
     errors = []
-    for process in processes.values():
-        if process.poll() is None:
-            process.terminate()
     for endpoint, process in processes.items():
+        if process.poll() is None:
+            stop_files[endpoint].write_text("stop\n", encoding="utf-8")
+    # Leave enough time for the asynchronous writer to drain a short shared-FS
+    # backlog while remaining bounded if a remote step is genuinely stuck.
+    deadline = time.monotonic() + 45.0
+    while any(process.poll() is None for process in processes.values()):
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.1)
+    for endpoint, process in processes.items():
+        required_signal = False
+        if process.poll() is None:
+            required_signal = True
+            process.terminate()
         try:
-            returncode = process.wait(timeout=20)
-            if returncode not in (0, -signal.SIGTERM, 128 + signal.SIGTERM):
+            returncode = process.wait(timeout=5)
+            if required_signal:
+                errors.append("%s monitor ignored graceful stop marker" % endpoint)
+            elif returncode != 0:
                 errors.append("%s monitor exit status %s" % (endpoint, returncode))
         except subprocess.TimeoutExpired:
             process.kill()
@@ -875,6 +958,7 @@ def run_preflight(config_path: Path, run_id: Optional[str] = None) -> Path:
     })
 
     processes: dict[str, subprocess.Popen[Any]] = {}
+    stop_files: dict[str, Path] = {}
     logs = []
     boundaries: dict[str, float] = {}
     phase3a_run_dir: Optional[Path] = None
@@ -887,6 +971,7 @@ def run_preflight(config_path: Path, run_id: Optional[str] = None) -> Path:
                 endpoint, run_dir / endpoint_id, config["sampling"]
             )
             processes[endpoint_id] = process
+            stop_files[endpoint_id] = run_dir / endpoint_id / "stop.requested"
             logs.append(log)
         _wait_capabilities(processes, run_dir)
 
@@ -909,7 +994,7 @@ def run_preflight(config_path: Path, run_id: Optional[str] = None) -> Path:
     except BaseException as exc:
         failure = exc
     finally:
-        stop_errors = _stop_monitors(processes, logs)
+        stop_errors = _stop_monitors(processes, logs, stop_files)
         _write_json(run_dir / "boundaries.json", boundaries)
 
     if failure is not None:
@@ -964,6 +1049,7 @@ def build_parser() -> argparse.ArgumentParser:
     monitor.add_argument("--duration-s", type=float)
     monitor.add_argument("--output", required=True)
     monitor.add_argument("--capability-output", required=True)
+    monitor.add_argument("--stop-file")
     monitor.set_defaults(handler=_monitor_command)
 
     preflight = subparsers.add_parser("preflight", help="run the one minimal physical preflight")

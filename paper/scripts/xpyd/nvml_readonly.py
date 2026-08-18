@@ -54,8 +54,10 @@ class NVMLCapabilities:
     power_supported: bool
     total_energy_probe_mj: Optional[int]
     power_probe_w: Optional[float]
+    power_query_source: Optional[str]
     total_energy_error: Optional[Mapping[str, str]]
     power_error: Optional[Mapping[str, str]]
+    power_primary_error: Optional[Mapping[str, str]]
 
 
 class ReadOnlyNVMLSource:
@@ -99,6 +101,7 @@ class ReadOnlyNVMLSource:
         self.role = role
         self.visible = visible
         self._shutdown = False
+        self._power_query = None
         self.binding.nvmlInit()
         try:
             self.handle, index = self._resolve_handle(visible)
@@ -194,14 +197,46 @@ class ReadOnlyNVMLSource:
         power_ok, power, power_error = self._probe(
             self.binding.nvmlDeviceGetPowerUsage, 0.001
         )
+        power_primary_error = power_error
+        power_source = "nvmlDeviceGetPowerUsage" if power_ok else None
+        if (
+            not power_ok
+            and bool((power_error or {}).get("not_supported"))
+            and callable(getattr(self.binding, "nvmlDeviceGetFieldValues", None))
+            and getattr(self.binding, "NVML_FI_DEV_POWER_AVERAGE", None) is not None
+        ):
+            power_ok, power, power_error = self._probe(
+                self._read_power_average_field_mw, 0.001
+            )
+            if power_ok:
+                power_source = "nvmlFieldValue_power_average"
+        if power_source == "nvmlFieldValue_power_average":
+            self._power_query = self._read_power_average_field_mw
+        elif power_source == "nvmlDeviceGetPowerUsage":
+            self._power_query = self.binding.nvmlDeviceGetPowerUsage
         return NVMLCapabilities(
             total_energy_supported=energy_ok,
             power_supported=power_ok,
             total_energy_probe_mj=int(energy) if energy is not None else None,
             power_probe_w=power,
+            power_query_source=power_source,
             total_energy_error=energy_error,
             power_error=power_error,
+            power_primary_error=power_primary_error,
         )
+
+    def _read_power_average_field_mw(self, handle: Any) -> int:
+        values = self.binding.nvmlDeviceGetFieldValues(
+            handle, [self.binding.NVML_FI_DEV_POWER_AVERAGE]
+        )
+        if len(values) != 1:
+            raise NVMLReadOnlyError("NVML power field query returned %d values" % len(values))
+        value = values[0]
+        status = int(value.nvmlReturn)
+        if status != int(getattr(self.binding, "NVML_SUCCESS", 0)):
+            error_type = getattr(self.binding, "NVMLError", NVMLReadOnlyError)
+            raise error_type(status)
+        return int(value.value.uiVal)
 
     def capability_record(self) -> dict[str, Any]:
         return {
@@ -238,7 +273,6 @@ class ReadOnlyNVMLSource:
         except Exception as exc:
             result["field_errors"]["identity"] = structured_error(exc)
         queries = {
-            "power_w": (self.binding.nvmlDeviceGetPowerUsage, 0.001),
             "graphics_clock_mhz": (
                 lambda handle: self.binding.nvmlDeviceGetClockInfo(
                     handle, self.binding.NVML_CLOCK_GRAPHICS
@@ -255,6 +289,8 @@ class ReadOnlyNVMLSource:
                 ), 1.0
             ),
         }
+        if self._power_query is not None:
+            queries["power_w"] = (self._power_query, 0.001)
         if self.capabilities.total_energy_supported:
             queries["total_energy_mj"] = (
                 self.binding.nvmlDeviceGetTotalEnergyConsumption, 1.0

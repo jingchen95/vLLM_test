@@ -28,14 +28,20 @@ The counter method is invalidated by a decrease/reset, identity change,
 device/query error in the interval, insufficient boundary coverage, excessive
 sampling gap, or insufficient coverage.
 
-Only an explicit `NVML_ERROR_NOT_SUPPORTED` permits the fallback. The fallback
-integrates valid watt samples over local monotonic time with the trapezoidal
-rule and is labelled `power_integral_estimate`; it is never labelled as a
-hardware counter. Other counter errors do not trigger fallback. NVIDIA defines
-power in milliwatts and documents that on Ampere (except GA100) and newer GPUs
-the value is averaged over about one second. A 200 ms polling period therefore
-improves boundary/cadence auditing but does not create independent 200 ms power
-measurements or exact short-event energy attribution.
+Only an explicit `NVML_ERROR_NOT_SUPPORTED` permits the energy fallback. The
+fallback integrates valid watt samples over local monotonic time with the
+trapezoidal rule and is labelled `power_integral_estimate`; it is never labelled
+as a hardware counter. Other counter errors do not trigger fallback. Power is
+queried first with `nvmlDeviceGetPowerUsage`. If that getter explicitly reports
+unsupported, the source may use NVML's read-only
+`NVML_FI_DEV_POWER_AVERAGE` field and records
+`nvmlFieldValue_power_average` as the power source. A failure of both invalidates
+the window.
+
+NVIDIA defines power in milliwatts and documents that on Ampere (except GA100)
+and newer GPUs the value is averaged over about one second. A 200 ms polling
+period therefore improves boundary/cadence auditing but does not create
+independent 200 ms power measurements or exact short-event energy attribution.
 
 Authoritative semantics: [NVIDIA NVML device queries](https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html)
 and [NVML power fields](https://docs.nvidia.com/deploy/nvml-api/group__nvmlFieldValueEnums.html).
@@ -55,9 +61,11 @@ processes, so one endpoint cannot shift the other's schedule.
 Each attempted record includes scheduled/start/finish local monotonic time,
 start/finish wall time, query latency, start drift, late status, identity,
 power/counter values, capabilities, metadata, and structured error class and
-message. Output is line-buffered and flushed per record, preserving a valid
-prefix after graceful termination. This is audited best-effort cadence, not a
-Minerva real-time guarantee.
+message. A dedicated writer flushes each record without placing shared-filesystem
+latency on the sampling deadline path. A node-local monitor observes a shared
+stop marker and drains that writer before exit, preserving a valid prefix after
+termination. This is audited best-effort cadence, not a Minerva real-time
+guarantee.
 
 Window summaries report requested and actual boundaries, duration, source,
 gross energy, power statistics, scheduled/successful/missed/late/error counts,
