@@ -3,6 +3,9 @@
 import asyncio
 import inspect
 import json
+from pathlib import Path
+import subprocess
+import sys
 import unittest
 
 from xpyd.disagg_proxy import (
@@ -87,6 +90,21 @@ def config():
 
 
 class DisaggProxyStreamingTests(unittest.TestCase):
+    def test_proxy_module_entrypoint_does_not_shadow_stdlib_types(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        env = {"PYTHONPATH": str(repo_root / "paper/scripts")}
+        result = subprocess.run(
+            [sys.executable, "-m", "xpyd.disagg_proxy", "--help"],
+            cwd=repo_root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--prefill-http-host", result.stdout)
+
     def test_real_stream_preserves_prefill_contract_and_forwards_incrementally(self):
         chunks = [
             b'data: {"choices":[{"text":"a"}]}\n\n',

@@ -67,9 +67,10 @@ XPYD_NO_GPU_MUTATION="${XPYD_NO_GPU_MUTATION:-0}"
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # The auditable proxy is checked in so its streaming behavior can be tested.
-# It keeps P non-streaming/max_tokens=1 and forwards real D SSE bytes.
+# It keeps P non-streaming/max_tokens=1 and forwards real D SSE bytes. Launch
+# it as a package module so xpyd/types.py cannot shadow the stdlib types module.
 # ---------------------------------------------------------------------------
-DISAGG_PROXY_SCRIPT="${SCRIPT_DIR}/paper/scripts/xpyd/disagg_proxy.py"
+DISAGG_PROXY_MODULE="xpyd.disagg_proxy"
 
 # ---------------------------------------------------------------------------
 # Helper: privileged GPU reset / reset-app-clocks on a node.
@@ -1568,7 +1569,8 @@ EOF
         local PROXY_PID
         local proxy_diagnostics_log="${RESULT_DIR}/xpyd_proxy_${SLURM_JOB_ID:-local}.jsonl"
         export XPYD_PROXY_DIAGNOSTICS_LOG="${proxy_diagnostics_log}"
-        "${PYTHON_BIN}" "${DISAGG_PROXY_SCRIPT}" \
+        PYTHONPATH="${SCRIPT_DIR}/paper/scripts${PYTHONPATH:+:${PYTHONPATH}}" \
+        "${PYTHON_BIN}" -m "${DISAGG_PROXY_MODULE}" \
             --prefill-http-host "${proxy_prefill_host}" --prefill-port "${PREFILL_PORT}" \
             --decode-http-host  "${proxy_decode_host}"  --decode-port  "${DECODE_PORT}" \
             --prefill-addr-host "${L40S_IP}" \

@@ -442,9 +442,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    import uvicorn
-
     args = parse_args()
+    import uvicorn
     config = ProxyConfig(
         prefill_http_host=args.prefill_http_host,
         decode_http_host=args.decode_http_host,
