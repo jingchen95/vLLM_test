@@ -8,6 +8,7 @@ from xpyd.phase3a_scientific import (
     rankdata,
     segment_proxy_records,
     source_digest,
+    write_csv,
 )
 
 
@@ -58,6 +59,15 @@ class Phase3AScientificAnalysisTests(unittest.TestCase):
             self.assertEqual(source_digest(root), before)
             (root / "raw.txt").write_text("changed", encoding="utf-8")
             self.assertNotEqual(source_digest(root), before)
+
+    def test_csv_output_uses_reproducible_lf_line_endings(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "result.csv"
+            write_csv(output, [{"name": "phase3a", "status": "PASS"}])
+            self.assertEqual(
+                output.read_bytes(),
+                b"name,status\nphase3a,PASS\n",
+            )
 
 
 if __name__ == "__main__":

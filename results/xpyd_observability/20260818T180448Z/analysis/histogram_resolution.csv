@@ -1,0 +1,23 @@
+endpoint_id,metric,target_seconds,nearest_lower_bucket_seconds,nearest_upper_bucket_seconds,exact_target_bucket,bracket_width_seconds,quantile_interpretation
+D0,vllm:time_to_first_token_seconds,0.3,0.25,0.5,False,0.25,histogram quantile is bounded only to this bucket interval
+D0,vllm:time_to_first_token_seconds,0.5,0.25,0.5,True,0.25,histogram quantile is bounded only to this bucket interval
+D0,vllm:time_to_first_token_seconds,1.0,0.75,1.0,True,0.25,histogram quantile is bounded only to this bucket interval
+D0,vllm:inter_token_latency_seconds,0.1,0.075,0.1,True,0.02500000000000001,histogram quantile is bounded only to this bucket interval
+D0,vllm:inter_token_latency_seconds,0.2,0.15,0.2,True,0.05000000000000002,histogram quantile is bounded only to this bucket interval
+D0,vllm:request_queue_time_seconds,0.1,,0.3,False,,histogram quantile is bounded only to this bucket interval
+D0,vllm:request_queue_time_seconds,0.3,,0.3,True,,histogram quantile is bounded only to this bucket interval
+D0,vllm:request_prefill_time_seconds,0.1,,0.3,False,,histogram quantile is bounded only to this bucket interval
+D0,vllm:request_prefill_time_seconds,0.3,,0.3,True,,histogram quantile is bounded only to this bucket interval
+D0,vllm:request_decode_time_seconds,0.3,,0.3,True,,histogram quantile is bounded only to this bucket interval
+D0,vllm:request_decode_time_seconds,1.0,0.8,1.0,True,0.19999999999999996,histogram quantile is bounded only to this bucket interval
+P0,vllm:time_to_first_token_seconds,0.3,0.25,0.5,False,0.25,histogram quantile is bounded only to this bucket interval
+P0,vllm:time_to_first_token_seconds,0.5,0.25,0.5,True,0.25,histogram quantile is bounded only to this bucket interval
+P0,vllm:time_to_first_token_seconds,1.0,0.75,1.0,True,0.25,histogram quantile is bounded only to this bucket interval
+P0,vllm:inter_token_latency_seconds,0.1,0.075,0.1,True,0.02500000000000001,histogram quantile is bounded only to this bucket interval
+P0,vllm:inter_token_latency_seconds,0.2,0.15,0.2,True,0.05000000000000002,histogram quantile is bounded only to this bucket interval
+P0,vllm:request_queue_time_seconds,0.1,,0.3,False,,histogram quantile is bounded only to this bucket interval
+P0,vllm:request_queue_time_seconds,0.3,,0.3,True,,histogram quantile is bounded only to this bucket interval
+P0,vllm:request_prefill_time_seconds,0.1,,0.3,False,,histogram quantile is bounded only to this bucket interval
+P0,vllm:request_prefill_time_seconds,0.3,,0.3,True,,histogram quantile is bounded only to this bucket interval
+P0,vllm:request_decode_time_seconds,0.3,,0.3,True,,histogram quantile is bounded only to this bucket interval
+P0,vllm:request_decode_time_seconds,1.0,0.8,1.0,True,0.19999999999999996,histogram quantile is bounded only to this bucket interval

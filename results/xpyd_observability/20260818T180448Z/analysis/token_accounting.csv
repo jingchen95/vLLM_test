@@ -1,0 +1,7 @@
+probe_id,probe_kind,logical_request_count,user_requested_input_tokens_per_request,user_requested_output_tokens_per_request,client_measured_output_tokens_total,client_output_token_source,P0_server_prompt_tokens_delta,D0_server_prompt_tokens_delta,P0_generation_tokens_delta,D0_generation_tokens_delta,P0_request_success_delta,D0_request_success_delta,P0_prompt_tokens_per_request,D0_prompt_tokens_per_request,server_prompt_minus_user_input_per_request
+semantic_il128_ol128,semantic,1,128,128,128,server_usage,129.0,129.0,1.0,128.0,1.0,1.0,129.0,129.0,1.0
+semantic_il2048_ol128,semantic,1,2048,128,128,server_usage,2049.0,2049.0,1.0,128.0,1.0,1.0,2049.0,2049.0,1.0
+semantic_il128_ol512,semantic,1,128,512,512,server_usage,129.0,129.0,1.0,512.0,1.0,1.0,129.0,129.0,1.0
+semantic_il2048_ol512,semantic,1,2048,512,512,server_usage,2049.0,2049.0,1.0,512.0,1.0,1.0,2049.0,2049.0,1.0
+load_light_il128_ol128,load,10,128,128,1280,server_usage,1290.0,1290.0,10.0,1280.0,10.0,10.0,129.0,129.0,1.0
+load_moderate_il2048_ol512,load,20,2048,512,10240,server_usage,40980.0,40980.0,20.0,10240.0,20.0,20.0,2049.0,2049.0,1.0

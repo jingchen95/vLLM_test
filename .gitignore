@@ -104,6 +104,10 @@ core.*
 !/results/paper/section45_ablation/summary.csv
 !/results/paper/section47_overhead/
 !/results/paper/section47_overhead/summary.csv
+!/results/xpyd_observability/
+!/results/xpyd_observability/20260818T180448Z/
+!/results/xpyd_observability/20260818T180448Z/analysis/
+!/results/xpyd_observability/20260818T180448Z/analysis/**
 
 # The exhaustive motivation/regime evaluation tables are ~300 MB each and
 # dominate the repository. Publication-sized outputs live in paper/figures.

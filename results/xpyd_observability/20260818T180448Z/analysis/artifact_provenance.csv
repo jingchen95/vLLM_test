@@ -1,0 +1,18 @@
+artifact,relative_path,purpose,available,size_bytes
+metadata,metadata.json,"scope, commit, workload definitions, exclusions",True,3583
+acceptance_summary,derived/summary.json,"run acceptance, bucket boundaries, global maxima",True,8490
+semantic_results,derived/semantic_deltas.json,semantic client summaries and P0/D0 before-after deltas,True,189279
+load_results,derived/load_runs.json,load client summaries and P0/D0 before-after deltas,True,96376
+load_monitoring,derived/load_monitoring.json,interval scrape coverage,True,875
+telemetry,derived/telemetry.jsonl,"load interval queue, running, KV and rate time series",True,2036508
+scrape_index,derived/scrapes.jsonl,scrape timing and raw snapshot provenance,True,74059
+proxy_diagnostics,derived/proxy_diagnostics.jsonl,real SSE and proxy path durations,True,44639
+proxy_audit,derived/proxy_diagnostics_audit.json,diagnostic cardinality and validity,True,188
+warmup,derived/phase_warmup.json,excluded warmup accounting,True,1309
+generated_engineering_summary,derived/summary.md,cross-check only; not primary quantitative source,True,784
+generated_semantic_summary,derived/semantic_summary.json,cross-check only; not primary quantitative source,True,15621
+P0_server_log,P0/server.log,server lifecycle/error-context audit,True,40615
+D0_server_log,D0/server.log,server lifecycle/error-context audit,True,43067
+client_request_metrics,client/<probe>/requests.jsonl,"per-request client TTFT, TPOT, ITL, E2E and token source",True,
+raw_prometheus_snapshots,P0/raw_metrics/*.prom; D0/raw_metrics/*.prom,unaltered live metric text and bucket definitions,True,
+dry_run_output,derived/dry_run.jsonl,not used: dry-run controller was disabled,False,
