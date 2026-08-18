@@ -182,6 +182,14 @@ endpoint healthy and advances its last-update timestamp. A connection, HTTP,
 parse, or mapping failure marks it unhealthy but retains the registry entry,
 last successful timestamp, and last known gauge values.
 
+`EndpointState` separately records whether queue depth and KV occupancy have
+ever been observed. Their numeric defaults are storage placeholders, not
+evidence of zero pressure. An explicit scraped zero is known zero; a first
+missing gauge remains unknown; a later missing gauge preserves a prior known
+value. Optimized routing and fallback both fail closed on never-observed queue
+or KV pressure. Dry-run JSON includes the two observed flags so this distinction
+is auditable.
+
 `model_name` is selected explicitly when configured. Without configuration, a
 single model label can be inferred, while multiple model series fail clearly
 instead of being combined. `request_success_total` is summed over configured
@@ -202,6 +210,12 @@ tracker subtracts consecutive scrapes and only then derives token/request rates
 and recent latency. A first scrape establishes a baseline. A decreasing
 counter, decreasing bucket/count/sum, changed bucket layout, or non-positive
 interval invalidates the interval; no negative delta is emitted.
+
+This detects observable counter/histogram discontinuities, not process identity.
+Without a process start-time or instance-identity signal, a restart whose new
+counters have already exceeded the previous values is indistinguishable from a
+continuing process. Such monotonic input is therefore accepted as a delta; the
+implementation does not claim unconditional restart detection.
 
 Prometheus histogram buckets are cumulative both across bucket boundaries and
 over process lifetime. For example, if TTFT is:
@@ -294,16 +308,21 @@ requested target frequency; it never executes a clock change.
   produces a one-level `STEP_DOWN`.
 - The gap between downshift and upshift thresholds is a hysteresis `HOLD`
   region; validation requires `0 < downshift < upshift <= 1`.
-- After a non-`HOLD` recommendation, `dvfs_min_dwell_s` suppresses normal
-  repeated changes. Emergency SLO/queue/KV pressure and `FALLBACK_MAX` may
-  bypass this cooldown.
+- `dvfs_min_dwell_s` is measured only from a separately recorded successful
+  external actuation/readback. A recommendation alone never starts dwell, so
+  unchanged dry-run state may produce the same recommendation repeatedly.
+  Emergency SLO/queue/KV pressure and `FALLBACK_MAX` may bypass dwell after a
+  real actuation.
 - Minimum/maximum boundaries produce `HOLD`.
 
 Every target is a real member of the endpoint GPU type's allowed-frequency set.
 The observed and requested frequencies remain separate because a future
 actuator may be delayed or fail readback verification. Dry-run recommendation
 history records only recommendation time; it never writes the hypothetical
-target back into observed `EndpointState.freq_mhz`.
+target back into observed `EndpointState.freq_mhz`. Recommendation and actual
+actuation timestamps are separate. `record_dvfs_actuation()` only records a
+future actuator's already-successful transition after the registry frequency
+matches hardware readback; it performs no frequency mutation itself.
 
 ### Dry-run controller and replay
 

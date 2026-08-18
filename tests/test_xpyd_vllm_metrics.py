@@ -191,6 +191,22 @@ class WindowDeltaTests(unittest.TestCase):
         self.assertIn("vllm:prompt_tokens_total", reset.reset_metrics)
         self.assertIsNone(reset.delta_prompt_tokens)
 
+    def test_monotonic_values_cannot_establish_process_identity(self):
+        tracker = VLLMWindowTracker()
+        before = self.collector.parse_text(
+            self.endpoint, fixture("normal_t0.prom"), 0
+        )
+        # These higher values could come from the same process or from a
+        # restarted process that already passed the old totals. There is no
+        # process identity/start-time evidence in VLLMMetricsSnapshot.
+        possibly_restarted = self.collector.parse_text(
+            self.endpoint, fixture("normal_t1.prom"), 10
+        )
+        tracker.observe(before)
+        window = tracker.observe(possibly_restarted)
+        self.assertTrue(window.valid)
+        self.assertEqual(window.reason, "ok")
+
     def test_zero_new_observations_has_no_quantile(self):
         tracker = VLLMWindowTracker()
         tracker.observe(self.collector.parse_text(self.endpoint, fixture("normal_t0.prom"), 0))

@@ -43,8 +43,10 @@ class EndpointDryRunRecord:
     scrape_error: Optional[str]
     missing_metrics: Tuple[str, ...]
     queue_depth: int
+    queue_depth_observed: bool
     running_requests: int
     kv_cache_usage_frac: float
+    kv_cache_usage_observed: bool
     healthy: bool
     lifecycle: str
     observed_freq_mhz: Optional[int]
@@ -236,6 +238,7 @@ class DryRunController:
                 raw.num_requests_waiting,
                 "vllm:num_requests_waiting",
             )
+            state.queue_depth_observed = True
         if raw.num_requests_running is not None:
             state.running_requests = self._integer_gauge(
                 raw.num_requests_running,
@@ -243,7 +246,9 @@ class DryRunController:
             )
         if raw.kv_cache_usage_frac is not None:
             state.kv_cache_usage_frac = raw.kv_cache_usage_frac
-        # Missing gauges intentionally leave the prior known state untouched.
+            state.kv_cache_usage_observed = True
+        # Missing gauges intentionally preserve prior values and their
+        # observed/unknown status.
         self.registry.update_state(state)
 
     def _mark_unhealthy(self, endpoint_id: str) -> None:
@@ -282,8 +287,10 @@ class DryRunController:
             scrape_error=scrape_status[1],
             missing_metrics=scrape_status[2],
             queue_depth=state.queue_depth,
+            queue_depth_observed=state.queue_depth_observed,
             running_requests=state.running_requests,
             kv_cache_usage_frac=state.kv_cache_usage_frac,
+            kv_cache_usage_observed=state.kv_cache_usage_observed,
             healthy=state.healthy,
             lifecycle=state.lifecycle.value,
             observed_freq_mhz=state.freq_mhz,
@@ -319,6 +326,14 @@ def build_controller_from_config(
     )
     for item in config["endpoints"]:
         item = dict(item)
+        queue_depth_present = "queue_depth" in item
+        kv_cache_usage_present = "kv_cache_usage_frac" in item
+        queue_depth_observed = bool(
+            item.pop("queue_depth_observed", queue_depth_present)
+        )
+        kv_cache_usage_observed = bool(
+            item.pop("kv_cache_usage_observed", kv_cache_usage_present)
+        )
         state = EndpointState(
             endpoint_id=item["endpoint_id"],
             freq_mhz=item.pop("freq_mhz", None),
@@ -327,6 +342,8 @@ def build_controller_from_config(
             queue_depth=int(item.pop("queue_depth", 0)),
             running_requests=int(item.pop("running_requests", 0)),
             kv_cache_usage_frac=float(item.pop("kv_cache_usage_frac", 0.0)),
+            queue_depth_observed=queue_depth_observed,
+            kv_cache_usage_observed=kv_cache_usage_observed,
             last_update_s=float(item.pop("last_update_s", 0.0)),
         )
         registry.register(EndpointSpec(**item), state)

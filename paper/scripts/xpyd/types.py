@@ -52,7 +52,11 @@ class EndpointSpec:
 
 @dataclass
 class EndpointState:
-    """Mutable observations for an endpoint; it contains no transition policy."""
+    """Mutable observations for an endpoint; it contains no transition policy.
+
+    Queue/KV numeric defaults are not safety evidence unless their matching
+    ``*_observed`` flag is true.
+    """
 
     endpoint_id: str
     freq_mhz: Optional[int]
@@ -61,6 +65,8 @@ class EndpointState:
     queue_depth: int = 0
     running_requests: int = 0
     kv_cache_usage_frac: float = 0.0
+    queue_depth_observed: bool = False
+    kv_cache_usage_observed: bool = False
     last_update_s: float = 0.0
 
     def __post_init__(self) -> None:
@@ -78,6 +84,10 @@ class EndpointState:
             raise ValueError("queue and running request counts cannot be negative")
         if not 0.0 <= self.kv_cache_usage_frac <= 1.0:
             raise ValueError("kv_cache_usage_frac must be in [0, 1]")
+        if not isinstance(self.queue_depth_observed, bool):
+            raise ValueError("queue_depth_observed must be a boolean")
+        if not isinstance(self.kv_cache_usage_observed, bool):
+            raise ValueError("kv_cache_usage_observed must be a boolean")
         if self.last_update_s < 0:
             raise ValueError("last_update_s cannot be negative")
 

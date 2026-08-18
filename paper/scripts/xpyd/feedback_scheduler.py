@@ -37,6 +37,8 @@ class DVFSRecommendation:
     target_freq_mhz: int
     action: DVFSAction
     reason: str
+    last_recommendation_time_s: Optional[float] = None
+    last_actuation_time_s: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -183,9 +185,10 @@ class FeedbackScheduler:
         self.hardware = hardware
         self.config = config
         self.clock = clock
-        # Dry-run recommendation history is deliberately separate from the
-        # observed EndpointState: a recommendation is not an applied clock.
+        # Recommendation history is diagnostic only. Dwell is based solely on
+        # separately recorded successful actuation/readback events.
         self._last_dvfs_recommendation_s: Dict[str, float] = {}
+        self._last_dvfs_actuation_s: Dict[str, float] = {}
 
     def evaluate_routes(
         self,
@@ -318,6 +321,12 @@ class FeedbackScheduler:
             )
         if not state.healthy or state.lifecycle != LifecycleState.ACTIVE:
             return self._hold(endpoint_id, current, "endpoint is not healthy and ACTIVE")
+        if not state.queue_depth_observed or not state.kv_cache_usage_observed:
+            return self._hold(
+                endpoint_id,
+                current,
+                "queue/KV pressure telemetry has never been observed",
+            )
 
         snapshot = self.telemetry.snapshot(endpoint_id, now_s=now_s)
         metric, slo_ms, metric_name, tail_count, observed_at_s = self._latency_metric(
@@ -421,6 +430,10 @@ class FeedbackScheduler:
             return "%s_unhealthy" % endpoint.endpoint_id
         if state.lifecycle != LifecycleState.ACTIVE:
             return "%s_not_active" % endpoint.endpoint_id
+        if not state.queue_depth_observed:
+            return "%s_queue_unknown" % endpoint.endpoint_id
+        if not state.kv_cache_usage_observed:
+            return "%s_kv_unknown" % endpoint.endpoint_id
         if state.queue_depth > self.config.max_queue_depth:
             return "%s_queue_pressure" % endpoint.endpoint_id
         if state.kv_cache_usage_frac > self.config.max_kv_cache_usage_frac:
@@ -559,10 +572,22 @@ class FeedbackScheduler:
         decode = self.registry.get_spec(self.config.fallback_decode_endpoint_id)
         if prefill.role != "prefill" or decode.role != "decode":
             raise NoEligibleRouteError("fallback endpoint roles are invalid")
-        if not self._hard_safe(prefill, require_current_frequency=False):
-            raise NoEligibleRouteError("fallback prefill endpoint fails hard safety checks")
-        if not self._hard_safe(decode, require_current_frequency=False):
-            raise NoEligibleRouteError("fallback decode endpoint fails hard safety checks")
+        prefill_rejection = self._hard_safety_reason(
+            prefill, require_current_frequency=False
+        )
+        if prefill_rejection is not None:
+            raise NoEligibleRouteError(
+                "fallback prefill endpoint fails hard safety checks: %s"
+                % prefill_rejection
+            )
+        decode_rejection = self._hard_safety_reason(
+            decode, require_current_frequency=False
+        )
+        if decode_rejection is not None:
+            raise NoEligibleRouteError(
+                "fallback decode endpoint fails hard safety checks: %s"
+                % decode_rejection
+            )
         if not self.compatibility.is_compatible(prefill, decode):
             raise NoEligibleRouteError("fallback P/D pair lacks explicit compatibility evidence")
         prefill_allowed = self.hardware.gpu_type(prefill.gpu_type).allowed_frequencies_mhz
@@ -581,8 +606,42 @@ class FeedbackScheduler:
     def last_dvfs_recommendation_time(self, endpoint_id: str) -> Optional[float]:
         return self._last_dvfs_recommendation_s.get(endpoint_id)
 
+    def last_dvfs_actuation_time(self, endpoint_id: str) -> Optional[float]:
+        return self._last_dvfs_actuation_s.get(endpoint_id)
+
+    def record_dvfs_actuation(
+        self,
+        endpoint_id: str,
+        observed_freq_mhz: int,
+        timestamp_s: Optional[float] = None,
+    ) -> None:
+        """Record a completed external transition after successful readback.
+
+        This bookkeeping method performs no actuation and does not update
+        ``EndpointState``. A future actuator must update the observed state
+        from hardware readback before calling it.
+        """
+
+        timestamp_s = self.clock() if timestamp_s is None else timestamp_s
+        if not math.isfinite(timestamp_s) or timestamp_s < 0:
+            raise ValueError("DVFS actuation timestamp must be finite and non-negative")
+        endpoint = self.registry.get_spec(endpoint_id)
+        state = self.registry.get_state(endpoint_id)
+        self.hardware.validate_endpoint(endpoint)
+        allowed = self.hardware.gpu_type(endpoint.gpu_type).allowed_frequencies_mhz
+        if observed_freq_mhz not in allowed:
+            raise ValueError("actuated frequency is not hardware-supported")
+        if state.freq_mhz != observed_freq_mhz:
+            raise ValueError(
+                "EndpointState frequency must match successful hardware readback"
+            )
+        previous = self._last_dvfs_actuation_s.get(endpoint_id)
+        if previous is not None and timestamp_s < previous:
+            raise ValueError("DVFS actuation timestamps must be non-decreasing")
+        self._last_dvfs_actuation_s[endpoint_id] = float(timestamp_s)
+
     def _cooldown_active(self, endpoint_id: str, now_s: float) -> bool:
-        previous = self._last_dvfs_recommendation_s.get(endpoint_id)
+        previous = self._last_dvfs_actuation_s.get(endpoint_id)
         return (
             previous is not None
             and now_s - previous < self.config.dvfs_min_dwell_s
@@ -605,14 +664,21 @@ class FeedbackScheduler:
             target_freq_mhz=target_freq_mhz,
             action=action,
             reason=reason,
+            last_recommendation_time_s=self._last_dvfs_recommendation_s.get(
+                endpoint_id
+            ),
+            last_actuation_time_s=self._last_dvfs_actuation_s.get(endpoint_id),
         )
 
-    @staticmethod
-    def _hold(endpoint_id: str, current: int, reason: str) -> DVFSRecommendation:
+    def _hold(self, endpoint_id: str, current: int, reason: str) -> DVFSRecommendation:
         return DVFSRecommendation(
             endpoint_id=endpoint_id,
             current_freq_mhz=current,
             target_freq_mhz=current,
             action=DVFSAction.HOLD,
             reason=reason,
+            last_recommendation_time_s=self._last_dvfs_recommendation_s.get(
+                endpoint_id
+            ),
+            last_actuation_time_s=self._last_dvfs_actuation_s.get(endpoint_id),
         )

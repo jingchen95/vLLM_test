@@ -368,7 +368,13 @@ class VLLMMetricsCollector:
 
 
 class VLLMWindowTracker:
-    """Convert process-lifetime counters/histograms into interval deltas."""
+    """Convert process-lifetime counters/histograms into interval deltas.
+
+    Decreases and histogram-layout changes are observable discontinuities and
+    invalidate the interval. Without a process identity/start-time metric,
+    monotonic values alone cannot prove that the serving process did not
+    restart between scrapes.
+    """
 
     def __init__(self) -> None:
         self._previous: Dict[str, VLLMMetricsSnapshot] = {}

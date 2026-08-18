@@ -99,6 +99,8 @@ def build_example_runtime() -> MockXpYdRuntime:
                 freq_mhz=1600,
                 lifecycle=LifecycleState.ACTIVE,
                 healthy=True,
+                queue_depth_observed=True,
+                kv_cache_usage_observed=True,
             ),
         )
 
