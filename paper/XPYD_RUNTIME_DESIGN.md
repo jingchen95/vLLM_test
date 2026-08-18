@@ -13,6 +13,8 @@ clocks, implement lifecycle transitions, or alter the current SWEEP scheduler,
 `EnergyScheduler`, `PoolBundle`, baselines, simulator, models, or results. The
 mock runtime validates explicit routes, while the feedback reference selects
 routes and recommends clocks without performing runtime I/O or actuation.
+The live-observability layer may issue read-only HTTP GET requests to configured
+vLLM `/metrics` endpoints; fixture replay performs no network operation.
 
 ## Old and new control boundaries
 
@@ -128,9 +130,95 @@ compatibility, hardware-supported clock values, and configured safety
 thresholds. It does not import or query `EnergyScheduler`.
 
 It is **not** a learned predictor, an oracle, an SLO guarantee, online RL, a
-bandit policy, or a production controller. It is not connected to vLLM, HTTP
-routing, NVML, a wattmeter, NIXL/NCCL, or a GPU-clock actuator. The configurable
-safety fraction is only a heuristic margin over recently observed behavior.
+bandit policy, or a production controller. It observes vLLM but is not connected
+to HTTP request routing, NVML, a wattmeter, NIXL/NCCL, or a GPU-clock actuator.
+The configurable safety fraction is only a heuristic margin over recently
+observed behavior.
+
+### Live observability path
+
+The implemented read-only path is:
+
+```text
+vLLM 0.15.1 /metrics
+  -> standard-library Prometheus text parser
+  -> VLLMMetricsCollector raw cumulative snapshot
+  -> per-endpoint cumulative-to-window deltas
+  -> TelemetryAggregator EWMA and recent-window summaries
+  -> FeedbackScheduler route/DVFS evaluation
+  -> JSONL dry-run decision (actuated=false)
+```
+
+`VLLMMetricsCollector` joins each `EndpointSpec.http_uri` with `/metrics`, uses
+a configurable timeout, validates HTTP status, and performs no retry or hidden
+fallback. The repository's physical script exposes vLLM's OpenAI server on
+`0.0.0.0` (prefill port 8100 and decode port 8200 in that two-server script)
+and checks `/health`; XpYd accepts arbitrary remote host/port URIs and assumes
+`/metrics` is served by that same process. It neither launches nor terminates
+the process.
+
+The collector recognizes these exact names:
+
+```text
+vllm:num_requests_running
+vllm:num_requests_waiting
+vllm:kv_cache_usage_perc
+vllm:prompt_tokens_total
+vllm:generation_tokens_total
+vllm:request_success_total
+vllm:time_to_first_token_seconds
+vllm:inter_token_latency_seconds
+vllm:e2e_request_latency_seconds
+vllm:request_queue_time_seconds
+vllm:request_prefill_time_seconds
+vllm:request_decode_time_seconds
+```
+
+No individual metric is assumed present: absent names are listed in
+`missing_metrics` and represented as `None`. The three gauges are used to
+synchronize running requests, waiting requests (the `EndpointState.queue_depth`
+mapping), and KV occupancy only when present. A successful scrape marks the
+endpoint healthy and advances its last-update timestamp. A connection, HTTP,
+parse, or mapping failure marks it unhealthy but retains the registry entry,
+last successful timestamp, and last known gauge values.
+
+`model_name` is selected explicitly when configured. Without configuration, a
+single model label can be inferred, while multiple model series fail clearly
+instead of being combined. `request_success_total` is summed over configured
+successful finish reasons; the default includes `stop` and `length` and
+deliberately excludes abort/error reasons.
+
+All listed metrics are optional at scrape/mapping time so version- or
+configuration-dependent omissions are visible rather than fatal. Eligibility
+requirements are policy-dependent: queue/running/KV state is updated only from
+present gauges, while the configured EWMA/P95/P99 policy requires its matching
+TTFT or TBT evidence. The scheduler default remains EWMA for compatibility; the
+included dry-run fixture explicitly selects window P99.
+
+### Cumulative counters and histogram windows
+
+Raw snapshots retain process-lifetime counters and histograms. A stateful
+tracker subtracts consecutive scrapes and only then derives token/request rates
+and recent latency. A first scrape establishes a baseline. A decreasing
+counter, decreasing bucket/count/sum, changed bucket layout, or non-positive
+interval invalidates the interval; no negative delta is emitted.
+
+Prometheus histogram buckets are cumulative both across bucket boundaries and
+over process lifetime. For example, if TTFT is:
+
+| scrape | <=50 ms | <=100 ms | <=200 ms | total |
+|---|---:|---:|---:|---:|
+| t0 | 10 | 20 | 20 | 20 |
+| t1 | 15 | 28 | 30 | 30 |
+| t1-t0 window | 5 | 8 | 10 | 10 |
+
+then the recent window has ten observations. Both P95 and P99 first reach their
+targets in the finite 200 ms bucket, so this implementation reports a
+conservative bucket upper bound of 200 ms. These are bucket-resolution
+approximations, not exact request-level percentiles. If a quantile is reached
+only in `+Inf`, it remains unknown. The fraction above an SLO is returned only
+when the SLO exactly matches a bucket boundary; an SLO inside a bucket returns
+`None` rather than an invented exact percentage.
 
 ### Raw samples and EWMA
 
@@ -139,7 +227,7 @@ running-request, KV-cache, token, and completion measurements. Missing metrics
 remain unknown. They are never filled from another metric or from an offline
 model.
 
-For each available metric, the aggregator applies:
+For each available scalar metric, the aggregator applies:
 
 ```text
 m_t = alpha*x_t + (1-alpha)*m_(t-1)
@@ -147,7 +235,10 @@ m_t = alpha*x_t + (1-alpha)*m_(t-1)
 
 The first observation initializes the value and `None` does not update it.
 `alpha` is configuration, not a research conclusion. **EWMA summarizes recent
-observed behavior; it does not predict unobserved configurations.**
+latency level and smooths noise; it is not equivalent to P95/P99 SLO evidence**
+and does not predict unobserved configurations. The snapshot therefore retains
+both EWMA TTFT/TBT/TPOT and the latest valid window's TTFT/TBT P95/P99, sample
+counts, token/request rates, latency-observation timestamp, and age.
 
 Energy semantics remain explicit:
 
@@ -164,10 +255,14 @@ Energy semantics remain explicit:
 
 `FeedbackScheduler.choose_route()` first considers healthy, `ACTIVE` endpoints.
 It rejects instantaneous queue/KV pressure, unsupported observed frequencies,
-and P/D pairs without exact connector/TP compatibility evidence. Prefill needs
-sufficient EWMA TTFT evidence below `safety_fraction * TTFT_SLO`. Decode uses
-EWMA TBT when available, otherwise configured EWMA TPOT. Never-observed or
-insufficiently observed endpoints are not considered measured-safe.
+and P/D pairs without exact connector/TP compatibility evidence. Prefill and
+decode safety can independently select EWMA, recent-window P95, or recent-window
+P99. Tail policies require `min_tail_samples`. Every policy also requires a
+latency observation no older than `telemetry_max_age_s`; never-observed,
+insufficient, or stale endpoints are not considered measured-safe. A stale
+example is an observation at t=1 evaluated at t=100 with a 30-second maximum:
+the pair is rejected as `<endpoint>_telemetry_stale`, while only the separately
+validated configured fallback may bypass missing/stale latency evidence.
 
 Safe pairs with energy/request observations on both endpoints are ranked by
 `P energy/request + D energy/request`. KV-transfer energy is an explicit future
@@ -175,7 +270,9 @@ term and is currently omitted. Energy/output-token is collected but is not
 mixed into this score because phase/workload comparability has not been
 established. When no candidate has comparable per-request energy, endpoint IDs
 provide a deterministic ordering rather than an invented power-to-energy
-conversion.
+conversion. The optional `workload_context_key` is carried through candidate
+evaluation for future accounting only; current energy history is not filtered
+or normalized by it.
 
 If no measured-safe route exists, the scheduler uses the fully configured
 fallback P/D endpoints and frequencies. The fallback may bypass missing
@@ -190,15 +287,61 @@ immutable recommendation containing the observed current frequency and the
 requested target frequency; it never executes a clock change.
 
 - Missing telemetry produces `HOLD`.
-- Latency or queue/KV pressure produces a one-level `STEP_UP`.
+- Latency above the configurable upshift fraction, or queue/KV pressure,
+  produces a one-level `STEP_UP`.
 - Severe configured pressure may produce `FALLBACK_MAX`.
-- Large measured SLO headroom with low pressure produces a one-level
-  `STEP_DOWN`.
-- The moderate region and minimum/maximum boundaries produce `HOLD`.
+- Latency at or below the configurable downshift fraction with low pressure
+  produces a one-level `STEP_DOWN`.
+- The gap between downshift and upshift thresholds is a hysteresis `HOLD`
+  region; validation requires `0 < downshift < upshift <= 1`.
+- After a non-`HOLD` recommendation, `dvfs_min_dwell_s` suppresses normal
+  repeated changes. Emergency SLO/queue/KV pressure and `FALLBACK_MAX` may
+  bypass this cooldown.
+- Minimum/maximum boundaries produce `HOLD`.
 
 Every target is a real member of the endpoint GPU type's allowed-frequency set.
 The observed and requested frequencies remain separate because a future
-actuator may be delayed or fail readback verification.
+actuator may be delayed or fail readback verification. Dry-run recommendation
+history records only recommendation time; it never writes the hypothetical
+target back into observed `EndpointState.freq_mhz`.
+
+### Dry-run controller and replay
+
+`DryRunController` iterates an arbitrary multi-node inventory, scrapes each
+endpoint, updates only present observed gauges, feeds valid windows to the
+existing aggregator, invokes the existing scheduler, and emits compact JSONL.
+Every record includes endpoint identity/state/freshness, all P/D eligibility
+results and reasons, an optional energy score and context key, selected
+hypothetical route, fallback status, and hypothetical DVFS recommendations.
+Raw histogram buckets are omitted by default and `actuated` is always `false`.
+
+The included six-endpoint replay can be run without CUDA, network access, or a
+vLLM process:
+
+```bash
+PYTHONPATH=paper/scripts .venv/bin/python -m xpyd.dry_run_controller \
+  --config tests/fixtures/vllm_metrics/dry_run_config.json \
+  --fixture-manifest tests/fixtures/vllm_metrics/dry_run_manifest.json \
+  --output /tmp/xpyd-dry-run.jsonl
+```
+
+Live read-only observation uses the same command without `--fixture-manifest`
+and honors `--interval` and `--duration`. Fixture text goes through the exact
+same parser and collector mapping as an HTTP response.
+
+### Energy and request-context limits
+
+vLLM `/metrics` provides serving latency, queue, token, completion, and KV
+signals; it does **not** provide the GPU energy measurements required for
+endpoint energy ranking. It never populates `power_w` or `energy_j`. The
+physical benchmark's NVML/hardware energy counter remains a separate source;
+real GPU/NVML or external-meter integration is future work.
+
+Current endpoint energy history is also not normalized by request/workload
+context. Comparing an endpoint serving mostly short prompts with one serving
+long prompts is therefore not fair energy evidence. Energy-based ranking is an
+experimental placeholder until context-aware accounting is added; no bucketing,
+ML, bandit, or exploration mechanism is introduced here.
 
 ### Deterministic CPU example
 
@@ -225,11 +368,11 @@ PYTHONPATH=paper/scripts .venv/bin/python -m xpyd.feedback_example
 
 ### Future interfaces, not implementations
 
-Future work needs interfaces for a real vLLM telemetry collector, NVML or
-external-wattmeter energy collection, NIXL KV-transfer telemetry,
+Future work needs interfaces for NVML or external-wattmeter energy collection,
+NIXL KV-transfer telemetry,
 topology-aware transfer cost, a clock actuator with readback, safe exploration,
 contextual bandits, and model-assisted counterfactual prediction. None is part
-of this feedback-only reference controller.
+of this non-actuating reference controller.
 
 ## Canonical-model provenance and reuse
 
@@ -321,8 +464,8 @@ Running 1 windows at SLO_TTFT = 500 ms (TPOT = 200 ms)
 KeyboardInterrupt in schedulers/sweep.py model evaluation
 ```
 
-Before the telemetry/feedback extension on 2026-08-18, the existing XpYd suite
-again passed all 11 tests. The original mock emitted P2->D0 and P0->D2, and the
+Before the live `/metrics` extension on 2026-08-18, the existing XpYd suite
+passed all 44 tests. The original mock emitted P2->D0 and P0->D2, and the
 one-request static-disaggregation smoke remained `1366.8 W`, SLO-met, A->B.
 The canonical model and result tree hashes were respectively
 `c5231b3d3b12a7f4cf101dbcdb3703bf9c55c8ec` and
@@ -331,7 +474,8 @@ The canonical model and result tree hashes were respectively
 ## Remaining implementation work
 
 - A vLLM launcher and endpoint lifecycle manager for the slow knobs.
-- Live health, queue, request, KV-cache, power, and clock telemetry.
+- Real GPU power/energy and verified clock-readback telemetry (vLLM runtime
+  health/queue/request/KV observation is now implemented read-only).
 - Measured NIXL/NCCL compatibility rows for cross-TP correctness, plus a
   separate topology-aware KV-transfer performance profile.
 - A privileged, verified DVFS actuator with rollback and clock-readback.

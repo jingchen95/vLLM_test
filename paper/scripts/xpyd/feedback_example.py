@@ -63,6 +63,7 @@ def build_feedback_example() -> FeedbackScheduler:
             fallback_prefill_freq_mhz=1600,
             fallback_decode_freq_mhz=1600,
         ),
+        clock=lambda: 1.0,
     )
 
 

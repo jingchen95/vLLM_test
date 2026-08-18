@@ -1,0 +1,3 @@
+vllm:num_requests_running{model_name="model-a"} 0
+vllm:prompt_tokens_total{model_name="model-a"} 1300
+vllm:generation_tokens_total{model_name="model-a"} 650

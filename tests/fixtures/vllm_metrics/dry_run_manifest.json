@@ -1,0 +1,26 @@
+{
+  "frames": [
+    {
+      "timestamp_s": 100.0,
+      "metrics": {
+        "P0": "normal_t0.prom",
+        "P1": "normal_t0.prom",
+        "P2": "normal_t0.prom",
+        "D0": "normal_t0.prom",
+        "D1": "normal_t0.prom",
+        "D2": "normal_t0.prom"
+      }
+    },
+    {
+      "timestamp_s": 110.0,
+      "metrics": {
+        "P0": "normal_t1.prom",
+        "P1": "high_pressure.prom",
+        "P2": "normal_t1.prom",
+        "D0": "normal_t1.prom",
+        "D1": "tail_pressure.prom",
+        "D2": "normal_t1.prom"
+      }
+    }
+  ]
+}

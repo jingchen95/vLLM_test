@@ -1,0 +1,35 @@
+# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running{model_name="model-a"} 2
+# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting{model_name="model-a"} 1
+# TYPE vllm:kv_cache_usage_perc gauge
+vllm:kv_cache_usage_perc{model_name="model-a"} 0.40
+# TYPE vllm:prompt_tokens_total counter
+vllm:prompt_tokens_total{model_name="model-a"} 1200
+# TYPE vllm:generation_tokens_total counter
+vllm:generation_tokens_total{model_name="model-a"} 620
+# TYPE vllm:request_success_total counter
+vllm:request_success_total{model_name="model-a",finished_reason="stop"} 25
+vllm:request_success_total{model_name="model-a",finished_reason="length"} 3
+vllm:request_success_total{model_name="model-a",finished_reason="abort"} 2
+# TYPE vllm:time_to_first_token_seconds histogram
+vllm:time_to_first_token_seconds_bucket{model_name="model-a",le="0.05"} 15
+vllm:time_to_first_token_seconds_bucket{model_name="model-a",le="0.1"} 28
+vllm:time_to_first_token_seconds_bucket{model_name="model-a",le="0.2"} 30
+vllm:time_to_first_token_seconds_bucket{model_name="model-a",le="0.5"} 30
+vllm:time_to_first_token_seconds_bucket{model_name="model-a",le="+Inf"} 30
+vllm:time_to_first_token_seconds_count{model_name="model-a"} 30
+vllm:time_to_first_token_seconds_sum{model_name="model-a"} 1.9
+# TYPE vllm:inter_token_latency_seconds histogram
+vllm:inter_token_latency_seconds_bucket{model_name="model-a",le="0.02"} 16
+vllm:inter_token_latency_seconds_bucket{model_name="model-a",le="0.05"} 55
+vllm:inter_token_latency_seconds_bucket{model_name="model-a",le="0.1"} 70
+vllm:inter_token_latency_seconds_bucket{model_name="model-a",le="0.2"} 70
+vllm:inter_token_latency_seconds_bucket{model_name="model-a",le="+Inf"} 70
+vllm:inter_token_latency_seconds_count{model_name="model-a"} 70
+vllm:inter_token_latency_seconds_sum{model_name="model-a"} 2.8
+# TYPE vllm:request_queue_time_seconds histogram
+vllm:request_queue_time_seconds_bucket{model_name="model-a",le="0.01"} 26
+vllm:request_queue_time_seconds_bucket{model_name="model-a",le="+Inf"} 28
+vllm:request_queue_time_seconds_count{model_name="model-a"} 28
+vllm:request_queue_time_seconds_sum{model_name="model-a"} 0.18

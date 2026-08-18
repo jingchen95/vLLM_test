@@ -1,0 +1,13 @@
+vllm:num_requests_running{model_name="model-a"} 8
+vllm:num_requests_waiting{model_name="model-a"} 20
+vllm:kv_cache_usage_perc{model_name="model-a"} 0.98
+vllm:prompt_tokens_total{model_name="model-a"} 1400
+vllm:generation_tokens_total{model_name="model-a"} 700
+vllm:request_success_total{model_name="model-a",finished_reason="stop"} 30
+vllm:time_to_first_token_seconds_bucket{model_name="model-a",le="0.05"} 16
+vllm:time_to_first_token_seconds_bucket{model_name="model-a",le="0.1"} 29
+vllm:time_to_first_token_seconds_bucket{model_name="model-a",le="0.2"} 31
+vllm:time_to_first_token_seconds_bucket{model_name="model-a",le="0.5"} 31
+vllm:time_to_first_token_seconds_bucket{model_name="model-a",le="+Inf"} 31
+vllm:time_to_first_token_seconds_count{model_name="model-a"} 31
+vllm:time_to_first_token_seconds_sum{model_name="model-a"} 1.97

@@ -182,6 +182,7 @@ def build_scheduler(
             min_samples=min_samples,
             **fallback_args,
         ),
+        clock=lambda: 2.0,
     )
     return runtime, telemetry, scheduler
 
@@ -253,6 +254,7 @@ class FeedbackRoutingTests(unittest.TestCase):
                 tbt_slo_ms=100,
                 tpot_slo_ms=100,
             ),
+            clock=lambda: 1.0,
         )
         self.assertIn(("P2", "D0"), candidate_ids(scheduler))
 

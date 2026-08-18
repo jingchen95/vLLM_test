@@ -3,7 +3,8 @@
 from dataclasses import dataclass
 from enum import Enum
 import math
-from typing import Optional, Tuple
+import time
+from typing import Callable, Dict, Optional, Tuple
 
 from xpyd.compatibility import CompatibilityTable
 from xpyd.hardware import HardwareProfile
@@ -23,6 +24,12 @@ class DVFSAction(str, Enum):
     FALLBACK_MAX = "FALLBACK_MAX"
 
 
+class LatencySafetyMetric(str, Enum):
+    EWMA = "ewma"
+    WINDOW_P95 = "window_p95"
+    WINDOW_P99 = "window_p99"
+
+
 @dataclass(frozen=True)
 class DVFSRecommendation:
     endpoint_id: str
@@ -38,6 +45,18 @@ class RouteCandidate:
     decode_endpoint_id: str
     energy_per_request_j: Optional[float]
     ranking_basis: str
+    workload_context_key: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class RouteEvaluation:
+    prefill_endpoint_id: str
+    decode_endpoint_id: str
+    eligible: bool
+    reason: str
+    energy_per_request_j: Optional[float]
+    ranking_basis: str
+    workload_context_key: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -47,6 +66,10 @@ class FeedbackSchedulerConfig:
     tpot_slo_ms: Optional[float] = None
     safety_fraction: float = 0.8
     min_samples: int = 1
+    prefill_safety_metric: LatencySafetyMetric = LatencySafetyMetric.EWMA
+    decode_safety_metric: LatencySafetyMetric = LatencySafetyMetric.EWMA
+    min_tail_samples: int = 20
+    telemetry_max_age_s: float = 30.0
     max_queue_depth: int = 8
     max_kv_cache_usage_frac: float = 0.90
     fallback_prefill_endpoint_id: Optional[str] = None
@@ -60,6 +83,7 @@ class FeedbackSchedulerConfig:
     severe_queue_depth: int = 16
     severe_kv_cache_usage_frac: float = 0.97
     severe_pressure_to_max: bool = True
+    dvfs_min_dwell_s: float = 0.0
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.ttft_slo_ms) or self.ttft_slo_ms <= 0:
@@ -76,6 +100,23 @@ class FeedbackSchedulerConfig:
             raise ValueError("safety_fraction must be in (0, 1]")
         if not isinstance(self.min_samples, int) or self.min_samples <= 0:
             raise ValueError("min_samples must be a positive integer")
+        if not isinstance(self.min_tail_samples, int) or self.min_tail_samples <= 0:
+            raise ValueError("min_tail_samples must be a positive integer")
+        for field_name in ("prefill_safety_metric", "decode_safety_metric"):
+            raw_metric = getattr(self, field_name)
+            try:
+                metric = (
+                    raw_metric
+                    if isinstance(raw_metric, LatencySafetyMetric)
+                    else LatencySafetyMetric(raw_metric)
+                )
+            except ValueError as exc:
+                raise ValueError("invalid %s" % field_name) from exc
+            object.__setattr__(self, field_name, metric)
+        if not math.isfinite(self.telemetry_max_age_s) or self.telemetry_max_age_s <= 0:
+            raise ValueError("telemetry_max_age_s must be positive")
+        if not math.isfinite(self.dvfs_min_dwell_s) or self.dvfs_min_dwell_s < 0:
+            raise ValueError("dvfs_min_dwell_s cannot be negative")
         if self.max_queue_depth < 0 or self.dvfs_low_queue_depth < 0:
             raise ValueError("queue thresholds cannot be negative")
         if self.severe_queue_depth < self.max_queue_depth:
@@ -134,58 +175,90 @@ class FeedbackScheduler:
         telemetry: TelemetryAggregator,
         hardware: HardwareProfile,
         config: FeedbackSchedulerConfig,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         self.registry = registry
         self.compatibility = compatibility
         self.telemetry = telemetry
         self.hardware = hardware
         self.config = config
+        self.clock = clock
+        # Dry-run recommendation history is deliberately separate from the
+        # observed EndpointState: a recommendation is not an applied clock.
+        self._last_dvfs_recommendation_s: Dict[str, float] = {}
 
-    def eligible_routes(self) -> Tuple[RouteCandidate, ...]:
-        """Return measured-safe compatible pairs in deterministic rank order."""
+    def evaluate_routes(
+        self,
+        now_s: Optional[float] = None,
+        workload_context_key: Optional[str] = None,
+    ) -> Tuple[RouteEvaluation, ...]:
+        """Explain every registered P/D pair without changing runtime state."""
 
+        now_s = self.clock() if now_s is None else now_s
         prefill_endpoints = sorted(
-            self.registry.healthy_active("prefill"),
+            self.registry.list_by_role("prefill"),
             key=lambda endpoint: endpoint.endpoint_id,
         )
         decode_endpoints = sorted(
-            self.registry.healthy_active("decode"),
+            self.registry.list_by_role("decode"),
             key=lambda endpoint: endpoint.endpoint_id,
         )
-        safe_prefill = [
-            endpoint for endpoint in prefill_endpoints
-            if self._hard_safe(endpoint, require_current_frequency=True)
-            and self._latency_safe(endpoint)
-        ]
-        safe_decode = [
-            endpoint for endpoint in decode_endpoints
-            if self._hard_safe(endpoint, require_current_frequency=True)
-            and self._latency_safe(endpoint)
-        ]
+        evaluations = []
+        for prefill in prefill_endpoints:
+            for decode in decode_endpoints:
+                rejection = self._hard_safety_reason(prefill, require_current_frequency=True)
+                if rejection is None:
+                    rejection = self._hard_safety_reason(decode, require_current_frequency=True)
+                if rejection is None and not self.compatibility.is_compatible(prefill, decode):
+                    rejection = "missing_or_unsupported_connector_compatibility"
+                if rejection is None:
+                    rejection = self._latency_safety_reason(prefill, now_s)
+                if rejection is None:
+                    rejection = self._latency_safety_reason(decode, now_s)
 
-        candidates = []
-        for prefill in safe_prefill:
-            prefill_snapshot = self.telemetry.snapshot(prefill.endpoint_id)
-            for decode in safe_decode:
-                if not self.compatibility.is_compatible(prefill, decode):
-                    continue
-                decode_snapshot = self.telemetry.snapshot(decode.endpoint_id)
-                pair_energy = self._pair_energy_per_request(
-                    prefill_snapshot,
-                    decode_snapshot,
-                )
-                candidates.append(
-                    RouteCandidate(
+                pair_energy = None
+                ranking_basis = "ineligible"
+                if rejection is None:
+                    pair_energy = self._pair_energy_per_request(
+                        self.telemetry.snapshot(prefill.endpoint_id, now_s=now_s),
+                        self.telemetry.snapshot(decode.endpoint_id, now_s=now_s),
+                    )
+                    ranking_basis = (
+                        "measured_energy_per_request"
+                        if pair_energy is not None
+                        else "deterministic_endpoint_ids"
+                    )
+                evaluations.append(
+                    RouteEvaluation(
                         prefill_endpoint_id=prefill.endpoint_id,
                         decode_endpoint_id=decode.endpoint_id,
+                        eligible=rejection is None,
+                        reason="eligible" if rejection is None else rejection,
                         energy_per_request_j=pair_energy,
-                        ranking_basis=(
-                            "measured_energy_per_request"
-                            if pair_energy is not None
-                            else "deterministic_endpoint_ids"
-                        ),
+                        ranking_basis=ranking_basis,
+                        workload_context_key=workload_context_key,
                     )
                 )
+        return tuple(evaluations)
+
+    def eligible_routes(
+        self,
+        now_s: Optional[float] = None,
+        workload_context_key: Optional[str] = None,
+    ) -> Tuple[RouteCandidate, ...]:
+        """Return measured-safe compatible pairs in deterministic rank order."""
+
+        candidates = [
+            RouteCandidate(
+                prefill_endpoint_id=evaluation.prefill_endpoint_id,
+                decode_endpoint_id=evaluation.decode_endpoint_id,
+                energy_per_request_j=evaluation.energy_per_request_j,
+                ranking_basis=evaluation.ranking_basis,
+                workload_context_key=evaluation.workload_context_key,
+            )
+            for evaluation in self.evaluate_routes(now_s, workload_context_key)
+            if evaluation.eligible
+        ]
 
         candidates.sort(
             key=lambda candidate: (
@@ -199,8 +272,12 @@ class FeedbackScheduler:
         )
         return tuple(candidates)
 
-    def choose_route(self) -> RoutingDecision:
-        candidates = self.eligible_routes()
+    def choose_route(
+        self,
+        now_s: Optional[float] = None,
+        workload_context_key: Optional[str] = None,
+    ) -> RoutingDecision:
+        candidates = self.eligible_routes(now_s, workload_context_key)
         if not candidates:
             return self._fallback_decision()
         selected = candidates[0]
@@ -216,9 +293,14 @@ class FeedbackScheduler:
             decode_freq_mhz=decode_state.freq_mhz,
         )
 
-    def choose_frequency_adjustment(self, endpoint_id: str) -> DVFSRecommendation:
+    def choose_frequency_adjustment(
+        self,
+        endpoint_id: str,
+        now_s: Optional[float] = None,
+    ) -> DVFSRecommendation:
         """Recommend, but never execute, one supported frequency action."""
 
+        now_s = self.clock() if now_s is None else now_s
         endpoint = self.registry.get_spec(endpoint_id)
         state = self.registry.get_state(endpoint_id)
         self.hardware.validate_endpoint(endpoint)
@@ -226,19 +308,36 @@ class FeedbackScheduler:
         current = state.freq_mhz
 
         if current not in allowed:
-            return DVFSRecommendation(
+            return self._recommend(
                 endpoint_id=endpoint_id,
                 current_freq_mhz=current,
                 target_freq_mhz=allowed[-1],
                 action=DVFSAction.FALLBACK_MAX,
                 reason="observed frequency is absent or unsupported; request a known safe maximum",
+                now_s=now_s,
             )
         if not state.healthy or state.lifecycle != LifecycleState.ACTIVE:
             return self._hold(endpoint_id, current, "endpoint is not healthy and ACTIVE")
 
-        snapshot = self.telemetry.snapshot(endpoint_id)
-        metric, slo_ms, metric_name = self._latency_metric(endpoint, snapshot)
-        if snapshot.sample_count < self.config.min_samples or metric is None or slo_ms is None:
+        snapshot = self.telemetry.snapshot(endpoint_id, now_s=now_s)
+        metric, slo_ms, metric_name, tail_count, observed_at_s = self._latency_metric(
+            endpoint, snapshot
+        )
+        if (
+            observed_at_s is None
+            or now_s - observed_at_s > self.config.telemetry_max_age_s
+        ):
+            return self._hold(endpoint_id, current, "latency telemetry is missing or stale")
+        selected_policy = self._safety_metric_for(endpoint)
+        if (
+            snapshot.sample_count < self.config.min_samples
+            or metric is None
+            or slo_ms is None
+            or (
+                selected_policy != LatencySafetyMetric.EWMA
+                and tail_count < self.config.min_tail_samples
+            )
+        ):
             return self._hold(endpoint_id, current, "insufficient measured latency telemetry")
 
         severe_pressure = (
@@ -246,12 +345,13 @@ class FeedbackScheduler:
             or state.kv_cache_usage_frac >= self.config.severe_kv_cache_usage_frac
         )
         if severe_pressure and self.config.severe_pressure_to_max:
-            return DVFSRecommendation(
+            return self._recommend(
                 endpoint_id=endpoint_id,
                 current_freq_mhz=current,
                 target_freq_mhz=allowed[-1],
                 action=DVFSAction.FALLBACK_MAX,
                 reason="severe queue/KV pressure; request maximum supported frequency",
+                now_s=now_s,
             )
 
         pressure = (
@@ -267,12 +367,20 @@ class FeedbackScheduler:
                     current,
                     "%s/queue/KV pressure, already at maximum frequency" % metric_name,
                 )
-            return DVFSRecommendation(
+            emergency = (
+                metric > slo_ms
+                or state.queue_depth > self.config.max_queue_depth
+                or state.kv_cache_usage_frac > self.config.max_kv_cache_usage_frac
+            )
+            if not emergency and self._cooldown_active(endpoint_id, now_s):
+                return self._hold(endpoint_id, current, "DVFS minimum dwell time is active")
+            return self._recommend(
                 endpoint_id=endpoint_id,
                 current_freq_mhz=current,
                 target_freq_mhz=allowed[current_index + 1],
                 action=DVFSAction.STEP_UP,
                 reason="%s or runtime pressure crossed the step-up threshold" % metric_name,
+                now_s=now_s,
             )
 
         large_slack = (
@@ -287,57 +395,146 @@ class FeedbackScheduler:
                     current,
                     "large SLO slack, already at minimum supported frequency",
                 )
-            return DVFSRecommendation(
+            if self._cooldown_active(endpoint_id, now_s):
+                return self._hold(endpoint_id, current, "DVFS minimum dwell time is active")
+            return self._recommend(
                 endpoint_id=endpoint_id,
                 current_freq_mhz=current,
                 target_freq_mhz=allowed[current_index - 1],
                 action=DVFSAction.STEP_DOWN,
                 reason="large measured SLO headroom and low queue/KV pressure",
+                now_s=now_s,
             )
 
         return self._hold(endpoint_id, current, "moderate measured operating region")
 
     def _hard_safe(self, endpoint: EndpointSpec, require_current_frequency: bool) -> bool:
+        return self._hard_safety_reason(endpoint, require_current_frequency) is None
+
+    def _hard_safety_reason(
+        self,
+        endpoint: EndpointSpec,
+        require_current_frequency: bool,
+    ) -> Optional[str]:
         state = self.registry.get_state(endpoint.endpoint_id)
-        if not state.healthy or state.lifecycle != LifecycleState.ACTIVE:
-            return False
+        if not state.healthy:
+            return "%s_unhealthy" % endpoint.endpoint_id
+        if state.lifecycle != LifecycleState.ACTIVE:
+            return "%s_not_active" % endpoint.endpoint_id
         if state.queue_depth > self.config.max_queue_depth:
-            return False
+            return "%s_queue_pressure" % endpoint.endpoint_id
         if state.kv_cache_usage_frac > self.config.max_kv_cache_usage_frac:
-            return False
+            return "%s_kv_pressure" % endpoint.endpoint_id
         try:
             self.hardware.validate_endpoint(endpoint)
         except (KeyError, ValueError):
-            return False
+            return "%s_hardware_profile_invalid" % endpoint.endpoint_id
         if require_current_frequency:
             allowed = self.hardware.gpu_type(endpoint.gpu_type).allowed_frequencies_mhz
             if state.freq_mhz not in allowed:
-                return False
-        return True
+                return "%s_frequency_unsupported" % endpoint.endpoint_id
+        return None
 
-    def _latency_safe(self, endpoint: EndpointSpec) -> bool:
-        snapshot = self.telemetry.snapshot(endpoint.endpoint_id)
+    def _latency_safe(self, endpoint: EndpointSpec, now_s: Optional[float] = None) -> bool:
+        now_s = self.clock() if now_s is None else now_s
+        return self._latency_safety_reason(endpoint, now_s) is None
+
+    def _latency_safety_reason(
+        self,
+        endpoint: EndpointSpec,
+        now_s: float,
+    ) -> Optional[str]:
+        snapshot = self.telemetry.snapshot(endpoint.endpoint_id, now_s=now_s)
         if snapshot.sample_count < self.config.min_samples:
-            return False
-        metric, slo_ms, _ = self._latency_metric(endpoint, snapshot)
+            return "%s_insufficient_samples" % endpoint.endpoint_id
+        metric, slo_ms, _, tail_count, observed_at_s = self._latency_metric(
+            endpoint, snapshot
+        )
+        if observed_at_s is None:
+            return "%s_latency_missing" % endpoint.endpoint_id
+        if now_s - observed_at_s > self.config.telemetry_max_age_s:
+            return "%s_telemetry_stale" % endpoint.endpoint_id
+        if metric is None or slo_ms is None:
+            return "%s_selected_latency_metric_missing" % endpoint.endpoint_id
+        if (
+            self._safety_metric_for(endpoint) != LatencySafetyMetric.EWMA
+            and tail_count < self.config.min_tail_samples
+        ):
+            return "%s_insufficient_tail_samples" % endpoint.endpoint_id
+        if metric > self.config.safety_fraction * slo_ms:
+            return "%s_latency_margin_exceeded" % endpoint.endpoint_id
+        return None
+
+    def _safety_metric_for(self, endpoint: EndpointSpec) -> LatencySafetyMetric:
         return (
-            metric is not None
-            and slo_ms is not None
-            and metric <= self.config.safety_fraction * slo_ms
+            self.config.prefill_safety_metric
+            if endpoint.role == "prefill"
+            else self.config.decode_safety_metric
         )
 
     def _latency_metric(
         self,
         endpoint: EndpointSpec,
         snapshot: EndpointTelemetrySnapshot,
-    ) -> Tuple[Optional[float], Optional[float], str]:
+    ) -> Tuple[Optional[float], Optional[float], str, int, Optional[float]]:
+        policy = self._safety_metric_for(endpoint)
         if endpoint.role == "prefill":
-            return snapshot.ewma_ttft_ms, self.config.ttft_slo_ms, "TTFT"
+            if policy == LatencySafetyMetric.WINDOW_P95:
+                return (
+                    snapshot.window_ttft_p95_ms,
+                    self.config.ttft_slo_ms,
+                    "window P95 TTFT",
+                    snapshot.window_ttft_count,
+                    snapshot.last_ttft_observation_s,
+                )
+            if policy == LatencySafetyMetric.WINDOW_P99:
+                return (
+                    snapshot.window_ttft_p99_ms,
+                    self.config.ttft_slo_ms,
+                    "window P99 TTFT",
+                    snapshot.window_ttft_count,
+                    snapshot.last_ttft_observation_s,
+                )
+            return (
+                snapshot.ewma_ttft_ms,
+                self.config.ttft_slo_ms,
+                "EWMA TTFT",
+                0,
+                snapshot.last_ttft_observation_s,
+            )
+        if policy == LatencySafetyMetric.WINDOW_P95:
+            return (
+                snapshot.window_tbt_p95_ms,
+                self.config.tbt_slo_ms,
+                "window P95 TBT",
+                snapshot.window_tbt_count,
+                snapshot.last_tbt_observation_s,
+            )
+        if policy == LatencySafetyMetric.WINDOW_P99:
+            return (
+                snapshot.window_tbt_p99_ms,
+                self.config.tbt_slo_ms,
+                "window P99 TBT",
+                snapshot.window_tbt_count,
+                snapshot.last_tbt_observation_s,
+            )
         if self.config.tbt_slo_ms is not None and snapshot.ewma_tbt_ms is not None:
-            return snapshot.ewma_tbt_ms, self.config.tbt_slo_ms, "TBT"
+            return (
+                snapshot.ewma_tbt_ms,
+                self.config.tbt_slo_ms,
+                "EWMA TBT",
+                0,
+                snapshot.last_tbt_observation_s,
+            )
         if self.config.tpot_slo_ms is not None and snapshot.ewma_tpot_ms is not None:
-            return snapshot.ewma_tpot_ms, self.config.tpot_slo_ms, "TPOT"
-        return None, None, "decode latency"
+            return (
+                snapshot.ewma_tpot_ms,
+                self.config.tpot_slo_ms,
+                "EWMA TPOT",
+                0,
+                snapshot.last_tpot_observation_s,
+            )
+        return None, None, "decode latency", 0, None
 
     @staticmethod
     def _pair_energy_per_request(
@@ -379,6 +576,35 @@ class FeedbackScheduler:
             decode_endpoint_id=decode.endpoint_id,
             prefill_freq_mhz=self.config.fallback_prefill_freq_mhz,
             decode_freq_mhz=self.config.fallback_decode_freq_mhz,
+        )
+
+    def last_dvfs_recommendation_time(self, endpoint_id: str) -> Optional[float]:
+        return self._last_dvfs_recommendation_s.get(endpoint_id)
+
+    def _cooldown_active(self, endpoint_id: str, now_s: float) -> bool:
+        previous = self._last_dvfs_recommendation_s.get(endpoint_id)
+        return (
+            previous is not None
+            and now_s - previous < self.config.dvfs_min_dwell_s
+        )
+
+    def _recommend(
+        self,
+        endpoint_id: str,
+        current_freq_mhz: Optional[int],
+        target_freq_mhz: int,
+        action: DVFSAction,
+        reason: str,
+        now_s: float,
+    ) -> DVFSRecommendation:
+        if action != DVFSAction.HOLD:
+            self._last_dvfs_recommendation_s[endpoint_id] = now_s
+        return DVFSRecommendation(
+            endpoint_id=endpoint_id,
+            current_freq_mhz=current_freq_mhz,
+            target_freq_mhz=target_freq_mhz,
+            action=action,
+            reason=reason,
         )
 
     @staticmethod

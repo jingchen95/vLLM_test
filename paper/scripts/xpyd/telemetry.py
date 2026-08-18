@@ -49,6 +49,15 @@ class EndpointTelemetrySample:
     ttft_ms: Optional[float] = None
     tbt_ms: Optional[float] = None
     tpot_ms: Optional[float] = None
+    window_ttft_p95_ms: Optional[float] = None
+    window_ttft_p99_ms: Optional[float] = None
+    window_tbt_p95_ms: Optional[float] = None
+    window_tbt_p99_ms: Optional[float] = None
+    window_ttft_count: int = 0
+    window_tbt_count: int = 0
+    window_prompt_tokens_per_s: Optional[float] = None
+    window_generation_tokens_per_s: Optional[float] = None
+    window_completed_requests_per_s: Optional[float] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.endpoint_id, str) or not self.endpoint_id.strip():
@@ -61,12 +70,24 @@ class EndpointTelemetrySample:
         _require_finite_nonnegative("ttft_ms", self.ttft_ms)
         _require_finite_nonnegative("tbt_ms", self.tbt_ms)
         _require_finite_nonnegative("tpot_ms", self.tpot_ms)
+        for name, value in (
+            ("window_ttft_p95_ms", self.window_ttft_p95_ms),
+            ("window_ttft_p99_ms", self.window_ttft_p99_ms),
+            ("window_tbt_p95_ms", self.window_tbt_p95_ms),
+            ("window_tbt_p99_ms", self.window_tbt_p99_ms),
+            ("window_prompt_tokens_per_s", self.window_prompt_tokens_per_s),
+            ("window_generation_tokens_per_s", self.window_generation_tokens_per_s),
+            ("window_completed_requests_per_s", self.window_completed_requests_per_s),
+        ):
+            _require_finite_nonnegative(name, value)
         _require_optional_count("queue_depth", self.queue_depth)
         _require_optional_count("running_requests", self.running_requests)
         for name, value in (
             ("input_tokens", self.input_tokens),
             ("output_tokens", self.output_tokens),
             ("completed_requests", self.completed_requests),
+            ("window_ttft_count", self.window_ttft_count),
+            ("window_tbt_count", self.window_tbt_count),
         ):
             _require_count(name, value)
         if self.interval_s is not None:
@@ -128,6 +149,20 @@ class EndpointTelemetrySnapshot:
     ewma_queue_depth: Optional[float]
     sample_count: int
     last_timestamp_s: Optional[float]
+    last_latency_observation_s: Optional[float]
+    last_ttft_observation_s: Optional[float]
+    last_tbt_observation_s: Optional[float]
+    last_tpot_observation_s: Optional[float]
+    last_observation_age_s: Optional[float]
+    window_ttft_p95_ms: Optional[float]
+    window_ttft_p99_ms: Optional[float]
+    window_tbt_p95_ms: Optional[float]
+    window_tbt_p99_ms: Optional[float]
+    window_ttft_count: int
+    window_tbt_count: int
+    window_prompt_tokens_per_s: Optional[float]
+    window_generation_tokens_per_s: Optional[float]
+    window_completed_requests_per_s: Optional[float]
 
 
 @dataclass
@@ -135,6 +170,19 @@ class _EndpointAccumulator:
     alpha: float
     sample_count: int = 0
     last_timestamp_s: Optional[float] = None
+    last_latency_observation_s: Optional[float] = None
+    last_ttft_observation_s: Optional[float] = None
+    last_tbt_observation_s: Optional[float] = None
+    last_tpot_observation_s: Optional[float] = None
+    window_ttft_p95_ms: Optional[float] = None
+    window_ttft_p99_ms: Optional[float] = None
+    window_tbt_p95_ms: Optional[float] = None
+    window_tbt_p99_ms: Optional[float] = None
+    window_ttft_count: int = 0
+    window_tbt_count: int = 0
+    window_prompt_tokens_per_s: Optional[float] = None
+    window_generation_tokens_per_s: Optional[float] = None
+    window_completed_requests_per_s: Optional[float] = None
     ttft: EWMA = field(init=False)
     tbt: EWMA = field(init=False)
     tpot: EWMA = field(init=False)
@@ -180,6 +228,51 @@ class TelemetryAggregator:
         accumulator.tpot.update(sample.tpot_ms)
         accumulator.power.update(sample.power_w)
         accumulator.queue_depth.update(sample.queue_depth)
+        if any(
+            value is not None
+            for value in (
+                sample.ttft_ms,
+                sample.tbt_ms,
+                sample.tpot_ms,
+                sample.window_ttft_p95_ms,
+                sample.window_ttft_p99_ms,
+                sample.window_tbt_p95_ms,
+                sample.window_tbt_p99_ms,
+            )
+        ):
+            accumulator.last_latency_observation_s = float(sample.timestamp_s)
+        if any(
+            value is not None
+            for value in (
+                sample.ttft_ms,
+                sample.window_ttft_p95_ms,
+                sample.window_ttft_p99_ms,
+            )
+        ):
+            accumulator.last_ttft_observation_s = float(sample.timestamp_s)
+        if any(
+            value is not None
+            for value in (
+                sample.tbt_ms,
+                sample.window_tbt_p95_ms,
+                sample.window_tbt_p99_ms,
+            )
+        ):
+            accumulator.last_tbt_observation_s = float(sample.timestamp_s)
+        if sample.tpot_ms is not None:
+            accumulator.last_tpot_observation_s = float(sample.timestamp_s)
+
+        # Window values describe the most recent interval, so a missing value
+        # clears the prior interval rather than silently reusing it.
+        accumulator.window_ttft_p95_ms = sample.window_ttft_p95_ms
+        accumulator.window_ttft_p99_ms = sample.window_ttft_p99_ms
+        accumulator.window_tbt_p95_ms = sample.window_tbt_p95_ms
+        accumulator.window_tbt_p99_ms = sample.window_tbt_p99_ms
+        accumulator.window_ttft_count = sample.window_ttft_count
+        accumulator.window_tbt_count = sample.window_tbt_count
+        accumulator.window_prompt_tokens_per_s = sample.window_prompt_tokens_per_s
+        accumulator.window_generation_tokens_per_s = sample.window_generation_tokens_per_s
+        accumulator.window_completed_requests_per_s = sample.window_completed_requests_per_s
 
         energy_per_request = None
         if sample.energy_j is not None and sample.completed_requests > 0:
@@ -200,7 +293,11 @@ class TelemetryAggregator:
         accumulator.last_timestamp_s = float(sample.timestamp_s)
         return self.snapshot(sample.endpoint_id)
 
-    def snapshot(self, endpoint_id: str) -> EndpointTelemetrySnapshot:
+    def snapshot(
+        self,
+        endpoint_id: str,
+        now_s: Optional[float] = None,
+    ) -> EndpointTelemetrySnapshot:
         accumulator = self._endpoints.get(endpoint_id)
         if accumulator is None:
             return EndpointTelemetrySnapshot(
@@ -215,7 +312,24 @@ class TelemetryAggregator:
                 ewma_queue_depth=None,
                 sample_count=0,
                 last_timestamp_s=None,
+                last_latency_observation_s=None,
+                last_ttft_observation_s=None,
+                last_tbt_observation_s=None,
+                last_tpot_observation_s=None,
+                last_observation_age_s=None,
+                window_ttft_p95_ms=None,
+                window_ttft_p99_ms=None,
+                window_tbt_p95_ms=None,
+                window_tbt_p99_ms=None,
+                window_ttft_count=0,
+                window_tbt_count=0,
+                window_prompt_tokens_per_s=None,
+                window_generation_tokens_per_s=None,
+                window_completed_requests_per_s=None,
             )
+        observation_age_s = None
+        if now_s is not None and accumulator.last_latency_observation_s is not None:
+            observation_age_s = max(0.0, now_s - accumulator.last_latency_observation_s)
         return EndpointTelemetrySnapshot(
             endpoint_id=endpoint_id,
             ewma_ttft_ms=accumulator.ttft.value,
@@ -228,6 +342,20 @@ class TelemetryAggregator:
             ewma_queue_depth=accumulator.queue_depth.value,
             sample_count=accumulator.sample_count,
             last_timestamp_s=accumulator.last_timestamp_s,
+            last_latency_observation_s=accumulator.last_latency_observation_s,
+            last_ttft_observation_s=accumulator.last_ttft_observation_s,
+            last_tbt_observation_s=accumulator.last_tbt_observation_s,
+            last_tpot_observation_s=accumulator.last_tpot_observation_s,
+            last_observation_age_s=observation_age_s,
+            window_ttft_p95_ms=accumulator.window_ttft_p95_ms,
+            window_ttft_p99_ms=accumulator.window_ttft_p99_ms,
+            window_tbt_p95_ms=accumulator.window_tbt_p95_ms,
+            window_tbt_p99_ms=accumulator.window_tbt_p99_ms,
+            window_ttft_count=accumulator.window_ttft_count,
+            window_tbt_count=accumulator.window_tbt_count,
+            window_prompt_tokens_per_s=accumulator.window_prompt_tokens_per_s,
+            window_generation_tokens_per_s=accumulator.window_generation_tokens_per_s,
+            window_completed_requests_per_s=accumulator.window_completed_requests_per_s,
         )
 
     def reset(self, endpoint_id: str) -> None:

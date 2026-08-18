@@ -1,0 +1,53 @@
+{
+  "gpu_types": [
+    {
+      "gpu_type": "fixture-gpu",
+      "allowed_frequencies_mhz": [800, 1200, 1600],
+      "max_frequency_mhz": 1600,
+      "nominal_tdp_w": 250.0,
+      "idle_power_w": 30.0,
+      "supported_tp_degrees": [1, 2]
+    }
+  ],
+  "nodes": [
+    {"node": "nodeA", "gpu_type": "fixture-gpu", "gpu_ids": [0, 1, 2, 3]},
+    {"node": "nodeB", "gpu_type": "fixture-gpu", "gpu_ids": [4, 5, 6, 7]}
+  ],
+  "endpoints": [
+    {"endpoint_id": "P0", "role": "prefill", "gpu_type": "fixture-gpu", "node": "nodeA", "gpu_ids": [0], "tp_degree": 1, "http_uri": "http://nodeA:8001", "kv_connector": "fixture-kv", "freq_mhz": 1600},
+    {"endpoint_id": "P1", "role": "prefill", "gpu_type": "fixture-gpu", "node": "nodeA", "gpu_ids": [1], "tp_degree": 1, "http_uri": "http://nodeA:8002", "kv_connector": "fixture-kv", "freq_mhz": 1600},
+    {"endpoint_id": "P2", "role": "prefill", "gpu_type": "fixture-gpu", "node": "nodeA", "gpu_ids": [2, 3], "tp_degree": 2, "http_uri": "http://nodeA:8003", "kv_connector": "fixture-kv", "freq_mhz": 1600},
+    {"endpoint_id": "D0", "role": "decode", "gpu_type": "fixture-gpu", "node": "nodeB", "gpu_ids": [4], "tp_degree": 1, "http_uri": "http://nodeB:8101", "kv_connector": "fixture-kv", "freq_mhz": 1600},
+    {"endpoint_id": "D1", "role": "decode", "gpu_type": "fixture-gpu", "node": "nodeB", "gpu_ids": [5], "tp_degree": 1, "http_uri": "http://nodeB:8102", "kv_connector": "fixture-kv", "freq_mhz": 1600},
+    {"endpoint_id": "D2", "role": "decode", "gpu_type": "fixture-gpu", "node": "nodeB", "gpu_ids": [6, 7], "tp_degree": 2, "http_uri": "http://nodeB:8103", "kv_connector": "fixture-kv", "freq_mhz": 1600}
+  ],
+  "compatibility": [
+    {"connector": "fixture-kv", "prefill_tp": 1, "decode_tp": 1, "supported": true, "reason": "fixture coverage"},
+    {"connector": "fixture-kv", "prefill_tp": 1, "decode_tp": 2, "supported": true, "reason": "fixture coverage"},
+    {"connector": "fixture-kv", "prefill_tp": 2, "decode_tp": 1, "supported": true, "reason": "fixture coverage"},
+    {"connector": "fixture-kv", "prefill_tp": 2, "decode_tp": 2, "supported": true, "reason": "fixture coverage"}
+  ],
+  "scheduler": {
+    "ttft_slo_ms": 500.0,
+    "tbt_slo_ms": 200.0,
+    "safety_fraction": 0.8,
+    "prefill_safety_metric": "window_p99",
+    "decode_safety_metric": "window_p99",
+    "min_tail_samples": 5,
+    "telemetry_max_age_s": 30.0,
+    "max_queue_depth": 8,
+    "max_kv_cache_usage_frac": 0.9,
+    "fallback_prefill_endpoint_id": "P2",
+    "fallback_decode_endpoint_id": "D0",
+    "fallback_prefill_freq_mhz": 1600,
+    "fallback_decode_freq_mhz": 1600,
+    "dvfs_step_down_fraction": 0.6,
+    "dvfs_step_up_fraction": 0.8,
+    "dvfs_low_queue_depth": 1,
+    "severe_queue_depth": 16,
+    "severe_kv_cache_usage_frac": 0.97,
+    "dvfs_min_dwell_s": 10.0
+  },
+  "collector": {"timeout_s": 1.0, "model_name": "model-a"},
+  "telemetry_alpha": 1.0
+}
