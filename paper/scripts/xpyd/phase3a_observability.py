@@ -207,6 +207,10 @@ class Phase3AHarness:
         self.snapshots: Dict[str, VLLMMetricsSnapshot] = {}
         self.semantic_records: list[dict] = []
         self.load_records: list[dict] = []
+        self.load_monitoring_records: list[dict] = []
+        self.scrape_errors: list[dict] = []
+        self.phase_warmup_record: Optional[dict] = None
+        self.proxy_diagnostics_audit: Optional[dict] = None
         self.dry_controller = None
         dry_path = self.config.get("dry_run_config")
         if dry_path:
@@ -255,6 +259,7 @@ class Phase3AHarness:
             ),
             "semantic_probes": self.config.get("semantic_probes", []),
             "load_probes": self.config.get("load_probes", []),
+            "load_monitoring": self.config.get("load_monitoring", {}),
             "phase_warmup": self.config.get("phase_warmup", {"enabled": False}),
             "physical_context": self.config.get("physical_context", {}),
             "server_logs": self.config.get("server_logs", {}),
@@ -273,7 +278,13 @@ class Phase3AHarness:
             ],
         }
 
-    def _scrape_round(self, label: str, probe_id: Optional[str] = None) -> Dict[str, VLLMMetricsSnapshot]:
+    def _scrape_round(
+        self,
+        label: str,
+        probe_id: Optional[str] = None,
+        *,
+        tolerate_errors: bool = False,
+    ) -> Dict[str, VLLMMetricsSnapshot]:
         self.round_sequence += 1
         round_id = self.round_sequence
         observed: Dict[str, VLLMMetricsSnapshot] = {}
@@ -283,17 +294,43 @@ class Phase3AHarness:
             mono_start = self.monotonic_clock()
             try:
                 raw = self.scrape_source(endpoint)
+                if not raw.raw_text.strip():
+                    raise Phase3AError("empty /metrics response")
+                if raw.snapshot.endpoint_id != endpoint.endpoint_id:
+                    raise Phase3AError("scrape returned wrong endpoint identity")
             except Exception as exc:
-                raise Phase3AError(
+                wall_end = self.wall_clock()
+                mono_end = self.monotonic_clock()
+                message = (
                     "metrics scrape failed for %s (%s): %s" %
                     (endpoint.endpoint_id, self.collector.metrics_url(endpoint), exc)
-                ) from exc
+                )
+                error_record = {
+                    "sequence": self.sequence,
+                    "round_sequence": round_id,
+                    "label": label,
+                    "probe_id": probe_id,
+                    "endpoint_id": endpoint.endpoint_id,
+                    "role": endpoint.role,
+                    "metrics_uri": self.collector.metrics_url(endpoint),
+                    "central_wall_start_s": wall_start,
+                    "central_wall_end_s": wall_end,
+                    "central_monotonic_start_s": mono_start,
+                    "central_monotonic_end_s": mono_end,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "tolerated": bool(tolerate_errors),
+                }
+                self.scrape_errors.append(error_record)
+                _append_jsonl(
+                    self.run_dir / "derived" / "scrape_errors.jsonl",
+                    error_record,
+                )
+                if tolerate_errors:
+                    continue
+                raise Phase3AError(message) from exc
             wall_end = self.wall_clock()
             mono_end = self.monotonic_clock()
-            if not raw.raw_text.strip():
-                raise Phase3AError("empty /metrics response for %s" % endpoint.endpoint_id)
-            if raw.snapshot.endpoint_id != endpoint.endpoint_id:
-                raise Phase3AError("scrape returned wrong endpoint identity")
             filename = "%06d_%s.prom" % (self.sequence, label.replace("/", "_"))
             raw_path = self.run_dir / endpoint.endpoint_id / "raw_metrics" / filename
             raw_path.write_text(raw.raw_text, encoding="utf-8")
@@ -321,7 +358,7 @@ class Phase3AHarness:
             observed[endpoint.endpoint_id] = raw.snapshot
             self.snapshots[endpoint.endpoint_id] = raw.snapshot
 
-        if self.dry_controller is not None:
+        if self.dry_controller is not None and len(observed) == len(self.endpoints):
             def provider(endpoint: EndpointSpec) -> VLLMMetricsSnapshot:
                 return observed[endpoint.endpoint_id]
 
@@ -388,7 +425,12 @@ class Phase3AHarness:
         _write_json(client_dir / "command.json", {"argv": command})
         return command
 
-    def _validate_client_result(self, client_dir: Path, returncode: int) -> dict:
+    def _validate_client_result(
+        self,
+        client_dir: Path,
+        returncode: int,
+        probe: Optional[Mapping[str, Any]] = None,
+    ) -> dict:
         if returncode != 0:
             raise Phase3AError("benchmark client failed with exit status %d" % returncode)
         summary_path = client_dir / "summary.json"
@@ -399,6 +441,34 @@ class Phase3AHarness:
             raise Phase3AError("benchmark produced no successful client result")
         if int(summary.get("failed_requests", 0)) != 0:
             raise Phase3AError("benchmark client reported request failures")
+        if probe is not None:
+            expected = int(probe.get("count", 1))
+            requests_total = int(summary.get("requests_total", -1))
+            successes = int(summary.get("successful_requests", 0))
+            if requests_total != expected or successes != expected:
+                raise Phase3AError(
+                    "benchmark request cardinality mismatch for %s: "
+                    "requests_total=%d, successful_requests=%d, expected=%d" %
+                    (probe.get("id"), requests_total, successes, expected)
+                )
+            expected_input = expected * int(probe["input_len"])
+            expected_output = expected * int(probe["output_len"])
+            observed_input = int(summary.get("input_tokens_total", -1))
+            requested_output = int(summary.get("requested_output_tokens_total", -1))
+            measured_output = int(summary.get("output_tokens_total", -1))
+            if (
+                observed_input != expected_input
+                or requested_output != expected_output
+                or measured_output != expected_output
+            ):
+                raise Phase3AError(
+                    "benchmark token cardinality mismatch for %s: input=%d/%d, "
+                    "requested_output=%d/%d, measured_output=%d/%d" % (
+                        probe.get("id"), observed_input, expected_input,
+                        requested_output, expected_output,
+                        measured_output, expected_output,
+                    )
+                )
         if bool(self.config.get("client", {}).get("require_server_token_usage", False)):
             successes = int(summary.get("successful_requests", 0))
             sources = summary.get("completion_token_sources", {})
@@ -430,7 +500,7 @@ class Phase3AHarness:
         client_dir = trace_path.parent
         with (client_dir / "client.log").open("w", encoding="utf-8") as stream:
             result = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT)
-        return self._validate_client_result(client_dir, result.returncode)
+        return self._validate_client_result(client_dir, result.returncode, probe)
 
     def _run_phase_warmup(self) -> Optional[dict]:
         warmup = dict(self.config.get("phase_warmup", {}))
@@ -530,6 +600,21 @@ class Phase3AHarness:
         interval = float(self.config.get("scrape_interval_s", 1.0))
         if not 0 < interval <= 2.0:
             raise Phase3AError("scrape_interval_s must be in (0, 2] for Phase 3A")
+        monitoring_config = dict(self.config.get("load_monitoring", {}))
+        minimum_successes = int(
+            monitoring_config.get("minimum_interval_scrapes_per_endpoint", 1)
+        )
+        maximum_consecutive_failures = int(
+            monitoring_config.get("maximum_consecutive_failures_per_endpoint", 3)
+        )
+        if minimum_successes < 1:
+            raise Phase3AError(
+                "minimum_interval_scrapes_per_endpoint must be at least 1"
+            )
+        if maximum_consecutive_failures < 1:
+            raise Phase3AError(
+                "maximum_consecutive_failures_per_endpoint must be at least 1"
+            )
         for probe in probes:
             probe = dict(probe)
             if "count" not in probe:
@@ -537,18 +622,86 @@ class Phase3AHarness:
                 probe["count"] = max(1, int(math.ceil(duration * float(probe["rate_rps"]))))
             probe_id = str(probe["id"])
             trace = self._write_trace(probe)
-            self._scrape_round("load_before", probe_id)
+            before = self._scrape_round("load_before", probe_id)
             process, stream = self._start_client(probe, trace)
+            endpoint_ids = tuple(endpoint.endpoint_id for endpoint in self.endpoints)
+            successful_scrapes = {endpoint_id: 0 for endpoint_id in endpoint_ids}
+            failed_scrapes = {endpoint_id: 0 for endpoint_id in endpoint_ids}
+            consecutive_failures = {endpoint_id: 0 for endpoint_id in endpoint_ids}
+            max_consecutive_failures = {endpoint_id: 0 for endpoint_id in endpoint_ids}
+            interval_rounds = 0
             try:
                 while process.poll() is None:
-                    self._scrape_round("load_interval", probe_id)
+                    interval_rounds += 1
+                    observed = self._scrape_round(
+                        "load_interval", probe_id, tolerate_errors=True
+                    )
+                    for endpoint_id in endpoint_ids:
+                        if endpoint_id in observed:
+                            successful_scrapes[endpoint_id] += 1
+                            consecutive_failures[endpoint_id] = 0
+                        else:
+                            failed_scrapes[endpoint_id] += 1
+                            consecutive_failures[endpoint_id] += 1
+                            max_consecutive_failures[endpoint_id] = max(
+                                max_consecutive_failures[endpoint_id],
+                                consecutive_failures[endpoint_id],
+                            )
                     self.sleeper(interval)
                 returncode = process.wait()
+            except Exception:
+                # Do not let observer failure orphan the workload or cause the
+                # outer server cleanup to kill requests still being measured.
+                process.wait()
+                raise
             finally:
                 stream.close()
-            client = self._validate_client_result(trace.parent, returncode)
-            self._scrape_round("load_after", probe_id)
-            record = {"probe": probe, "client": client, "returncode": returncode}
+            after = self._scrape_round("load_after", probe_id)
+            monitoring = {
+                "probe_id": probe_id,
+                "interval_rounds": interval_rounds,
+                "successful_interval_scrapes": successful_scrapes,
+                "failed_interval_scrapes": failed_scrapes,
+                "maximum_consecutive_failures": max_consecutive_failures,
+                "minimum_interval_scrapes_per_endpoint": minimum_successes,
+                "maximum_consecutive_failures_per_endpoint": maximum_consecutive_failures,
+                "tolerated_scrape_error_count": sum(failed_scrapes.values()),
+            }
+            self.load_monitoring_records.append(monitoring)
+            _write_json(
+                self.run_dir / "derived" / "load_monitoring.json",
+                self.load_monitoring_records,
+            )
+            client = self._validate_client_result(trace.parent, returncode, probe)
+            violations = []
+            for endpoint_id in endpoint_ids:
+                if successful_scrapes[endpoint_id] < minimum_successes:
+                    violations.append(
+                        "%s successful interval scrapes %d < %d" % (
+                            endpoint_id,
+                            successful_scrapes[endpoint_id],
+                            minimum_successes,
+                        )
+                    )
+                if max_consecutive_failures[endpoint_id] > maximum_consecutive_failures:
+                    violations.append(
+                        "%s consecutive interval scrape failures %d > %d" % (
+                            endpoint_id,
+                            max_consecutive_failures[endpoint_id],
+                            maximum_consecutive_failures,
+                        )
+                    )
+            if violations:
+                raise Phase3AError(
+                    "load monitoring coverage invalid for %s: %s" %
+                    (probe_id, "; ".join(violations))
+                )
+            delta = self._semantic_delta(probe, client, before, after)
+            record = {
+                **delta,
+                "returncode": returncode,
+                "monitoring": monitoring,
+            }
             self.load_records.append(record)
             _write_json(self.run_dir / "derived" / "load_runs.json", self.load_records)
 
@@ -597,6 +750,106 @@ class Phase3AHarness:
                 raise Phase3AError(message) from exc
             return [message]
         return []
+
+    def _audit_proxy_diagnostics(self) -> None:
+        path = self.run_dir / "derived" / "proxy_diagnostics.jsonl"
+        if not path.is_file():
+            self.proxy_diagnostics_audit = None
+            return
+        records = []
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    records.append(json.loads(line))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise Phase3AError("invalid proxy diagnostics artifact: %s" % exc) from exc
+        expected = 0
+        if self.phase_warmup_record is not None:
+            expected += int(
+                self.phase_warmup_record["client"].get("successful_requests", 0)
+            )
+        expected += sum(
+            int(record["client"].get("successful_requests", 0))
+            for record in self.semantic_records
+        )
+        expected += sum(
+            int(record["client"].get("successful_requests", 0))
+            for record in self.load_records
+        )
+        violations = []
+        if len(records) != expected:
+            violations.append(
+                "diagnostic record count %d != successful request count %d" %
+                (len(records), expected)
+            )
+        require_streaming = bool(
+            self.config.get("client", {}).get("require_real_decode_streaming", False)
+        )
+        if require_streaming:
+            timestamp_order = (
+                "request_received",
+                "prefill_started",
+                "prefill_completed",
+                "decode_request_started",
+                "decode_response_headers_received",
+                "decode_first_real_chunk_received",
+                "decode_first_real_chunk_forwarded",
+                "decode_last_chunk_received",
+                "response_completed",
+            )
+            for index, record in enumerate(records):
+                content_type = str(record.get("decode_content_type") or "")
+                timestamps = record.get("timestamps_monotonic_s") or {}
+                timestamp_values = [timestamps.get(key) for key in timestamp_order]
+                durations = record.get("durations_ms") or {}
+                timing_valid = (
+                    all(isinstance(value, (int, float)) for value in timestamp_values)
+                    and all(
+                        earlier <= later
+                        for earlier, later in zip(timestamp_values, timestamp_values[1:])
+                    )
+                    and durations
+                    and all(
+                        isinstance(value, (int, float)) and value >= 0
+                        for value in durations.values()
+                    )
+                )
+                if not (
+                    record.get("outcome") == "completed"
+                    and record.get("incoming_client_stream") is True
+                    and record.get("outgoing_decode_stream") is True
+                    and record.get("decode_stream_available") is True
+                    and record.get("client_ttft_valid") is True
+                    and record.get("client_tpot_valid") is True
+                    and record.get("client_itl_valid") is True
+                    and content_type.startswith("text/event-stream")
+                    and int(record.get("upstream_chunk_count", 0)) > 0
+                    and int(record.get("upstream_byte_count", 0)) > 0
+                    and timing_valid
+                ):
+                    violations.append(
+                        "diagnostic record %d is not a completed real SSE path" % index
+                    )
+        self.proxy_diagnostics_audit = {
+            "expected_successful_requests": expected,
+            "diagnostic_record_count": len(records),
+            "require_real_decode_streaming": require_streaming,
+            "completed_real_sse_records": sum(
+                1 for record in records
+                if record.get("outcome") == "completed"
+                and record.get("decode_stream_available") is True
+            ),
+            "valid": not violations,
+            "violations": violations,
+        }
+        _write_json(
+            self.run_dir / "derived" / "proxy_diagnostics_audit.json",
+            self.proxy_diagnostics_audit,
+        )
+        if violations:
+            raise Phase3AError(
+                "proxy diagnostics audit failed: %s" % "; ".join(violations)
+            )
 
     def _summary(self) -> dict:
         latest = {}
@@ -713,6 +966,9 @@ class Phase3AHarness:
             "latest_endpoint_observations": latest,
             "semantic_probe_count": len(self.semantic_records),
             "load_probe_count": len(self.load_records),
+            "scrape_error_count": len(self.scrape_errors),
+            "load_monitoring": self.load_monitoring_records,
+            "proxy_diagnostics_audit": self.proxy_diagnostics_audit,
             "reset_or_discontinuity_observations": resets,
             "endpoint_window_behavior": behavior,
             "interpretation_boundary": (
@@ -730,7 +986,7 @@ class Phase3AHarness:
         try:
             # Initialize lazy cross-node/runtime state before the first metric
             # baseline so warmup requests cannot contaminate measured windows.
-            self._run_phase_warmup()
+            self.phase_warmup_record = self._run_phase_warmup()
             # Preflight is intentionally a real scrape of both endpoints.
             self._scrape_round("preflight")
             if "semantic" in normalized:
@@ -739,6 +995,7 @@ class Phase3AHarness:
                 self.run_load()
             self._copy_server_logs()
             self._copy_proxy_diagnostics()
+            self._audit_proxy_diagnostics()
             summary = self._summary()
             _write_json(self.run_dir / "derived" / "summary.json", summary)
             write_run_summary_markdown(self.run_dir, summary)
@@ -915,6 +1172,7 @@ def _parse_args() -> argparse.Namespace:
     run.add_argument("--mode", choices=("semantic", "load", "all"), default="all")
     run.add_argument("--run-id")
     run.add_argument("--semantic-probe-id")
+    run.add_argument("--load-probe-id")
     analyze = subparsers.add_parser("analyze")
     analyze.add_argument("--run-dir", required=True, type=Path)
     return parser.parse_args()
@@ -937,6 +1195,14 @@ def main() -> int:
                 "semantic probe ID not found: %s" % args.semantic_probe_id
             )
         config["semantic_probes"] = selected
+    if args.load_probe_id:
+        selected = [
+            probe for probe in config.get("load_probes", [])
+            if probe.get("id") == args.load_probe_id
+        ]
+        if not selected:
+            raise Phase3AError("load probe ID not found: %s" % args.load_probe_id)
+        config["load_probes"] = selected
     modes = ("semantic", "load") if args.mode == "all" else (args.mode,)
     run_dir = Phase3AHarness(config, run_id=args.run_id).run(modes)
     print(run_dir.as_posix())

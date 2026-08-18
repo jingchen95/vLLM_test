@@ -62,6 +62,10 @@ class FixtureHarness(Phase3AHarness):
             "mean_tpot_ms": 120.0,
             "p99_tpot_ms": 120.0,
             "completion_token_sources": {"server_usage": 1},
+            "decode_stream_available_requests": 1,
+            "client_ttft_valid_requests": 1,
+            "client_tpot_valid_requests": 1,
+            "client_itl_valid_requests": 1,
         }
         (trace_path.parent / "summary.json").write_text(
             json.dumps(summary) + "\n", encoding="utf-8"
@@ -74,21 +78,24 @@ class FixtureHarness(Phase3AHarness):
 
 
 class FakeProcess:
-    def __init__(self):
+    def __init__(self, active_polls=1):
         self.poll_count = 0
+        self.active_polls = active_polls
 
     def poll(self):
         self.poll_count += 1
-        return None if self.poll_count == 1 else 0
+        return None if self.poll_count <= self.active_polls else 0
 
     def wait(self):
         return 0
 
 
 class LoadFixtureHarness(FixtureHarness):
+    active_polls = 1
+
     def _start_client(self, probe, trace_path):
         self._run_client(probe, trace_path)
-        return FakeProcess(), (trace_path.parent / "fake-stream.log").open("w")
+        return FakeProcess(self.active_polls), (trace_path.parent / "fake-stream.log").open("w")
 
 
 class TrackingFixtureHarness(FixtureHarness):
@@ -114,6 +121,8 @@ class ScrapeSequence:
     def __call__(self, endpoint: EndpointSpec):
         self.timestamp += 1.0
         text = next(self.frames[endpoint.endpoint_id])
+        if isinstance(text, BaseException):
+            raise text
         return VLLMRawScrape(
             metrics_url=self.collector.metrics_url(endpoint),
             raw_text=text,
@@ -324,6 +333,136 @@ vllm:request_success_total{model_name="model-a"} 1
             self.assertEqual(
                 summary["endpoint_window_behavior"]["P0"]["max_waiting_requests"], 1
             )
+            self.assertTrue(runs[0]["endpoints"]["P0"]["window"]["valid"])
+            self.assertTrue(runs[0]["endpoints"]["D0"]["window"]["valid"])
+
+    def test_transient_load_interval_scrape_error_is_recorded_and_tolerated(self):
+        baseline = prom(1000, 500, 20)
+        interval = prom(1100, 550, 22, running=2, waiting=1, kv=0.5)
+        final = prom(1200, 600, 24)
+        source = ScrapeSequence({
+            "P0": [baseline, baseline, interval, interval, final],
+            "D0": [baseline, baseline, OSError("busy"), interval, final],
+        })
+        with tempfile.TemporaryDirectory() as temp:
+            load_config = config(Path(temp))
+            load_config["load_probes"] = [{
+                "id": "load", "input_len": 128, "output_len": 128,
+                "rate_rps": 1.0, "duration_s": 1.0, "max_concurrency": 1,
+            }]
+            harness = LoadFixtureHarness(
+                load_config, run_id="transient", scrape_source=source,
+                sleeper=lambda _: None,
+            )
+            harness.active_polls = 2
+            run_dir = harness.run(("load",))
+
+            errors = [
+                json.loads(line) for line in
+                (run_dir / "derived/scrape_errors.jsonl").read_text().splitlines()
+            ]
+            self.assertEqual(len(errors), 1)
+            self.assertTrue(errors[0]["tolerated"])
+            monitoring = json.loads(
+                (run_dir / "derived/load_monitoring.json").read_text()
+            )[0]
+            self.assertEqual(monitoring["failed_interval_scrapes"]["D0"], 1)
+            self.assertEqual(monitoring["successful_interval_scrapes"]["D0"], 1)
+            summary = json.loads((run_dir / "derived/summary.json").read_text())
+            self.assertTrue(summary["completed"])
+            self.assertEqual(summary["scrape_error_count"], 1)
+
+    def test_sustained_load_interval_scrape_outage_fails_after_client_finishes(self):
+        baseline = prom(1000, 500, 20)
+        interval = prom(1100, 550, 22)
+        final = prom(1200, 600, 24)
+        source = ScrapeSequence({
+            "P0": [baseline, baseline, interval, interval, final],
+            "D0": [baseline, baseline, OSError("busy-1"), OSError("busy-2"), final],
+        })
+        with tempfile.TemporaryDirectory() as temp:
+            load_config = config(Path(temp))
+            load_config["load_monitoring"] = {
+                "minimum_interval_scrapes_per_endpoint": 1,
+                "maximum_consecutive_failures_per_endpoint": 1,
+            }
+            load_config["load_probes"] = [{
+                "id": "load", "input_len": 128, "output_len": 128,
+                "rate_rps": 1.0, "duration_s": 1.0, "max_concurrency": 1,
+            }]
+            harness = LoadFixtureHarness(
+                load_config, run_id="outage", scrape_source=source,
+                sleeper=lambda _: None,
+            )
+            harness.active_polls = 2
+            with self.assertRaisesRegex(Phase3AError, "load monitoring coverage invalid"):
+                harness.run(("load",))
+
+            run_dir = Path(temp) / "outage"
+            self.assertTrue((run_dir / "client/load/summary.json").is_file())
+            self.assertEqual(
+                len(list((run_dir / "D0/raw_metrics").glob("*load_after.prom"))), 1
+            )
+            monitoring = json.loads(
+                (run_dir / "derived/load_monitoring.json").read_text()
+            )[0]
+            self.assertEqual(monitoring["maximum_consecutive_failures"]["D0"], 2)
+            self.assertTrue((run_dir / "derived/failure.json").is_file())
+
+    def test_proxy_diagnostics_audit_matches_successful_real_stream_requests(self):
+        baseline = prom(1000, 500, 20)
+        source = ScrapeSequence({
+            "P0": [baseline, baseline, prom(1128, 501, 21)],
+            "D0": [baseline, baseline, prom(1128, 628, 21)],
+        })
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            diagnostics = temp_path / "proxy.jsonl"
+            diagnostics.write_text(json.dumps({
+                "outcome": "completed",
+                "incoming_client_stream": True,
+                "outgoing_decode_stream": True,
+                "decode_stream_available": True,
+                "decode_content_type": "text/event-stream; charset=utf-8",
+                "client_ttft_valid": True,
+                "client_tpot_valid": True,
+                "client_itl_valid": True,
+                "upstream_chunk_count": 2,
+                "upstream_byte_count": 100,
+                "timestamps_monotonic_s": {
+                    "request_received": 1.0,
+                    "prefill_started": 2.0,
+                    "prefill_completed": 3.0,
+                    "decode_request_started": 4.0,
+                    "decode_response_headers_received": 5.0,
+                    "decode_first_real_chunk_received": 6.0,
+                    "decode_first_real_chunk_forwarded": 7.0,
+                    "decode_last_chunk_received": 8.0,
+                    "response_completed": 9.0,
+                },
+                "durations_ms": {
+                    "prefill": 1.0,
+                    "decode_request_to_headers": 1.0,
+                    "decode_request_to_first_real_chunk": 2.0,
+                    "first_chunk_forwarding_delay": 1.0,
+                    "full_decode_stream": 2.0,
+                    "decode_request_to_last_chunk": 4.0,
+                    "total_proxy_request": 8.0,
+                },
+            }) + "\n", encoding="utf-8")
+            audit_config = config(temp_path)
+            audit_config["client"]["require_real_decode_streaming"] = True
+            audit_config["proxy_diagnostics_log"] = str(diagnostics)
+            run_dir = FixtureHarness(
+                audit_config, run_id="audit", scrape_source=source,
+            ).run(("semantic",))
+
+            audit = json.loads(
+                (run_dir / "derived/proxy_diagnostics_audit.json").read_text()
+            )
+            self.assertTrue(audit["valid"])
+            self.assertEqual(audit["expected_successful_requests"], 1)
+            self.assertEqual(audit["diagnostic_record_count"], 1)
 
 
 if __name__ == "__main__":

@@ -1611,6 +1611,9 @@ EOF
             if [ -n "${XPYD_PHASE3A_SEMANTIC_PROBE_ID}" ]; then
                 phase3a_args+=(--semantic-probe-id "${XPYD_PHASE3A_SEMANTIC_PROBE_ID}")
             fi
+            if [ -n "${XPYD_PHASE3A_LOAD_PROBE_ID:-}" ]; then
+                phase3a_args+=(--load-probe-id "${XPYD_PHASE3A_LOAD_PROBE_ID}")
+            fi
             "${PYTHON_BIN}" "${phase3a_args[@]}" || phase3a_status=$?
             kill "${PROXY_PID}" 2>/dev/null || true
             wait "${PROXY_PID}" 2>/dev/null || true

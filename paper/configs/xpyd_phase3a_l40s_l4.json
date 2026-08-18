@@ -9,6 +9,10 @@
   "collector": {
     "timeout_s": 5.0
   },
+  "load_monitoring": {
+    "minimum_interval_scrapes_per_endpoint": 1,
+    "maximum_consecutive_failures_per_endpoint": 3
+  },
   "client": {
     "base_url": "$XPYD_PROXY_URI",
     "script": "paper/scripts/replay_synthetic_trace.py",

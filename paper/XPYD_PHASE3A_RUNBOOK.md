@@ -65,8 +65,11 @@ squeue -u "$USER"
 tail -f logs/disagg_bench_<jobid>.log
 ```
 
-Replace `<jobid>` with the ID printed by `sbatch`.  A failed endpoint scrape,
-benchmark, or log copy produces `derived/failure.json` and a nonzero job exit.
+Replace `<jobid>` with the ID printed by `sbatch`. Preflight, before, after, and
+semantic endpoint scrapes remain strict. During a load, isolated interval
+scrape failures are preserved in `derived/scrape_errors.jsonl` while the client
+is allowed to finish; insufficient per-endpoint interval coverage or too many
+consecutive failures still produces `derived/failure.json` and a nonzero exit.
 
 ## 4. Inspect evidence
 
@@ -101,6 +104,14 @@ interpret it as measured TTFT/TPOT/ITL.
 For short loads, inspect `endpoint_window_behavior`, queue/running/KV maxima,
 rate maxima, tail bounds, missing metric unions, and `max_central_scrape_gap_s`.
 Use `telemetry.jsonl` for evolution rather than interpreting maxima alone.
+Also inspect `load_runs.json` for strict before/after endpoint deltas and
+`load_monitoring.json` for successful, failed, and consecutive interval scrape
+counts. A completed run may contain explicitly tolerated interval gaps, but it
+must satisfy the configured coverage policy.
+
+Finally, `proxy_diagnostics_audit.json` must report `valid: true` and its record
+count must equal the successful warmup + semantic + load request count. This
+prevents a run from completing with a truncated proxy diagnostic artifact.
 
 ## 5. Re-run analysis without touching servers
 
