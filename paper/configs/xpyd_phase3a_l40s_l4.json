@@ -1,0 +1,65 @@
+{
+  "model": "mistralai/Mistral-7B-v0.1",
+  "tokenizer_model": "mistralai/Mistral-7B-v0.1",
+  "vllm_version": "0.15.1",
+  "output_root": "results/xpyd_observability",
+  "scrape_interval_s": 1.0,
+  "staleness_threshold_s": 2.5,
+  "request_timeout_s": 900.0,
+  "collector": {
+    "timeout_s": 5.0
+  },
+  "client": {
+    "base_url": "$XPYD_PROXY_URI",
+    "script": "paper/scripts/replay_synthetic_trace.py",
+    "protocol": "OpenAI-compatible streaming /v1/completions through existing disagg_proxy.py"
+  },
+  "endpoints": [
+    {
+      "endpoint_id": "P0",
+      "role": "prefill",
+      "gpu_type": "NVIDIA L40S",
+      "node": "neptune",
+      "gpu_ids": [0],
+      "tp_degree": 1,
+      "http_uri": "$XPYD_P_HTTP_URI",
+      "kv_connector": "P2pNcclConnector"
+    },
+    {
+      "endpoint_id": "D0",
+      "role": "decode",
+      "gpu_type": "NVIDIA L4",
+      "node": "europa",
+      "gpu_ids": [0],
+      "tp_degree": 1,
+      "http_uri": "$XPYD_D_HTTP_URI",
+      "kv_connector": "P2pNcclConnector"
+    }
+  ],
+  "semantic_probes": [
+    {"id": "semantic_il128_ol128", "input_len": 128, "output_len": 128, "count": 1, "max_concurrency": 1},
+    {"id": "semantic_il2048_ol128", "input_len": 2048, "output_len": 128, "count": 1, "max_concurrency": 1},
+    {"id": "semantic_il128_ol512", "input_len": 128, "output_len": 512, "count": 1, "max_concurrency": 1},
+    {"id": "semantic_il2048_ol512", "input_len": 2048, "output_len": 512, "count": 1, "max_concurrency": 1}
+  ],
+  "load_probes": [
+    {"id": "load_light_il128_ol128", "input_len": 128, "output_len": 128, "rate_rps": 0.5, "duration_s": 20, "max_concurrency": 4},
+    {"id": "load_moderate_il2048_ol512", "input_len": 2048, "output_len": 512, "rate_rps": 1.0, "duration_s": 20, "max_concurrency": 8}
+  ],
+  "server_logs": {
+    "P0": "$XPYD_P_SERVER_LOG",
+    "D0": "$XPYD_D_SERVER_LOG"
+  },
+  "physical_context": {
+    "scheduler": "Slurm",
+    "slurm_job_id": "$SLURM_JOB_ID",
+    "allocation": "exclusive neptune + europa",
+    "prefill_kv_role": "kv_producer",
+    "decode_kv_role": "kv_consumer",
+    "server_launch_reference": "run_disagg_benchmark.sh::run_experiment_E/start_vllm_server",
+    "proxy_launch_reference": "run_disagg_benchmark.sh::run_experiment_E/disagg_proxy.py",
+    "frequency_policy": "untouched by Phase 3A",
+    "current_fixed_frequency_mhz": "unavailable_not_read_by_phase3a",
+    "energy_collection": "disabled"
+  }
+}

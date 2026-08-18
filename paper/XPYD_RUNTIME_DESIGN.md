@@ -393,6 +393,33 @@ topology-aware transfer cost, a clock actuator with readback, safe exploration,
 contextual bandits, and model-assisted counterfactual prediction. None is part
 of this non-actuating reference controller.
 
+## Phase 3A live observability validation
+
+Phase 3A does not extend the scheduler. It wraps the existing physical
+Experiment E 1×L40S prefill → 1×L4 decode path to test whether real vLLM 0.15.1
+metrics have the semantics assumed by this CPU-only architecture.
+
+Controlled semantic probes scrape P0 and D0 before and after a known small
+logical request count and compare independent client results with each
+endpoint's request, prompt-token, generation-token, and histogram deltas. Short
+load probes use configurable rate/duration/shape values and centrally scrape
+both endpoints every 1–2 seconds to observe queues, running requests, KV use,
+rates, tail buckets, missing metrics, and scrape gaps.
+
+Every HTTP response is retained verbatim alongside centrally assigned wall and
+monotonic timestamps, sequence, endpoint role, and URI. Client TTFT/TPOT/E2E,
+success, and token measurements come from the existing streaming trace client,
+not from Prometheus. Client and endpoint values are therefore independent
+evidence sources; agreement is reported as observed correlation, not proof of
+internal phase ownership.
+
+The Phase 3A physical branch reuses the established server, connector, proxy,
+health-check, log, and process-cleanup path, but skips energy/NVML collection,
+GPU frequency/persistence/reset commands, routing actuation, and all model
+training. P/D metric semantics remain the object under validation until the
+physical run is performed. The design and exact physical commands are in
+`XPYD_PHASE3A_OBSERVABILITY.md` and `XPYD_PHASE3A_RUNBOOK.md`.
+
 ## Canonical-model provenance and reuse
 
 All four canonical phase families were trained from the full monolithic,

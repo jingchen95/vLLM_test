@@ -88,6 +88,15 @@ class VLLMMetricsSnapshot:
 
 
 @dataclass(frozen=True)
+class VLLMRawScrape:
+    """One live scrape with the exact Prometheus payload retained."""
+
+    metrics_url: str
+    raw_text: str
+    snapshot: VLLMMetricsSnapshot
+
+
+@dataclass(frozen=True)
 class VLLMWindowDelta:
     endpoint_id: str
     start_timestamp_s: Optional[float]
@@ -151,6 +160,11 @@ class VLLMMetricsCollector:
         return base if base.endswith("/metrics") else base + "/metrics"
 
     def scrape(self, endpoint: EndpointSpec) -> VLLMMetricsSnapshot:
+        return self.scrape_raw(endpoint).snapshot
+
+    def scrape_raw(self, endpoint: EndpointSpec) -> VLLMRawScrape:
+        """Fetch once, retain the raw response, and parse through ``parse_text``."""
+
         url = self.metrics_url(endpoint)
         request = Request(
             url,
@@ -172,7 +186,12 @@ class VLLMMetricsCollector:
             ) from exc
         except (URLError, TimeoutError, OSError, UnicodeDecodeError) as exc:
             raise VLLMMetricsConnectionError("failed to scrape %s: %s" % (url, exc)) from exc
-        return self.parse_text(endpoint, payload, timestamp_s=self.clock())
+        snapshot = self.parse_text(endpoint, payload, timestamp_s=self.clock())
+        return VLLMRawScrape(
+            metrics_url=url,
+            raw_text=payload,
+            snapshot=snapshot,
+        )
 
     def parse_text(
         self,

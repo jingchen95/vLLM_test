@@ -48,10 +48,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--trace-csv", required=True)
     p.add_argument("--output-file", required=True)
     p.add_argument("--summary-json", required=True)
+    p.add_argument("--requests-jsonl")
     p.add_argument("--tokenizer-model")
     p.add_argument("--max-concurrency", type=int, default=64)
     p.add_argument("--num-warmups", type=int, default=0)
     p.add_argument("--request-timeout-s", type=float, default=900.0)
+    p.add_argument("--fail-on-request-error", action="store_true")
     return p.parse_args()
 
 
@@ -206,6 +208,7 @@ async def consume_sse_completion(
         "ok": True,
         "send_unix_s": send_unix_s,
         "complete_unix_s": complete_unix_s,
+        "e2e_latency_ms": (complete_mono - send_mono) * 1000.0,
         "ttft_ms": ttft_ms,
         "tpot_ms": tpot_ms,
         "completion_tokens": completion_tokens,
@@ -305,11 +308,26 @@ async def replay_trace(
     complete_times = [r["complete_unix_s"] for r in results if "complete_unix_s" in r]
     ttfts = [float(r["ttft_ms"]) for r in results if r.get("ok") and r.get("ttft_ms") is not None]
     tpots = [float(r["tpot_ms"]) for r in results if r.get("ok") and r.get("tpot_ms") is not None]
+    e2e_latencies = [
+        float(r["e2e_latency_ms"])
+        for r in results
+        if r.get("ok") and r.get("e2e_latency_ms") is not None
+    ]
     successes = sum(1 for r in results if r.get("ok"))
     failures = len(results) - successes
+    input_tokens_total = sum(
+        int(r["input_len"]) for r in results if r.get("ok")
+    )
+    requested_output_tokens_total = sum(
+        int(r["output_len"]) for r in results if r.get("ok")
+    )
+    output_tokens_total = sum(
+        int(r.get("completion_tokens") or 0) for r in results if r.get("ok")
+    )
 
     return {
         "requests_total": len(results),
+        "logical_request_count": len(results),
         "successful_requests": successes,
         "failed_requests": failures,
         "timing_start_unix_s": min(send_times) if send_times else None,
@@ -318,9 +336,15 @@ async def replay_trace(
         "p99_ttft_ms": percentile(ttfts, 99.0),
         "mean_tpot_ms": mean(tpots),
         "p99_tpot_ms": percentile(tpots, 99.0),
+        "mean_e2e_latency_ms": mean(e2e_latencies),
+        "p99_e2e_latency_ms": percentile(e2e_latencies, 99.0),
         "trace_duration_s": requests[-1].arrival_time_s if requests else 0.0,
         "max_concurrency": max_concurrency,
         "num_warmups": num_warmups,
+        "input_tokens_total": input_tokens_total,
+        "requested_output_tokens_total": requested_output_tokens_total,
+        "output_tokens_total": output_tokens_total,
+        "request_results": results,
     }
 
 
@@ -341,6 +365,8 @@ def write_text_summary(path: Path, trace_csv: Path, summary: dict[str, Any]) -> 
         f"P99 TTFT (ms):                           {format_metric(summary['p99_ttft_ms'])}",
         f"Mean TPOT (ms):                          {format_metric(summary['mean_tpot_ms'])}",
         f"P99 TPOT (ms):                           {format_metric(summary['p99_tpot_ms'])}",
+        f"Mean E2E latency (ms):                   {format_metric(summary['mean_e2e_latency_ms'])}",
+        f"P99 E2E latency (ms):                    {format_metric(summary['p99_e2e_latency_ms'])}",
         f"Replay trace duration (s):               {summary['trace_duration_s']:.3f}",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -351,6 +377,7 @@ def main() -> int:
     trace_csv = Path(args.trace_csv)
     output_file = Path(args.output_file)
     summary_json = Path(args.summary_json)
+    requests_jsonl = Path(args.requests_jsonl) if args.requests_jsonl else None
 
     requests = load_trace(trace_csv)
     tokenizer_name = args.tokenizer_model or args.model
@@ -373,10 +400,15 @@ def main() -> int:
     except KeyboardInterrupt:
         return 130
 
+    request_results = summary.pop("request_results")
     summary["trace_csv"] = trace_csv.as_posix()
     summary["model"] = args.model
     summary["tokenizer_model"] = tokenizer_name
     summary_json.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    if requests_jsonl is not None:
+        with requests_jsonl.open("w", encoding="utf-8") as stream:
+            for result in request_results:
+                stream.write(json.dumps(result, sort_keys=True) + "\n")
     write_text_summary(output_file, trace_csv, summary)
 
     print(json.dumps({
@@ -385,7 +417,11 @@ def main() -> int:
         "successful_requests": summary["successful_requests"],
         "failed_requests": summary["failed_requests"],
     }))
-    return 0 if summary["successful_requests"] > 0 else 1
+    if summary["successful_requests"] <= 0:
+        return 1
+    if args.fail_on_request_error and summary["failed_requests"] > 0:
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

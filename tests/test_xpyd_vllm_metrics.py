@@ -25,6 +25,7 @@ from xpyd.vllm_metrics import (
     VLLMMetricsCollector,
     VLLMMetricsConnectionError,
     VLLMMetricsHTTPError,
+    VLLMRawScrape,
     VLLMWindowTracker,
     window_delta_to_telemetry_sample,
 )
@@ -144,6 +145,19 @@ class VLLMMappingTests(unittest.TestCase):
             self.collector.metrics_url(endpoint(uri="http://node-a:8001/metrics")),
             "http://node-a:8001/metrics",
         )
+
+    def test_raw_scrape_retains_exact_payload(self):
+        payload = fixture("normal_t0.prom")
+        response = unittest.mock.MagicMock()
+        response.getcode.return_value = 200
+        response.read.return_value = payload.encode("utf-8")
+        response.__enter__.return_value = response
+        with patch("xpyd.vllm_metrics.urlopen", return_value=response):
+            raw = self.collector.scrape_raw(endpoint())
+        self.assertIsInstance(raw, VLLMRawScrape)
+        self.assertEqual(raw.raw_text, payload)
+        self.assertEqual(raw.snapshot.prompt_tokens_total, 1000)
+        self.assertEqual(raw.metrics_url, "http://node-a:8001/metrics")
 
 
 class WindowDeltaTests(unittest.TestCase):

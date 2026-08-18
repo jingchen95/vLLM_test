@@ -55,6 +55,14 @@ SEQ_BIN="${SEQ_BIN:-/usr/bin/seq}"
 SYNC_BIN="${SYNC_BIN:-/bin/sync}"
 PYTHON_BIN="${PYTHON_BIN:-$(command -v python3 || command -v python)}"
 SCONTROL_BIN="${SCONTROL_BIN:-/usr/bin/scontrol}"
+# When set, Experiment E starts the existing P/D/proxy lifecycle and hands
+# control to the read-only Phase 3A harness.  That path performs no GPU clock,
+# persistence, reset, or NVML-monitor operations.
+XPYD_PHASE3A_CONFIG="${XPYD_PHASE3A_CONFIG:-}"
+XPYD_PHASE3A_MODE="${XPYD_PHASE3A_MODE:-all}"
+XPYD_PHASE3A_SEMANTIC_PROBE_ID="${XPYD_PHASE3A_SEMANTIC_PROBE_ID:-}"
+XPYD_NO_GPU_MUTATION="${XPYD_NO_GPU_MUTATION:-0}"
+[ -n "${XPYD_PHASE3A_CONFIG}" ] && XPYD_NO_GPU_MUTATION=1
 
 # ---------------------------------------------------------------------------
 # Generate disagg_proxy.py in SCRIPT_DIR.
@@ -325,6 +333,10 @@ PROXY_EOF
 # ---------------------------------------------------------------------------
 _reset_gpu_state() {
     local node="$1"
+    if [ "${XPYD_NO_GPU_MUTATION}" -eq 1 ]; then
+        echo "  Phase 3A: skipping GPU reset/app-clock mutation on ${node}"
+        return 0
+    fi
     local _reset_cmd="set -e; ${SUDO_BIN} ${NVIDIA_SMI_BIN} --gpu-reset 2>/dev/null || ${SUDO_BIN} ${NVIDIA_SMI_BIN} -rac 2>/dev/null"
     if [ "${node}" = "${LOCAL_NODE:-}" ]; then
         "${BASH_BIN}" -c "${_reset_cmd}" || true
@@ -1536,6 +1548,10 @@ run_experiment_E() {
     local vllm_ver
     vllm_ver=$("${PYTHON_BIN}" -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "unknown")
     echo "  vLLM version: ${vllm_ver}"
+    if [ -n "${XPYD_PHASE3A_CONFIG}" ] && [ "${vllm_ver}" != "0.15.1" ]; then
+        echo "  ERROR: Phase 3A requires observed vLLM version 0.15.1 (got ${vllm_ver})"
+        return 1
+    fi
 
     # ---------------------------------------------------------------------------
     # Diagnostic patch: add a 60-second timeout to P2pNcclEngine.recv_tensor so
@@ -1770,9 +1786,14 @@ EOF
         echo ""
         echo "  Config: L40S@${l40s_freq}MHz + L4@${l4_freq}MHz"
 
-        # Set frequencies on both nodes before starting servers
-        set_gpu_freq "${L40S_NODE}" "${l40s_freq}" "${tp}" "${L40S_MEM_FREQ}"
-        set_gpu_freq "${L4_NODE}"   "${l4_freq}"   "${tp}" "${L4_MEM_FREQ}"
+        # Phase 3A observes the scheduler/runtime default and must not issue
+        # clock commands.  The regular Experiment E path remains unchanged.
+        if [ -z "${XPYD_PHASE3A_CONFIG}" ]; then
+            set_gpu_freq "${L40S_NODE}" "${l40s_freq}" "${tp}" "${L40S_MEM_FREQ}"
+            set_gpu_freq "${L4_NODE}"   "${l4_freq}"   "${tp}" "${L4_MEM_FREQ}"
+        else
+            echo "  Phase 3A: leaving both GPU clocks untouched"
+        fi
 
         # Start prefill instance (L40S) — P2pNcclConnector (V1 engine native)
         # Note: no single quotes around the JSON — extra_args is unquoted in
@@ -1823,6 +1844,35 @@ EOF
             fi
         done
         echo "  Proxy ready (${elapsed}s)"
+
+        if [ -n "${XPYD_PHASE3A_CONFIG}" ]; then
+            export XPYD_P_HTTP_URI="http://${proxy_prefill_host}:${PREFILL_PORT}"
+            export XPYD_D_HTTP_URI="http://${proxy_decode_host}:${DECODE_PORT}"
+            export XPYD_PROXY_URI="http://127.0.0.1:${PROXY_PORT}"
+            export XPYD_P_SERVER_LOG="${RESULT_DIR}/vllm_${L40S_NODE}_${PREFILL_PORT}.log"
+            export XPYD_D_SERVER_LOG="${RESULT_DIR}/vllm_${L4_NODE}_${DECODE_PORT}.log"
+            export PYTHONPATH="${SCRIPT_DIR}/paper/scripts${PYTHONPATH:+:${PYTHONPATH}}"
+            echo "  Phase 3A: running read-only observability harness"
+            local phase3a_status=0
+            local phase3a_args=(
+                -m xpyd.phase3a_observability run
+                --config "${XPYD_PHASE3A_CONFIG}"
+                --mode "${XPYD_PHASE3A_MODE}"
+            )
+            if [ -n "${XPYD_PHASE3A_SEMANTIC_PROBE_ID}" ]; then
+                phase3a_args+=(--semantic-probe-id "${XPYD_PHASE3A_SEMANTIC_PROBE_ID}")
+            fi
+            "${PYTHON_BIN}" "${phase3a_args[@]}" || phase3a_status=$?
+            kill "${PROXY_PID}" 2>/dev/null || true
+            wait "${PROXY_PID}" 2>/dev/null || true
+            stop_server "${L40S_NODE}" "${PREFILL_PORT}"
+            stop_server "${L4_NODE}" "${DECODE_PORT}"
+            if [ "${phase3a_status}" -ne 0 ]; then
+                echo "  ERROR: Phase 3A harness failed with status ${phase3a_status}"
+                return "${phase3a_status}"
+            fi
+            break
+        fi
 
         # Per-workload: monitors on BOTH nodes + timestamps + energy
         for wl in "${E_WORKLOADS[@]}"; do
@@ -1934,16 +1984,20 @@ for _node in "${ACTIVE_NODES[@]}"; do
 done
 sleep 3
 
-# Enable GPU persistence mode on all active nodes (survives server restarts)
-for _node in "${ACTIVE_NODES[@]}"; do
-    if [ "${_node}" = "${LOCAL_NODE}" ]; then
-        "${SUDO_BIN}" "${NVIDIA_SMI_BIN}" -pm 1
-    else
-        srun --overlap --nodes=1 --ntasks=1 --nodelist="${_node}" \
+# Phase 3A must not issue any nvidia-smi mutation, including persistence mode.
+if [ "${XPYD_NO_GPU_MUTATION}" -eq 0 ]; then
+    for _node in "${ACTIVE_NODES[@]}"; do
+        if [ "${_node}" = "${LOCAL_NODE}" ]; then
             "${SUDO_BIN}" "${NVIDIA_SMI_BIN}" -pm 1
-    fi
-done
-echo "GPU persistence mode enabled on active nodes."
+        else
+            srun --overlap --nodes=1 --ntasks=1 --nodelist="${_node}" \
+                "${SUDO_BIN}" "${NVIDIA_SMI_BIN}" -pm 1
+        fi
+    done
+    echo "GPU persistence mode enabled on active nodes."
+else
+    echo "Phase 3A: GPU persistence/clock/reset mutations disabled."
+fi
 echo ""
 
 # Run experiments
