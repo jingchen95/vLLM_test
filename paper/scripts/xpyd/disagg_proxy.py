@@ -6,8 +6,6 @@ buffering, reconstruction, or timing sleeps.  The core is dependency-light so
 its streaming behavior can be covered by CPU-only fake-upstream tests.
 """
 
-from __future__ import annotations
-
 import argparse
 from dataclasses import dataclass, field
 import inspect
