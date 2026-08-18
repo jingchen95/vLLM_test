@@ -197,7 +197,22 @@ async def completions(raw_request: Request):
 
     async def sse_generator():
         n_tokens = 0
-        prev_len = 0  # tracks cumulative token_ids length for format detection
+        seen_tids = []
+        token_id_mode = None
+
+        def usage_chunk():
+            return {
+                "id": compl_id,
+                "object": "text_completion",
+                "model": MODEL,
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": len(token_ids),
+                    "completion_tokens": n_tokens,
+                    "total_tokens": len(token_ids) + n_tokens,
+                },
+            }
+
         try:
             async with aiohttp.ClientSession(timeout=HTTP_TIMEOUT) as s:
                 print(f"decode_start req_id=...{req_id[-20:]}", flush=True)
@@ -249,6 +264,7 @@ async def completions(raw_request: Request):
                                              "finish_reason": finish_reason if is_last else None}],
                             }
                             yield f"data: {json.dumps(oa_chunk)}\n\n"
+                        yield f"data: {json.dumps(usage_chunk())}\n\n"
                         yield "data: [DONE]\n\n"
                         return
 
@@ -269,14 +285,30 @@ async def completions(raw_request: Request):
                         except Exception:
                             continue
                         tids, chunk_text, finish_reason = _extract_from_dc(dc)
-                        # Cumulative detection: if tids starts with previously
-                        # seen prefix, extract only the new suffix.
-                        if tids and len(tids) > prev_len and tids[:prev_len] == tids[:prev_len]:
-                            new_tids = tids[prev_len:]
-                            prev_len = len(tids)
-                        else:
+                        # Infer the endpoint's token_ids format once, then
+                        # preserve exact token counts for both cumulative and
+                        # incremental streams.
+                        if not tids:
+                            new_tids = []
+                        elif token_id_mode == "cumulative":
+                            if tids[:len(seen_tids)] != seen_tids:
+                                raise RuntimeError("cumulative token_ids prefix changed")
+                            new_tids = tids[len(seen_tids):]
+                            seen_tids = list(tids)
+                        elif token_id_mode == "incremental":
                             new_tids = tids
-                            prev_len += len(tids)
+                            seen_tids.extend(tids)
+                        elif not seen_tids:
+                            new_tids = tids
+                            seen_tids = list(tids)
+                        elif len(tids) > len(seen_tids) and tids[:len(seen_tids)] == seen_tids:
+                            token_id_mode = "cumulative"
+                            new_tids = tids[len(seen_tids):]
+                            seen_tids = list(tids)
+                        else:
+                            token_id_mode = "incremental"
+                            new_tids = tids
+                            seen_tids.extend(tids)
                         if not chunk_text and new_tids:
                             chunk_text = tok.decode(new_tids, skip_special_tokens=True)
                         n_tokens += len(new_tids)
@@ -293,6 +325,7 @@ async def completions(raw_request: Request):
             print(f"decode_done req_id=...{req_id[-20:]} n_tokens={n_tokens}", flush=True)
         except Exception as e:
             print(f"sse_exception req_id=...{req_id[-20:]} error={repr(e)}", flush=True)
+        yield f"data: {json.dumps(usage_chunk())}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(sse_generator(), media_type="text/event-stream")

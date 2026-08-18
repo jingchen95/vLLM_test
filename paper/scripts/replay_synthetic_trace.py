@@ -161,6 +161,7 @@ async def consume_sse_completion(
     send_mono = time.perf_counter()
     first_token_mono: float | None = None
     text_chunks: list[str] = []
+    server_completion_tokens: int | None = None
 
     async with session.post(url, json=payload) as resp:
         if resp.status != 200:
@@ -183,19 +184,32 @@ async def consume_sse_completion(
                 obj = json.loads(data)
             except Exception:
                 continue
-            if first_token_mono is None:
-                first_token_mono = time.perf_counter()
+            usage = obj.get("usage")
+            if isinstance(usage, dict) and usage.get("completion_tokens") is not None:
+                reported = int(usage["completion_tokens"])
+                if reported < 0:
+                    raise ValueError("server reported a negative completion token count")
+                server_completion_tokens = reported
             choices = obj.get("choices") or []
             if not choices:
                 continue
             text = choices[0].get("text") or ""
             if text:
+                if first_token_mono is None:
+                    first_token_mono = time.perf_counter()
                 text_chunks.append(text)
 
     complete_unix_s = time.time()
     complete_mono = time.perf_counter()
     full_text = "".join(text_chunks)
-    completion_tokens = len(tokenizer.encode(full_text, add_special_tokens=False)) if full_text else 0
+    if server_completion_tokens is not None:
+        completion_tokens = server_completion_tokens
+        completion_token_source = "server_usage"
+    else:
+        completion_tokens = (
+            len(tokenizer.encode(full_text, add_special_tokens=False)) if full_text else 0
+        )
+        completion_token_source = "retokenized_text_fallback"
 
     ttft_ms = None
     tpot_ms = None
@@ -212,6 +226,7 @@ async def consume_sse_completion(
         "ttft_ms": ttft_ms,
         "tpot_ms": tpot_ms,
         "completion_tokens": completion_tokens,
+        "completion_token_source": completion_token_source,
     }
 
 
@@ -324,6 +339,12 @@ async def replay_trace(
     output_tokens_total = sum(
         int(r.get("completion_tokens") or 0) for r in results if r.get("ok")
     )
+    completion_token_sources: dict[str, int] = {}
+    for result in results:
+        if not result.get("ok"):
+            continue
+        source = str(result.get("completion_token_source") or "unavailable")
+        completion_token_sources[source] = completion_token_sources.get(source, 0) + 1
 
     return {
         "requests_total": len(results),
@@ -344,6 +365,7 @@ async def replay_trace(
         "input_tokens_total": input_tokens_total,
         "requested_output_tokens_total": requested_output_tokens_total,
         "output_tokens_total": output_tokens_total,
+        "completion_token_sources": completion_token_sources,
         "request_results": results,
     }
 

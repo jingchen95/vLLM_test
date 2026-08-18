@@ -43,7 +43,15 @@ light/moderate load or endpoint capacity.
 The trace client records request success/failure, exact requested input/output
 lengths, actual output tokens, TTFT, TPOT when multiple output tokens are
 observed, E2E latency, and send/completion times.  These values are obtained
-from the client stream and tokenizer, never from Prometheus.
+from the client stream, never from Prometheus. The proxy derives exact actual
+output counts from decode token IDs and emits them as final stream usage. The
+canonical client rejects runs where any successful request falls back to lossy
+text re-tokenization.
+
+One configured phase-level request initializes lazy cross-node NCCL/runtime
+state before the first preflight scrape. Its client artifacts and summary are
+retained, but it is explicitly excluded from all semantic and load measurement
+windows.
 
 Each metrics GET is centrally annotated with a global sequence, scrape-round
 sequence, wall-clock start/end, monotonic start/end, endpoint ID, role, and
@@ -68,6 +76,7 @@ results/xpyd_observability/<run_id>/
     requests.jsonl
     summary.json
     summary.txt
+  client/_phase_warmup/             # when configured; excluded from windows
   P0/
     raw_metrics/*.prom
     server.log
@@ -80,6 +89,7 @@ results/xpyd_observability/<run_id>/
     dry_run.jsonl                 # only when explicitly configured
     semantic_deltas.json          # semantic mode
     load_runs.json                # load mode
+    phase_warmup.json             # when configured
     semantic_summary.json
     semantic_summary.md
     summary.json
@@ -118,9 +128,10 @@ the coordinator is intentionally not a general process manager.
 ## Failure policy
 
 P0/D0 unreachability, non-200/empty metrics, parse ambiguity, client nonzero
-exit, any request failure, absent client summary, absent configured server log,
-or result-write error fails the run.  Missing individual vLLM metric families
-do not fabricate zeros: they remain `null` and are listed for analysis.
+exit, any request failure, absent client summary, missing exact server token
+usage when required, absent configured server log, or result-write error fails
+the run. Missing individual vLLM metric families do not fabricate zeros: they
+remain `null` and are listed for analysis.
 
 ## Model provenance
 

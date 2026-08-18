@@ -12,7 +12,15 @@
   "client": {
     "base_url": "$XPYD_PROXY_URI",
     "script": "paper/scripts/replay_synthetic_trace.py",
-    "protocol": "OpenAI-compatible streaming /v1/completions through existing disagg_proxy.py"
+    "protocol": "OpenAI-compatible streaming /v1/completions through existing disagg_proxy.py",
+    "require_server_token_usage": true
+  },
+  "phase_warmup": {
+    "enabled": true,
+    "input_len": 128,
+    "output_len": 128,
+    "count": 1,
+    "max_concurrency": 1
   },
   "endpoints": [
     {

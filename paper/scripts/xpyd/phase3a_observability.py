@@ -255,6 +255,7 @@ class Phase3AHarness:
             ),
             "semantic_probes": self.config.get("semantic_probes", []),
             "load_probes": self.config.get("load_probes", []),
+            "phase_warmup": self.config.get("phase_warmup", {"enabled": False}),
             "physical_context": self.config.get("physical_context", {}),
             "server_logs": self.config.get("server_logs", {}),
             "dry_run": {
@@ -386,8 +387,7 @@ class Phase3AHarness:
         _write_json(client_dir / "command.json", {"argv": command})
         return command
 
-    @staticmethod
-    def _validate_client_result(client_dir: Path, returncode: int) -> dict:
+    def _validate_client_result(self, client_dir: Path, returncode: int) -> dict:
         if returncode != 0:
             raise Phase3AError("benchmark client failed with exit status %d" % returncode)
         summary_path = client_dir / "summary.json"
@@ -398,6 +398,15 @@ class Phase3AHarness:
             raise Phase3AError("benchmark produced no successful client result")
         if int(summary.get("failed_requests", 0)) != 0:
             raise Phase3AError("benchmark client reported request failures")
+        if bool(self.config.get("client", {}).get("require_server_token_usage", False)):
+            successes = int(summary.get("successful_requests", 0))
+            sources = summary.get("completion_token_sources", {})
+            exact = int(sources.get("server_usage", 0)) if isinstance(sources, dict) else 0
+            if exact != successes:
+                raise Phase3AError(
+                    "exact server completion-token usage required for every successful "
+                    "request: got %d of %d" % (exact, successes)
+                )
         return summary
 
     def _run_client(self, probe: Mapping[str, Any], trace_path: Path) -> dict:
@@ -406,6 +415,29 @@ class Phase3AHarness:
         with (client_dir / "client.log").open("w", encoding="utf-8") as stream:
             result = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT)
         return self._validate_client_result(client_dir, result.returncode)
+
+    def _run_phase_warmup(self) -> Optional[dict]:
+        warmup = dict(self.config.get("phase_warmup", {}))
+        if not bool(warmup.get("enabled", False)):
+            return None
+        probe = {
+            "id": "_phase_warmup",
+            "input_len": int(warmup["input_len"]),
+            "output_len": int(warmup["output_len"]),
+            "count": int(warmup.get("count", 1)),
+            "max_concurrency": int(warmup.get("max_concurrency", 1)),
+        }
+        if probe["count"] > 1:
+            probe["rate_rps"] = float(warmup.get("rate_rps", 1.0))
+        trace = self._write_trace(probe)
+        client = self._run_client(probe, trace)
+        record = {
+            "excluded_from_measurement_windows": True,
+            "probe": probe,
+            "client": client,
+        }
+        _write_json(self.run_dir / "derived" / "phase_warmup.json", record)
+        return record
 
     def _start_client(self, probe: Mapping[str, Any], trace_path: Path) -> Tuple[subprocess.Popen, Any]:
         command = self._client_command(probe, trace_path)
@@ -659,6 +691,9 @@ class Phase3AHarness:
         self._create_layout()
         _write_json(self.run_dir / "metadata.json", self._metadata(normalized))
         try:
+            # Initialize lazy cross-node/runtime state before the first metric
+            # baseline so warmup requests cannot contaminate measured windows.
+            self._run_phase_warmup()
             # Preflight is intentionally a real scrape of both endpoints.
             self._scrape_round("preflight")
             if "semantic" in normalized:

@@ -61,6 +61,7 @@ class FixtureHarness(Phase3AHarness):
             "p99_ttft_ms": 250.0,
             "mean_tpot_ms": 120.0,
             "p99_tpot_ms": 120.0,
+            "completion_token_sources": {"server_usage": 1},
         }
         (trace_path.parent / "summary.json").write_text(
             json.dumps(summary) + "\n", encoding="utf-8"
@@ -88,6 +89,20 @@ class LoadFixtureHarness(FixtureHarness):
     def _start_client(self, probe, trace_path):
         self._run_client(probe, trace_path)
         return FakeProcess(), (trace_path.parent / "fake-stream.log").open("w")
+
+
+class TrackingFixtureHarness(FixtureHarness):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.events = []
+
+    def _run_client(self, probe, trace_path):
+        self.events.append(("client", probe["id"]))
+        return super()._run_client(probe, trace_path)
+
+    def _scrape_round(self, label, probe_id=None):
+        self.events.append(("scrape", label))
+        return super()._scrape_round(label, probe_id)
 
 
 class ScrapeSequence:
@@ -133,6 +148,54 @@ def config(output_root):
 
 
 class Phase3AFixtureTests(unittest.TestCase):
+    def test_required_server_usage_rejects_retokenized_fallback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            strict_config = config(Path(temp))
+            strict_config["client"]["require_server_token_usage"] = True
+            harness = FixtureHarness(strict_config, run_id="strict")
+            client_dir = Path(temp) / "client"
+            client_dir.mkdir()
+            (client_dir / "summary.json").write_text(json.dumps({
+                "successful_requests": 1,
+                "failed_requests": 0,
+                "completion_token_sources": {"retokenized_text_fallback": 1},
+            }), encoding="utf-8")
+
+            with self.assertRaisesRegex(Phase3AError, "exact server completion-token usage"):
+                harness._validate_client_result(client_dir, 0)
+
+    def test_phase_warmup_precedes_preflight_and_is_excluded(self):
+        baseline = prom(1000, 500, 20)
+        source = ScrapeSequence({
+            "P0": [baseline, baseline, prom(1128, 501, 21)],
+            "D0": [baseline, baseline, prom(1001, 628, 21)],
+        })
+        with tempfile.TemporaryDirectory() as temp:
+            warm_config = config(Path(temp))
+            warm_config["phase_warmup"] = {
+                "enabled": True,
+                "input_len": 128,
+                "output_len": 128,
+                "count": 1,
+                "max_concurrency": 1,
+            }
+            harness = TrackingFixtureHarness(
+                warm_config, run_id="warmup", scrape_source=source,
+            )
+            run_dir = harness.run(("semantic",))
+
+            self.assertEqual(harness.events[0], ("client", "_phase_warmup"))
+            self.assertEqual(harness.events[1], ("scrape", "preflight"))
+            warmup = json.loads(
+                (run_dir / "derived/phase_warmup.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue(warmup["excluded_from_measurement_windows"])
+            self.assertEqual(warmup["client"]["output_tokens_total"], 128)
+            deltas = json.loads(
+                (run_dir / "derived/semantic_deltas.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(deltas), 1)
+
     def test_before_after_pd_deltas_buckets_summary_and_layout(self):
         baseline = prom(1000, 500, 20)
         source = ScrapeSequence({

@@ -407,11 +407,13 @@ both endpoints every 1–2 seconds to observe queues, running requests, KV use,
 rates, tail buckets, missing metrics, and scrape gaps.
 
 Every HTTP response is retained verbatim alongside centrally assigned wall and
-monotonic timestamps, sequence, endpoint role, and URI. Client TTFT/TPOT/E2E,
-success, and token measurements come from the existing streaming trace client,
-not from Prometheus. Client and endpoint values are therefore independent
-evidence sources; agreement is reported as observed correlation, not proof of
-internal phase ownership.
+monotonic timestamps, sequence, endpoint role, and URI. Client TTFT/TPOT/E2E
+and success come from the existing streaming trace client; exact output counts
+come from decode token IDs carried as final proxy stream usage, not from
+Prometheus or text re-tokenization. A phase-level request warms lazy NCCL state
+before the first metric baseline and is excluded from measured windows. Client
+and endpoint values are therefore independent evidence sources; agreement is
+reported as observed correlation, not proof of internal phase ownership.
 
 The Phase 3A physical branch reuses the established server, connector, proxy,
 health-check, log, and process-cleanup path, but skips energy/NVML collection,

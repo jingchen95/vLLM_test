@@ -1,8 +1,8 @@
 # XpYd Phase 3A physical runbook (Chalmers)
 
 This runbook prepares and invokes the existing `neptune` L40S → `europa` L4
-Experiment E path.  The commands have not been run from this local macOS
-workspace; no physical result is claimed here.
+Experiment E path. It is a procedure; each physical result is claimed only by
+its archived Slurm and run-directory artifacts.
 
 ## 1. Review and preflight
 
@@ -37,10 +37,12 @@ sbatch --export=ALL,EXP=E,E_SMOKE=1,XPYD_PHASE3A_CONFIG=paper/configs/xpyd_phase
   run_disagg_benchmark.sh
 ```
 
-This makes exactly one configured logical request after the preflight and
-before-scrape pair. The full command below runs all four single-request semantic
-shapes followed by two short loads. Adjust rate/duration only in a copied config
-and keep that config with results.
+This makes one unmeasured phase-level warmup request before the first preflight
+scrape, then exactly one configured logical request inside the measured
+before/after window. The warmup initializes lazy NCCL/runtime state and is saved
+under `client/_phase_warmup` plus `derived/phase_warmup.json`. The full command
+below runs all four single-request semantic shapes followed by two short loads.
+Adjust rate/duration only in a copied config and keep that config with results.
 
 ## 3. Submit the physical Phase 3A job
 
@@ -83,6 +85,10 @@ assume both endpoints increment identically.  Inspect the exact bucket arrays
 and `target_boundary_visibility` around TTFT 0.3/0.5/1.0 seconds and
 inter-token 0.1/0.2 seconds.  If a target lies inside a bucket, report only the
 available bucket-resolution bound.
+
+Confirm each client `summary.json` reports every successful request under
+`completion_token_sources.server_usage`. The canonical config fails instead of
+silently accepting lossy text re-tokenization.
 
 For short loads, inspect `endpoint_window_behavior`, queue/running/KV maxima,
 rate maxima, tail bounds, missing metric unions, and `max_central_scrape_gap_s`.
