@@ -106,12 +106,19 @@ rate maxima, tail bounds, missing metric unions, and `max_central_scrape_gap_s`.
 Use `telemetry.jsonl` for evolution rather than interpreting maxima alone.
 Also inspect `load_runs.json` for strict before/after endpoint deltas and
 `load_monitoring.json` for successful, failed, and consecutive interval scrape
-counts. A completed run may contain explicitly tolerated interval gaps, but it
-must satisfy the configured coverage policy.
+counts. Check `scheduled_interval_scrapes`, `missed_interval_scrapes`,
+`late_interval_scrapes`, and per-endpoint maximum/mean scheduling drift. Every
+actual attempt in `scrapes.jsonl` has scheduled/start/finish/latency fields;
+missed slots have `status: missed` and no fabricated timing or metric payload.
+A completed run may contain explicitly tolerated interval gaps, but it must
+satisfy the configured coverage policy.
 
 Finally, `proxy_diagnostics_audit.json` must report `valid: true` and its record
 count must equal the successful warmup + semantic + load request count. This
-prevents a run from completing with a truncated proxy diagnostic artifact.
+prevents a run from completing with a truncated proxy diagnostic artifact. It
+must also report `logical_request_ids_exactly_match: true`: client
+`logical_request_id`/`trace_request_id` and proxy diagnostic `request_id` are
+the same identifier, not ordinally inferred matches.
 
 ## 5. Re-run analysis without touching servers
 

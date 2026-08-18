@@ -4,6 +4,7 @@
   "vllm_version": "0.15.1",
   "output_root": "results/xpyd_observability",
   "scrape_interval_s": 1.0,
+  "scrape_late_tolerance_s": 0.1,
   "staleness_threshold_s": 2.5,
   "request_timeout_s": 900.0,
   "collector": {
@@ -18,7 +19,8 @@
     "script": "paper/scripts/replay_synthetic_trace.py",
     "protocol": "OpenAI-compatible streaming /v1/completions through existing disagg_proxy.py",
     "require_server_token_usage": true,
-    "require_real_decode_streaming": true
+    "require_real_decode_streaming": true,
+    "require_logical_request_id_propagation": true
   },
   "phase_warmup": {
     "enabled": true,

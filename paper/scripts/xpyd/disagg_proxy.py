@@ -46,6 +46,7 @@ class ProxyConfig:
 @dataclass
 class ProxyDiagnostics:
     request_id: str
+    vllm_request_id: str
     incoming_client_stream: bool
     outgoing_decode_stream: bool
     timestamps_monotonic_s: dict[str, Optional[float]]
@@ -72,6 +73,8 @@ class ProxyDiagnostics:
         return {
             "event": "xpyd_proxy_stream_diagnostics",
             "request_id": self.request_id,
+            "logical_request_id": self.request_id,
+            "vllm_request_id": self.vllm_request_id,
             "incoming_client_stream": self.incoming_client_stream,
             "outgoing_decode_stream": self.outgoing_decode_stream,
             "decode_content_type": self.decode_content_type,
@@ -140,8 +143,26 @@ def build_decode_payload(client_body: Mapping[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def upstream_headers(request_id: str) -> dict[str, str]:
-    return {"X-Request-Id": request_id}
+def upstream_headers(
+    logical_request_id: str,
+    vllm_request_id: str,
+) -> dict[str, str]:
+    return {
+        "X-Request-Id": vllm_request_id,
+        "X-Xpyd-Logical-Request-Id": logical_request_id,
+    }
+
+
+def ingress_logical_request_id(headers: Mapping[str, str]) -> Optional[str]:
+    logical_request_id = headers.get("X-Xpyd-Logical-Request-Id")
+    request_id = headers.get("X-Request-Id")
+    if (
+        logical_request_id is not None
+        and request_id is not None
+        and logical_request_id != request_id
+    ):
+        raise ValueError("conflicting ingress logical request ID headers")
+    return logical_request_id or request_id
 
 
 async def _close_upstream(response: Any, session: Any) -> None:
@@ -175,11 +196,27 @@ class DisaggProxyCore:
     def _print_diagnostics(value: Mapping[str, Any]) -> None:
         print(json.dumps(dict(value), sort_keys=True), flush=True)
 
-    def _request_id(self) -> str:
+    @staticmethod
+    def _logical_request_id(value: Optional[str]) -> str:
+        request_id = value if value is not None else uuid.uuid4().hex
+        if not request_id or request_id != request_id.strip():
+            raise ValueError("logical request ID must be non-empty without edge whitespace")
+        if len(request_id) > 256 or any(
+            not 33 <= ord(character) <= 126 for character in request_id
+        ):
+            raise ValueError(
+                "logical request ID must be printable ASCII and <=256 characters"
+            )
+        return request_id
+
+    def _vllm_request_id(self, logical_request_id: str) -> str:
+        # vLLM 0.15.1's P2pNcclConnector parses both peer addresses from this
+        # transport envelope.  Preserve that contract and use the ingress ID as
+        # its stable suffix instead of generating a second identifier domain.
         return (
             f"___prefill_addr_{self.config.prefill_addr_host}:{self.config.kv_port}"
             f"___decode_addr_{self.config.decode_addr_host}:{self.config.kv_port}_"
-            f"{uuid.uuid4().hex}"
+            f"{logical_request_id}"
         )
 
     def _diagnostic_headers(self, diagnostics: ProxyDiagnostics) -> dict[str, str]:
@@ -195,6 +232,8 @@ class DisaggProxyCore:
             "X-Xpyd-Decode-Stream-Available": str(
                 diagnostics.decode_stream_available
             ).lower(),
+            "X-Xpyd-Logical-Request-Id": diagnostics.request_id,
+            "X-Xpyd-Vllm-Request-Id": diagnostics.vllm_request_id,
         }
 
     def _emit(self, diagnostics: ProxyDiagnostics) -> None:
@@ -242,11 +281,17 @@ class DisaggProxyCore:
             await _close_upstream(response, session)
             self._emit(diagnostics)
 
-    async def prepare(self, client_body: Mapping[str, Any]) -> PreparedProxyResponse:
+    async def prepare(
+        self,
+        client_body: Mapping[str, Any],
+        logical_request_id: Optional[str] = None,
+    ) -> PreparedProxyResponse:
         incoming_stream = bool(client_body.get("stream", False))
-        request_id = self._request_id()
+        request_id = self._logical_request_id(logical_request_id)
+        vllm_request_id = self._vllm_request_id(request_id)
         diagnostics = ProxyDiagnostics(
             request_id=request_id,
+            vllm_request_id=vllm_request_id,
             incoming_client_stream=incoming_stream,
             outgoing_decode_stream=incoming_stream,
             timestamps_monotonic_s={
@@ -261,7 +306,7 @@ class DisaggProxyCore:
                 "response_completed": None,
             },
         )
-        headers = upstream_headers(request_id)
+        headers = upstream_headers(request_id, vllm_request_id)
 
         prefill_session = self.session_factory()
         diagnostics.record("prefill_started", self.clock())
@@ -403,8 +448,12 @@ def create_app(
     @app.post("/v1/completions")
     async def completions(raw_request: Request) -> Any:
         try:
-            prepared = await core.prepare(await raw_request.json())
-        except ProxyUpstreamError as exc:
+            logical_request_id = ingress_logical_request_id(raw_request.headers)
+            prepared = await core.prepare(
+                await raw_request.json(),
+                logical_request_id=logical_request_id,
+            )
+        except (ProxyUpstreamError, ValueError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=502)
         if prepared.stream is not None:
             return StreamingResponse(

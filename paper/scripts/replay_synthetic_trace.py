@@ -156,6 +156,7 @@ async def consume_sse_completion(
     url: str,
     payload: dict[str, Any],
     tokenizer: Any,
+    logical_request_id: str | None = None,
 ) -> dict[str, Any]:
     send_unix_s = time.time()
     send_mono = time.perf_counter()
@@ -165,7 +166,16 @@ async def consume_sse_completion(
     server_completion_tokens: int | None = None
     stream_error: str | None = None
 
-    async with session.post(url, json=payload) as resp:
+    request_headers = None
+    if logical_request_id is not None:
+        request_headers = {
+            "X-Request-Id": logical_request_id,
+            "X-Xpyd-Logical-Request-Id": logical_request_id,
+        }
+    async with session.post(url, json=payload, headers=request_headers) as resp:
+        echoed_logical_request_id = resp.headers.get(
+            "X-Xpyd-Logical-Request-Id"
+        )
         incoming_client_stream = resp.headers.get(
             "X-Xpyd-Incoming-Client-Stream"
         )
@@ -197,6 +207,12 @@ async def consume_sse_completion(
                 "client_ttft_valid": False,
                 "client_tpot_valid": False,
                 "client_itl_valid": False,
+                "logical_request_id": logical_request_id,
+                "echoed_logical_request_id": echoed_logical_request_id,
+                "logical_request_id_propagated": (
+                    logical_request_id is not None
+                    and echoed_logical_request_id == logical_request_id
+                ),
             }
 
         async for raw_line in resp.content:
@@ -245,6 +261,12 @@ async def consume_sse_completion(
             "client_ttft_valid": False,
             "client_tpot_valid": False,
             "client_itl_valid": False,
+            "logical_request_id": logical_request_id,
+            "echoed_logical_request_id": echoed_logical_request_id,
+            "logical_request_id_propagated": (
+                logical_request_id is not None
+                and echoed_logical_request_id == logical_request_id
+            ),
         }
     full_text = "".join(text_chunks)
     if server_completion_tokens is not None:
@@ -287,6 +309,12 @@ async def consume_sse_completion(
         "client_tpot_valid": latency_stream_valid and tpot_ms is not None,
         "client_itl_valid": latency_stream_valid and bool(itls_ms),
         "streamed_text_event_count": len(token_event_monos),
+        "logical_request_id": logical_request_id,
+        "echoed_logical_request_id": echoed_logical_request_id,
+        "logical_request_id_propagated": (
+            logical_request_id is not None
+            and echoed_logical_request_id == logical_request_id
+        ),
     }
 
 
@@ -359,7 +387,13 @@ async def replay_trace(
                     "ignore_eos": True,
                     "stream": True,
                 }
-                result = await consume_sse_completion(session, url, payload, tokenizer)
+                result = await consume_sse_completion(
+                    session,
+                    url,
+                    payload,
+                    tokenizer,
+                    logical_request_id=req.request_id,
+                )
                 result["trace_request_id"] = req.request_id
                 result["arrival_time_s"] = req.arrival_time_s
                 result["input_len"] = req.input_len
@@ -445,6 +479,11 @@ async def replay_trace(
         ),
         "client_itl_valid_requests": sum(
             1 for r in results if r.get("ok") and r.get("client_itl_valid")
+        ),
+        "logical_request_id_propagated_requests": sum(
+            1
+            for r in results
+            if r.get("ok") and r.get("logical_request_id_propagated")
         ),
         "request_results": results,
     }

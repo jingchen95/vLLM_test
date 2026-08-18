@@ -66,12 +66,18 @@ class FixtureHarness(Phase3AHarness):
             "client_ttft_valid_requests": 1,
             "client_tpot_valid_requests": 1,
             "client_itl_valid_requests": 1,
+            "logical_request_id_propagated_requests": 1,
         }
         (trace_path.parent / "summary.json").write_text(
             json.dumps(summary) + "\n", encoding="utf-8"
         )
         (trace_path.parent / "requests.jsonl").write_text(
-            json.dumps({"ok": True, "trace_request_id": "fixture-0"}) + "\n",
+            json.dumps({
+                "ok": True,
+                "trace_request_id": "fixture-0",
+                "logical_request_id": "fixture-0",
+                "logical_request_id_propagated": True,
+            }) + "\n",
             encoding="utf-8",
         )
         return summary
@@ -136,8 +142,13 @@ def config(output_root):
         "tokenizer_model": "model-a",
         "vllm_version": "0.15.1",
         "output_root": str(output_root),
+        "scrape_interval_s": 0.01,
+        "scrape_late_tolerance_s": 0.002,
         "collector": {"model_name": "model-a"},
-        "client": {"base_url": "http://fixture-proxy:8000"},
+        "client": {
+            "base_url": "http://fixture-proxy:8000",
+            "require_logical_request_id_propagation": True,
+        },
         "endpoints": [
             {
                 "endpoint_id": "P0", "role": "prefill", "gpu_type": "L40S",
@@ -335,6 +346,21 @@ vllm:request_success_total{model_name="model-a"} 1
             )
             self.assertTrue(runs[0]["endpoints"]["P0"]["window"]["valid"])
             self.assertTrue(runs[0]["endpoints"]["D0"]["window"]["valid"])
+            monitoring = runs[0]["monitoring"]
+            self.assertEqual(
+                monitoring["sampling_architecture"],
+                "independent_fixed_period_endpoint_workers",
+            )
+            self.assertGreaterEqual(
+                monitoring["scheduled_interval_scrapes"]["P0"], 1
+            )
+            self.assertGreaterEqual(
+                monitoring["scheduled_interval_scrapes"]["D0"], 1
+            )
+            self.assertIn(
+                "max_scheduling_drift_s",
+                summary["endpoint_window_behavior"]["P0"],
+            )
 
     def test_transient_load_interval_scrape_error_is_recorded_and_tolerated(self):
         baseline = prom(1000, 500, 20)
@@ -419,6 +445,9 @@ vllm:request_success_total{model_name="model-a"} 1
             temp_path = Path(temp)
             diagnostics = temp_path / "proxy.jsonl"
             diagnostics.write_text(json.dumps({
+                "request_id": "fixture-0",
+                "logical_request_id": "fixture-0",
+                "vllm_request_id": "___prefill_addr_p___decode_addr_d_fixture-0",
                 "outcome": "completed",
                 "incoming_client_stream": True,
                 "outgoing_decode_stream": True,
@@ -463,6 +492,7 @@ vllm:request_success_total{model_name="model-a"} 1
             self.assertTrue(audit["valid"])
             self.assertEqual(audit["expected_successful_requests"], 1)
             self.assertEqual(audit["diagnostic_record_count"], 1)
+            self.assertTrue(audit["logical_request_ids_exactly_match"])
 
 
 if __name__ == "__main__":

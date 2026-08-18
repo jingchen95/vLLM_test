@@ -53,8 +53,10 @@ class FakeResponse:
 class FakeSession:
     def __init__(self, events):
         self.response = FakeResponse(events)
+        self.posts = []
 
-    def post(self, url, json):
+    def post(self, url, json, headers=None):
+        self.posts.append({"url": url, "json": json, "headers": headers})
         return self.response
 
 
@@ -112,18 +114,30 @@ class StreamingTokenAccountingTests(unittest.TestCase):
             "X-Xpyd-Outgoing-Decode-Stream": "true",
             "X-Xpyd-Decode-Content-Type": "text/event-stream",
             "X-Xpyd-Decode-Stream-Available": "true",
+            "X-Xpyd-Logical-Request-Id": "trace-request-007",
         }
 
         session = FakeSession(events)
         session.response.headers = headers
         result = asyncio.run(consume_sse_completion(
-            session, "http://proxy/v1/completions", {}, tokenizer,
+            session,
+            "http://proxy/v1/completions",
+            {},
+            tokenizer,
+            logical_request_id="trace-request-007",
         ))
         self.assertTrue(result["decode_stream_available"])
         self.assertTrue(result["client_ttft_valid"])
         self.assertTrue(result["client_tpot_valid"])
         self.assertTrue(result["client_itl_valid"])
         self.assertEqual(result["streamed_text_event_count"], 2)
+        self.assertEqual(
+            session.posts[0]["headers"]["X-Request-Id"],
+            "trace-request-007",
+        )
+        self.assertEqual(result["logical_request_id"], "trace-request-007")
+        self.assertEqual(result["echoed_logical_request_id"], "trace-request-007")
+        self.assertTrue(result["logical_request_id_propagated"])
 
     def test_missing_usage_is_explicitly_marked_as_fallback(self):
         tokenizer = FakeTokenizer(retokenized_count=7)

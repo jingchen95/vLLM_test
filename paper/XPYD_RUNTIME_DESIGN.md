@@ -402,9 +402,10 @@ metrics have the semantics assumed by this CPU-only architecture.
 Controlled semantic probes scrape P0 and D0 before and after a known small
 logical request count and compare independent client results with each
 endpoint's request, prompt-token, generation-token, and histogram deltas. Short
-load probes use configurable rate/duration/shape values and centrally scrape
-both endpoints every 1–2 seconds to observe queues, running requests, KV use,
-rates, tail buckets, missing metrics, and scrape gaps.
+load probes use configurable rate/duration/shape values and independently
+scrape both endpoints on a fixed-period schedule to observe queues, running
+requests, KV use, rates, tail buckets, missing metrics, scrape latency/drift,
+and explicit late or missed samples.
 
 Every HTTP response is retained verbatim alongside centrally assigned wall and
 monotonic timestamps, sequence, endpoint role, and URI. Client TTFT/TPOT/E2E

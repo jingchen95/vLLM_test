@@ -33,9 +33,12 @@ with one logical request for each configurable `(IL, OL)` pair: `(128,128)`,
 `(2048,128)`, `(128,512)`, and `(2048,512)`.
 
 The short-load mode generates a deterministic trace from configurable rate,
-duration, shape, and concurrency values.  It scrapes both endpoints every
-configured interval (1 second in the example) while the client is alive.  The
-rates in the example are bring-up values, not claims of scientifically correct
+duration, shape, and concurrency values. Independent P0 and D0 workers scrape
+on the same configured fixed-period schedule (1 second in the example) while
+the client is alive. A slow endpoint cannot shift the other endpoint's next
+scheduled sample. Per-endpoint overlap is forbidden: schedule slots that pass
+while the prior scrape remains in flight are recorded as missed. The rates in
+the example are bring-up values, not claims of scientifically correct
 light/moderate load or endpoint capacity.
 
 ## Independent evidence and timestamps
@@ -55,8 +58,11 @@ retained, but it is explicitly excluded from all semantic and load measurement
 windows.
 
 Each metrics GET is centrally annotated with a global sequence, scrape-round
-sequence, wall-clock start/end, monotonic start/end, endpoint ID, role, and
-exact URI.  Node-local log clocks remain supplementary evidence.
+sequence, scheduled monotonic time, actual wall/monotonic start and finish,
+scrape latency, scheduling drift, late status, endpoint ID, role, and exact
+URI. `scrapes.jsonl` also contains explicit missed records with no fabricated
+snapshot. Node-local log clocks remain supplementary evidence. This is a
+fixed-period best-effort sampler, not a real-time scheduling claim.
 
 `VLLMMetricsCollector.scrape_raw()` fetches once and returns both the exact text
 and the parsed snapshot.  Thus raw retention and derivation cannot accidentally
@@ -105,12 +111,14 @@ server-log references, Slurm context, and explicit exclusions.  Secret-shaped
 configuration keys are rejected rather than copied.
 
 `summary.json` reports observed missing metrics, gauge maxima, token/request
-rates, reconstructed tail upper bounds, central scrape gaps, reset-like
+rates, reconstructed tail upper bounds, scrape latency/drift and missed/late
+counts, central scrape gaps, reset-like
 discontinuities, all actual histogram boundaries, and whether exact 300/500/
 1000 ms TTFT and 100/200 ms inter-token boundaries are visible.  These target
 values are inspection points only; the harness does not enforce them as SLOs.
 
-Each `proxy_diagnostics.jsonl` record captures incoming/outgoing stream flags,
+Each `proxy_diagnostics.jsonl` record captures the logical request ID, the
+vLLM transport request ID, incoming/outgoing stream flags,
 the actual D Content-Type, stream availability, request/prefill/decode/header/
 first-chunk/last-chunk/completion monotonic timestamps, first-chunk forwarding
 delay, and request/decode durations. These diagnostics audit the path; they are
@@ -153,6 +161,15 @@ and D use `/v1/completions` with the same `X-Request-Id`; P remains
 `stream=false,max_tokens=1`, while D uses real `stream=true` and its response
 bytes are forwarded incrementally. A non-SSE D response fails closed with
 TTFT/TPOT/ITL invalid rather than being replayed.
+
+The trace client's request ID is now the end-to-end logical ID. The proxy reuses
+it when present or generates it once at ingress, echoes it to the client,
+records it in diagnostics, and forwards it unchanged to P0/D0 in
+`X-Xpyd-Logical-Request-Id`. vLLM 0.15.1's P2pNcclConnector additionally
+requires peer addresses inside `X-Request-Id`; the proxy preserves that serving
+contract and uses the same logical ID as the stable suffix of that transport
+envelope. Thus diagnostics `request_id` and client `trace_request_id` join
+exactly without altering routing or KV-transfer semantics.
 
 ## Model provenance
 

@@ -12,6 +12,7 @@ from xpyd.disagg_proxy import (
     DisaggProxyCore,
     ProxyConfig,
     ProxyUpstreamError,
+    ingress_logical_request_id,
 )
 
 
@@ -90,6 +91,24 @@ def config():
 
 
 class DisaggProxyStreamingTests(unittest.TestCase):
+    def test_ingress_reuses_one_id_and_rejects_conflicting_domains(self):
+        self.assertEqual(
+            ingress_logical_request_id({"X-Request-Id": "client-1"}),
+            "client-1",
+        )
+        self.assertEqual(
+            ingress_logical_request_id({
+                "X-Request-Id": "client-1",
+                "X-Xpyd-Logical-Request-Id": "client-1",
+            }),
+            "client-1",
+        )
+        with self.assertRaisesRegex(ValueError, "conflicting"):
+            ingress_logical_request_id({
+                "X-Request-Id": "client-1",
+                "X-Xpyd-Logical-Request-Id": "client-2",
+            })
+
     def test_proxy_module_entrypoint_does_not_shadow_stdlib_types(self):
         repo_root = Path(__file__).resolve().parents[1]
         env = {"PYTHONPATH": str(repo_root / "paper/scripts")}
@@ -120,12 +139,15 @@ class DisaggProxyStreamingTests(unittest.TestCase):
         )
 
         async def scenario():
-            prepared = await core.prepare({
-                "model": "m",
-                "prompt": "hello",
-                "max_tokens": 2,
-                "stream": True,
-            })
+            prepared = await core.prepare(
+                {
+                    "model": "m",
+                    "prompt": "hello",
+                    "max_tokens": 2,
+                    "stream": True,
+                },
+                logical_request_id="trace-request-007",
+            )
             self.assertIsNotNone(prepared.stream)
             first = await prepared.stream.__anext__()
             self.assertEqual(first, chunks[0])
@@ -149,16 +171,64 @@ class DisaggProxyStreamingTests(unittest.TestCase):
             prefill_post["headers"]["X-Request-Id"],
             decode_post["headers"]["X-Request-Id"],
         )
+        self.assertEqual(
+            prefill_post["headers"]["X-Xpyd-Logical-Request-Id"],
+            "trace-request-007",
+        )
+        self.assertEqual(
+            decode_post["headers"]["X-Xpyd-Logical-Request-Id"],
+            "trace-request-007",
+        )
+        self.assertTrue(
+            prefill_post["headers"]["X-Request-Id"].endswith(
+                "_trace-request-007"
+            )
+        )
+        self.assertEqual(prepared.diagnostics.request_id, "trace-request-007")
+        self.assertEqual(
+            prepared.headers["X-Xpyd-Logical-Request-Id"],
+            "trace-request-007",
+        )
         self.assertEqual(forwarded, chunks)
         self.assertEqual(decode.read_calls, 0)
         self.assertTrue(decode.content.completed)
         self.assertEqual(prepared.diagnostics.outcome, "completed")
         self.assertTrue(prepared.diagnostics.decode_stream_available)
         self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0]["request_id"], "trace-request-007")
+        self.assertEqual(
+            diagnostics[0]["logical_request_id"], "trace-request-007"
+        )
+        self.assertEqual(
+            diagnostics[0]["vllm_request_id"],
+            prefill_post["headers"]["X-Request-Id"],
+        )
         self.assertIsNotNone(
             diagnostics[0]["durations_ms"]["first_chunk_forwarding_delay"]
         )
         self.assertNotIn("sleep", inspect.getsource(core._real_decode_stream))
+
+    def test_ingress_generates_one_logical_id_when_client_omits_it(self):
+        factory = SessionFactory([
+            FakeResponse(),
+            FakeResponse(content_type="application/json", body=b"{}"),
+        ])
+        diagnostics = []
+        core = DisaggProxyCore(
+            config(), factory, clock=StepClock(), diagnostic_sink=diagnostics.append,
+        )
+
+        prepared = asyncio.run(core.prepare({"prompt": "hello", "stream": False}))
+        prefill_headers = factory.sessions[0].posts[0]["headers"]
+        decode_headers = factory.sessions[1].posts[0]["headers"]
+
+        self.assertTrue(prepared.diagnostics.request_id)
+        self.assertEqual(
+            prefill_headers["X-Xpyd-Logical-Request-Id"],
+            prepared.diagnostics.request_id,
+        )
+        self.assertEqual(prefill_headers, decode_headers)
+        self.assertEqual(diagnostics[0]["request_id"], prepared.diagnostics.request_id)
 
     def test_nonstreaming_decode_fails_closed_without_replay(self):
         prefill = FakeResponse()

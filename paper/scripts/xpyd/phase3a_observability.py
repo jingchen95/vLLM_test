@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import argparse
 import csv
-from dataclasses import asdict
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
 import math
@@ -19,6 +20,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
@@ -55,6 +57,131 @@ HISTOGRAM_FIELDS = {
 
 class Phase3AError(RuntimeError):
     """An explicit validation failure; never silently downgraded to success."""
+
+
+@dataclass(frozen=True)
+class ScrapeAttempt:
+    endpoint: EndpointSpec
+    scheduled_monotonic_s: float
+    actual_wall_start_s: float
+    actual_wall_finish_s: float
+    actual_monotonic_start_s: float
+    actual_monotonic_finish_s: float
+    raw: Optional[VLLMRawScrape]
+    error: Optional[BaseException]
+
+
+@dataclass(frozen=True)
+class ScheduledScrapeEvent:
+    endpoint: EndpointSpec
+    schedule_index: int
+    scheduled_monotonic_s: float
+    detected_monotonic_s: float
+    attempt: Optional[ScrapeAttempt]
+    missed: bool
+    missed_reason: Optional[str]
+
+
+class FixedPeriodScrapeOrchestrator:
+    """Run one independent fixed-period scrape worker per endpoint.
+
+    Workers never overlap scrapes for the same endpoint.  If an endpoint is
+    still busy when one or more of its scheduled slots pass, those slots are
+    emitted as explicit missed events.  Other endpoint workers remain
+    independent, so a slow P scrape cannot shift D's schedule (or vice versa).
+    """
+
+    def __init__(
+        self,
+        endpoints: Sequence[EndpointSpec],
+        scrape: Callable[[EndpointSpec, float], ScrapeAttempt],
+        period_s: float,
+        monotonic_clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if period_s <= 0 or not math.isfinite(period_s):
+            raise ValueError("period_s must be finite and positive")
+        self.endpoints = tuple(endpoints)
+        self.scrape = scrape
+        self.period_s = period_s
+        self.monotonic_clock = monotonic_clock
+
+    def run_while(self, active: Callable[[], bool]) -> list[ScheduledScrapeEvent]:
+        base_s = self.monotonic_clock()
+        stop = threading.Event()
+        events: list[ScheduledScrapeEvent] = []
+        lock = threading.Lock()
+        stop_requested_at: list[Optional[float]] = [None]
+
+        def emit(event: ScheduledScrapeEvent) -> None:
+            with lock:
+                events.append(event)
+
+        def worker(endpoint: EndpointSpec) -> None:
+            schedule_index = 0
+            while not stop.is_set():
+                scheduled_s = base_s + schedule_index * self.period_s
+                delay_s = scheduled_s - self.monotonic_clock()
+                if delay_s > 0 and stop.wait(delay_s):
+                    break
+                if stop.is_set():
+                    break
+                attempt = self.scrape(endpoint, scheduled_s)
+                detected_s = self.monotonic_clock()
+                emit(ScheduledScrapeEvent(
+                    endpoint=endpoint,
+                    schedule_index=schedule_index,
+                    scheduled_monotonic_s=scheduled_s,
+                    detected_monotonic_s=detected_s,
+                    attempt=attempt,
+                    missed=False,
+                    missed_reason=None,
+                ))
+                schedule_index += 1
+                coverage_end_s = stop_requested_at[0]
+                if coverage_end_s is None:
+                    coverage_end_s = detected_s
+                while base_s + schedule_index * self.period_s <= coverage_end_s:
+                    missed_s = base_s + schedule_index * self.period_s
+                    emit(ScheduledScrapeEvent(
+                        endpoint=endpoint,
+                        schedule_index=schedule_index,
+                        scheduled_monotonic_s=missed_s,
+                        detected_monotonic_s=detected_s,
+                        attempt=None,
+                        missed=True,
+                        missed_reason="previous_endpoint_scrape_still_in_flight",
+                    ))
+                    schedule_index += 1
+
+        threads = [
+            threading.Thread(
+                target=worker,
+                args=(endpoint,),
+                name="xpyd-scrape-%s" % endpoint.endpoint_id,
+                daemon=True,
+            )
+            for endpoint in self.endpoints
+        ]
+        for thread in threads:
+            thread.start()
+        try:
+            # Polling only controls when collection stops.  Endpoint cadence is
+            # owned by the independent workers above.
+            while active():
+                stop.wait(min(0.75 * self.period_s, 0.05))
+        finally:
+            stop_requested_at[0] = self.monotonic_clock()
+            stop.set()
+            for thread in threads:
+                thread.join()
+        return sorted(
+            events,
+            key=lambda event: (
+                event.schedule_index,
+                event.endpoint.endpoint_id,
+                event.missed,
+            ),
+        )
 
 
 def _utc_now_id() -> str:
@@ -253,6 +380,10 @@ class Phase3AHarness:
             "endpoints": [asdict(endpoint) for endpoint in self.endpoints],
             "client": self.config["client"],
             "scrape_interval_s": self.config.get("scrape_interval_s", 1.0),
+            "scrape_late_tolerance_s": self.config.get(
+                "scrape_late_tolerance_s",
+                0.1 * float(self.config.get("scrape_interval_s", 1.0)),
+            ),
             "staleness_threshold_s": self.config.get(
                 "staleness_threshold_s",
                 2.5 * float(self.config.get("scrape_interval_s", 1.0)),
@@ -278,6 +409,190 @@ class Phase3AHarness:
             ],
         }
 
+    def _perform_scrape(
+        self,
+        endpoint: EndpointSpec,
+        scheduled_monotonic_s: float,
+    ) -> ScrapeAttempt:
+        wall_start = self.wall_clock()
+        mono_start = self.monotonic_clock()
+        raw: Optional[VLLMRawScrape] = None
+        error: Optional[BaseException] = None
+        try:
+            raw = self.scrape_source(endpoint)
+            if not raw.raw_text.strip():
+                raise Phase3AError("empty /metrics response")
+            if raw.snapshot.endpoint_id != endpoint.endpoint_id:
+                raise Phase3AError("scrape returned wrong endpoint identity")
+        except Exception as exc:
+            raw = None
+            error = exc
+        return ScrapeAttempt(
+            endpoint=endpoint,
+            scheduled_monotonic_s=scheduled_monotonic_s,
+            actual_wall_start_s=wall_start,
+            actual_wall_finish_s=self.wall_clock(),
+            actual_monotonic_start_s=mono_start,
+            actual_monotonic_finish_s=self.monotonic_clock(),
+            raw=raw,
+            error=error,
+        )
+
+    def _timing_fields(self, attempt: ScrapeAttempt) -> dict:
+        latency_s = max(
+            0.0,
+            attempt.actual_monotonic_finish_s - attempt.actual_monotonic_start_s,
+        )
+        drift_s = max(
+            0.0,
+            attempt.actual_monotonic_start_s - attempt.scheduled_monotonic_s,
+        )
+        tolerance_s = float(self.config.get(
+            "scrape_late_tolerance_s",
+            0.1 * float(self.config.get("scrape_interval_s", 1.0)),
+        ))
+        return {
+            "scheduled_monotonic_start_s": attempt.scheduled_monotonic_s,
+            "actual_wall_start_s": attempt.actual_wall_start_s,
+            "actual_wall_finish_s": attempt.actual_wall_finish_s,
+            "actual_monotonic_start_s": attempt.actual_monotonic_start_s,
+            "actual_monotonic_finish_s": attempt.actual_monotonic_finish_s,
+            # Backward-compatible aliases used by accepted Phase 3A analysis.
+            "central_wall_start_s": attempt.actual_wall_start_s,
+            "central_wall_end_s": attempt.actual_wall_finish_s,
+            "central_monotonic_start_s": attempt.actual_monotonic_start_s,
+            "central_monotonic_end_s": attempt.actual_monotonic_finish_s,
+            "scrape_latency_s": latency_s,
+            "scrape_latency_ms": latency_s * 1000.0,
+            "scheduling_drift_s": drift_s,
+            "late_tolerance_s": tolerance_s,
+            "late": drift_s > tolerance_s,
+            "late_by_s": max(0.0, drift_s - tolerance_s),
+            "missed": False,
+        }
+
+    def _record_scrape_attempt(
+        self,
+        attempt: ScrapeAttempt,
+        label: str,
+        probe_id: Optional[str],
+        round_id: int,
+        *,
+        tolerate_errors: bool,
+    ) -> Optional[VLLMMetricsSnapshot]:
+        self.sequence += 1
+        endpoint = attempt.endpoint
+        timing = self._timing_fields(attempt)
+        common = {
+            "sequence": self.sequence,
+            "round_sequence": round_id,
+            "label": label,
+            "probe_id": probe_id,
+            "endpoint_id": endpoint.endpoint_id,
+            "role": endpoint.role,
+            "metrics_uri": self.collector.metrics_url(endpoint),
+            **timing,
+        }
+        if attempt.error is not None:
+            error_record = {
+                **common,
+                "status": "error",
+                "error_type": type(attempt.error).__name__,
+                "error": str(attempt.error),
+                "tolerated": bool(tolerate_errors),
+            }
+            self.scrape_errors.append(error_record)
+            _append_jsonl(
+                self.run_dir / "derived" / "scrape_errors.jsonl",
+                error_record,
+            )
+            _append_jsonl(self.run_dir / "derived" / "scrapes.jsonl", error_record)
+            if tolerate_errors:
+                return None
+            raise Phase3AError(
+                "metrics scrape failed for %s (%s): %s" %
+                (endpoint.endpoint_id, common["metrics_uri"], attempt.error)
+            ) from attempt.error
+
+        raw = attempt.raw
+        if raw is None:
+            raise AssertionError("successful scrape attempt has no raw payload")
+        filename = "%06d_%s.prom" % (self.sequence, label.replace("/", "_"))
+        raw_path = self.run_dir / endpoint.endpoint_id / "raw_metrics" / filename
+        raw_path.write_text(raw.raw_text, encoding="utf-8")
+        window = self.tracker.observe(raw.snapshot)
+        record = {
+            **common,
+            "status": "success",
+            "metrics_uri": raw.metrics_url,
+            "raw_metrics_path": raw_path.relative_to(self.run_dir).as_posix(),
+            "snapshot": _snapshot_dict(raw.snapshot),
+            "window": _window_dict(window),
+        }
+        _append_jsonl(self.run_dir / "derived" / "telemetry.jsonl", record)
+        _append_jsonl(self.run_dir / "derived" / "scrapes.jsonl", {
+            key: value
+            for key, value in record.items()
+            if key not in ("snapshot", "window")
+        })
+        self.snapshots[endpoint.endpoint_id] = raw.snapshot
+        return raw.snapshot
+
+    def _record_missed_scrape(
+        self,
+        event: ScheduledScrapeEvent,
+        label: str,
+        probe_id: Optional[str],
+        round_id: int,
+    ) -> None:
+        self.sequence += 1
+        endpoint = event.endpoint
+        _append_jsonl(self.run_dir / "derived" / "scrapes.jsonl", {
+            "sequence": self.sequence,
+            "round_sequence": round_id,
+            "label": label,
+            "probe_id": probe_id,
+            "endpoint_id": endpoint.endpoint_id,
+            "role": endpoint.role,
+            "metrics_uri": self.collector.metrics_url(endpoint),
+            "status": "missed",
+            "scheduled_monotonic_start_s": event.scheduled_monotonic_s,
+            "missed_detected_monotonic_s": event.detected_monotonic_s,
+            "actual_wall_start_s": None,
+            "actual_wall_finish_s": None,
+            "actual_monotonic_start_s": None,
+            "actual_monotonic_finish_s": None,
+            "scrape_latency_s": None,
+            "scrape_latency_ms": None,
+            "scheduling_drift_s": None,
+            "late": False,
+            "late_by_s": None,
+            "missed": True,
+            "missed_reason": event.missed_reason,
+        })
+
+    def _maybe_run_dry_controller(
+        self,
+        observed: Mapping[str, VLLMMetricsSnapshot],
+        probe_id: Optional[str],
+    ) -> None:
+        if self.dry_controller is None or len(observed) != len(self.endpoints):
+            return
+
+        def provider(endpoint: EndpointSpec) -> VLLMMetricsSnapshot:
+            return observed[endpoint.endpoint_id]
+
+        now_s = max(item.timestamp_s for item in observed.values())
+        dry_record = self.dry_controller.run_once(
+            snapshot_provider=provider,
+            now_s=now_s,
+            workload_context_key=probe_id,
+        )
+        dry_dict = dry_record.to_dict()
+        if dry_dict.get("actuated") is not False:
+            raise Phase3AError("dry-run controller violated non-actuation invariant")
+        _append_jsonl(self.run_dir / "derived" / "dry_run.jsonl", dry_dict)
+
     def _scrape_round(
         self,
         label: str,
@@ -288,90 +603,38 @@ class Phase3AHarness:
         self.round_sequence += 1
         round_id = self.round_sequence
         observed: Dict[str, VLLMMetricsSnapshot] = {}
-        for endpoint in self.endpoints:
-            self.sequence += 1
-            wall_start = self.wall_clock()
-            mono_start = self.monotonic_clock()
-            try:
-                raw = self.scrape_source(endpoint)
-                if not raw.raw_text.strip():
-                    raise Phase3AError("empty /metrics response")
-                if raw.snapshot.endpoint_id != endpoint.endpoint_id:
-                    raise Phase3AError("scrape returned wrong endpoint identity")
-            except Exception as exc:
-                wall_end = self.wall_clock()
-                mono_end = self.monotonic_clock()
-                message = (
-                    "metrics scrape failed for %s (%s): %s" %
-                    (endpoint.endpoint_id, self.collector.metrics_url(endpoint), exc)
+        scheduled_s = self.monotonic_clock()
+        with ThreadPoolExecutor(
+            max_workers=len(self.endpoints),
+            thread_name_prefix="xpyd-scrape-round",
+        ) as executor:
+            futures = {
+                endpoint.endpoint_id: executor.submit(
+                    self._perform_scrape, endpoint, scheduled_s
                 )
-                error_record = {
-                    "sequence": self.sequence,
-                    "round_sequence": round_id,
-                    "label": label,
-                    "probe_id": probe_id,
-                    "endpoint_id": endpoint.endpoint_id,
-                    "role": endpoint.role,
-                    "metrics_uri": self.collector.metrics_url(endpoint),
-                    "central_wall_start_s": wall_start,
-                    "central_wall_end_s": wall_end,
-                    "central_monotonic_start_s": mono_start,
-                    "central_monotonic_end_s": mono_end,
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
-                    "tolerated": bool(tolerate_errors),
-                }
-                self.scrape_errors.append(error_record)
-                _append_jsonl(
-                    self.run_dir / "derived" / "scrape_errors.jsonl",
-                    error_record,
-                )
-                if tolerate_errors:
-                    continue
-                raise Phase3AError(message) from exc
-            wall_end = self.wall_clock()
-            mono_end = self.monotonic_clock()
-            filename = "%06d_%s.prom" % (self.sequence, label.replace("/", "_"))
-            raw_path = self.run_dir / endpoint.endpoint_id / "raw_metrics" / filename
-            raw_path.write_text(raw.raw_text, encoding="utf-8")
-            window = self.tracker.observe(raw.snapshot)
-            record = {
-                "sequence": self.sequence,
-                "round_sequence": round_id,
-                "label": label,
-                "probe_id": probe_id,
-                "endpoint_id": endpoint.endpoint_id,
-                "role": endpoint.role,
-                "metrics_uri": raw.metrics_url,
-                "central_wall_start_s": wall_start,
-                "central_wall_end_s": wall_end,
-                "central_monotonic_start_s": mono_start,
-                "central_monotonic_end_s": mono_end,
-                "raw_metrics_path": raw_path.relative_to(self.run_dir).as_posix(),
-                "snapshot": _snapshot_dict(raw.snapshot),
-                "window": _window_dict(window),
+                for endpoint in self.endpoints
             }
-            _append_jsonl(self.run_dir / "derived" / "telemetry.jsonl", record)
-            _append_jsonl(self.run_dir / "derived" / "scrapes.jsonl", {
-                key: value for key, value in record.items() if key not in ("snapshot", "window")
-            })
-            observed[endpoint.endpoint_id] = raw.snapshot
-            self.snapshots[endpoint.endpoint_id] = raw.snapshot
-
-        if self.dry_controller is not None and len(observed) == len(self.endpoints):
-            def provider(endpoint: EndpointSpec) -> VLLMMetricsSnapshot:
-                return observed[endpoint.endpoint_id]
-
-            now_s = max(item.timestamp_s for item in observed.values())
-            dry_record = self.dry_controller.run_once(
-                snapshot_provider=provider,
-                now_s=now_s,
-                workload_context_key=probe_id,
-            )
-            dry_dict = dry_record.to_dict()
-            if dry_dict.get("actuated") is not False:
-                raise Phase3AError("dry-run controller violated non-actuation invariant")
-            _append_jsonl(self.run_dir / "derived" / "dry_run.jsonl", dry_dict)
+            attempts = {
+                endpoint_id: future.result()
+                for endpoint_id, future in futures.items()
+            }
+        failures = []
+        for endpoint in self.endpoints:
+            try:
+                snapshot = self._record_scrape_attempt(
+                    attempts[endpoint.endpoint_id],
+                    label,
+                    probe_id,
+                    round_id,
+                    tolerate_errors=tolerate_errors,
+                )
+                if snapshot is not None:
+                    observed[endpoint.endpoint_id] = snapshot
+            except Phase3AError as exc:
+                failures.append(exc)
+        if failures:
+            raise failures[0]
+        self._maybe_run_dry_controller(observed, probe_id)
         return observed
 
     def _trace_path(self, probe_id: str) -> Path:
@@ -493,6 +756,18 @@ class Phase3AHarness:
                         "%s=%d, successful_requests=%d" %
                         (field, observed, successes)
                     )
+        if bool(self.config.get("client", {}).get(
+            "require_logical_request_id_propagation", False
+        )):
+            successes = int(summary.get("successful_requests", 0))
+            propagated = int(
+                summary.get("logical_request_id_propagated_requests", 0)
+            )
+            if propagated != successes:
+                raise Phase3AError(
+                    "logical request ID propagation required for every successful "
+                    "request: got %d of %d" % (propagated, successes)
+                )
         return summary
 
     def _run_client(self, probe: Mapping[str, Any], trace_path: Path) -> dict:
@@ -593,6 +868,135 @@ class Phase3AHarness:
                 self.semantic_records,
             )
 
+    def _collect_fixed_period_load_scrapes(
+        self,
+        process: Any,
+        probe_id: str,
+        interval_s: float,
+        minimum_successes: int,
+        maximum_consecutive_failures: int,
+    ) -> dict:
+        orchestrator = FixedPeriodScrapeOrchestrator(
+            endpoints=self.endpoints,
+            scrape=self._perform_scrape,
+            period_s=interval_s,
+            monotonic_clock=self.monotonic_clock,
+        )
+        events = orchestrator.run_while(lambda: process.poll() is None)
+        endpoint_ids = tuple(endpoint.endpoint_id for endpoint in self.endpoints)
+        successful = {endpoint_id: 0 for endpoint_id in endpoint_ids}
+        failed = {endpoint_id: 0 for endpoint_id in endpoint_ids}
+        missed = {endpoint_id: 0 for endpoint_id in endpoint_ids}
+        late = {endpoint_id: 0 for endpoint_id in endpoint_ids}
+        scheduled = {endpoint_id: 0 for endpoint_id in endpoint_ids}
+        consecutive = {endpoint_id: 0 for endpoint_id in endpoint_ids}
+        max_consecutive = {endpoint_id: 0 for endpoint_id in endpoint_ids}
+        drift_values: Dict[str, list[float]] = {
+            endpoint_id: [] for endpoint_id in endpoint_ids
+        }
+        round_ids = {}
+        observed_by_slot: Dict[int, Dict[str, VLLMMetricsSnapshot]] = {}
+        for event in events:
+            endpoint_id = event.endpoint.endpoint_id
+            scheduled[endpoint_id] += 1
+            if event.schedule_index not in round_ids:
+                self.round_sequence += 1
+                round_ids[event.schedule_index] = self.round_sequence
+            round_id = round_ids[event.schedule_index]
+            if event.missed:
+                missed[endpoint_id] += 1
+                consecutive[endpoint_id] += 1
+                max_consecutive[endpoint_id] = max(
+                    max_consecutive[endpoint_id], consecutive[endpoint_id]
+                )
+                self._record_missed_scrape(
+                    event, "load_interval", probe_id, round_id
+                )
+                continue
+            attempt = event.attempt
+            if attempt is None:
+                raise AssertionError("non-missed schedule event has no attempt")
+            timing = self._timing_fields(attempt)
+            drift_values[endpoint_id].append(timing["scheduling_drift_s"])
+            if timing["late"]:
+                late[endpoint_id] += 1
+            snapshot = self._record_scrape_attempt(
+                attempt,
+                "load_interval",
+                probe_id,
+                round_id,
+                tolerate_errors=True,
+            )
+            if snapshot is None:
+                failed[endpoint_id] += 1
+                consecutive[endpoint_id] += 1
+                max_consecutive[endpoint_id] = max(
+                    max_consecutive[endpoint_id], consecutive[endpoint_id]
+                )
+            else:
+                successful[endpoint_id] += 1
+                consecutive[endpoint_id] = 0
+                observed_by_slot.setdefault(event.schedule_index, {})[
+                    endpoint_id
+                ] = snapshot
+
+        for schedule_index in sorted(observed_by_slot):
+            self._maybe_run_dry_controller(
+                observed_by_slot[schedule_index], probe_id
+            )
+
+        violations = []
+        for endpoint_id in endpoint_ids:
+            if successful[endpoint_id] < minimum_successes:
+                violations.append(
+                    "%s successful interval scrapes %d < %d" % (
+                        endpoint_id,
+                        successful[endpoint_id],
+                        minimum_successes,
+                    )
+                )
+            if max_consecutive[endpoint_id] > maximum_consecutive_failures:
+                violations.append(
+                    "%s consecutive interval scrape failures/misses %d > %d" % (
+                        endpoint_id,
+                        max_consecutive[endpoint_id],
+                        maximum_consecutive_failures,
+                    )
+                )
+        monitoring = {
+            "probe_id": probe_id,
+            "sampling_architecture": "independent_fixed_period_endpoint_workers",
+            "configured_period_s": interval_s,
+            "late_tolerance_s": float(self.config.get(
+                "scrape_late_tolerance_s", 0.1 * interval_s
+            )),
+            "interval_rounds": len(round_ids),
+            "scheduled_interval_scrapes": scheduled,
+            "successful_interval_scrapes": successful,
+            "failed_interval_scrapes": failed,
+            "missed_interval_scrapes": missed,
+            "late_interval_scrapes": late,
+            "maximum_consecutive_failures": max_consecutive,
+            "maximum_scheduling_drift_s": {
+                endpoint_id: max(drift_values[endpoint_id], default=None)
+                for endpoint_id in endpoint_ids
+            },
+            "mean_scheduling_drift_s": {
+                endpoint_id: (
+                    sum(drift_values[endpoint_id]) / len(drift_values[endpoint_id])
+                    if drift_values[endpoint_id] else None
+                )
+                for endpoint_id in endpoint_ids
+            },
+            "minimum_interval_scrapes_per_endpoint": minimum_successes,
+            "maximum_consecutive_failures_per_endpoint": maximum_consecutive_failures,
+            "tolerated_scrape_error_count": sum(failed.values()),
+            "missed_scrape_count": sum(missed.values()),
+            "late_scrape_count": sum(late.values()),
+            "violations": violations,
+        }
+        return monitoring
+
     def run_load(self) -> None:
         probes = self.config.get("load_probes", [])
         if not probes:
@@ -600,6 +1004,11 @@ class Phase3AHarness:
         interval = float(self.config.get("scrape_interval_s", 1.0))
         if not 0 < interval <= 2.0:
             raise Phase3AError("scrape_interval_s must be in (0, 2] for Phase 3A")
+        late_tolerance = float(
+            self.config.get("scrape_late_tolerance_s", 0.1 * interval)
+        )
+        if not math.isfinite(late_tolerance) or late_tolerance < 0:
+            raise Phase3AError("scrape_late_tolerance_s must be finite and nonnegative")
         monitoring_config = dict(self.config.get("load_monitoring", {}))
         minimum_successes = int(
             monitoring_config.get("minimum_interval_scrapes_per_endpoint", 1)
@@ -624,30 +1033,14 @@ class Phase3AHarness:
             trace = self._write_trace(probe)
             before = self._scrape_round("load_before", probe_id)
             process, stream = self._start_client(probe, trace)
-            endpoint_ids = tuple(endpoint.endpoint_id for endpoint in self.endpoints)
-            successful_scrapes = {endpoint_id: 0 for endpoint_id in endpoint_ids}
-            failed_scrapes = {endpoint_id: 0 for endpoint_id in endpoint_ids}
-            consecutive_failures = {endpoint_id: 0 for endpoint_id in endpoint_ids}
-            max_consecutive_failures = {endpoint_id: 0 for endpoint_id in endpoint_ids}
-            interval_rounds = 0
             try:
-                while process.poll() is None:
-                    interval_rounds += 1
-                    observed = self._scrape_round(
-                        "load_interval", probe_id, tolerate_errors=True
-                    )
-                    for endpoint_id in endpoint_ids:
-                        if endpoint_id in observed:
-                            successful_scrapes[endpoint_id] += 1
-                            consecutive_failures[endpoint_id] = 0
-                        else:
-                            failed_scrapes[endpoint_id] += 1
-                            consecutive_failures[endpoint_id] += 1
-                            max_consecutive_failures[endpoint_id] = max(
-                                max_consecutive_failures[endpoint_id],
-                                consecutive_failures[endpoint_id],
-                            )
-                    self.sleeper(interval)
+                monitoring = self._collect_fixed_period_load_scrapes(
+                    process,
+                    probe_id,
+                    interval,
+                    minimum_successes,
+                    maximum_consecutive_failures,
+                )
                 returncode = process.wait()
             except Exception:
                 # Do not let observer failure orphan the workload or cause the
@@ -657,40 +1050,13 @@ class Phase3AHarness:
             finally:
                 stream.close()
             after = self._scrape_round("load_after", probe_id)
-            monitoring = {
-                "probe_id": probe_id,
-                "interval_rounds": interval_rounds,
-                "successful_interval_scrapes": successful_scrapes,
-                "failed_interval_scrapes": failed_scrapes,
-                "maximum_consecutive_failures": max_consecutive_failures,
-                "minimum_interval_scrapes_per_endpoint": minimum_successes,
-                "maximum_consecutive_failures_per_endpoint": maximum_consecutive_failures,
-                "tolerated_scrape_error_count": sum(failed_scrapes.values()),
-            }
             self.load_monitoring_records.append(monitoring)
             _write_json(
                 self.run_dir / "derived" / "load_monitoring.json",
                 self.load_monitoring_records,
             )
             client = self._validate_client_result(trace.parent, returncode, probe)
-            violations = []
-            for endpoint_id in endpoint_ids:
-                if successful_scrapes[endpoint_id] < minimum_successes:
-                    violations.append(
-                        "%s successful interval scrapes %d < %d" % (
-                            endpoint_id,
-                            successful_scrapes[endpoint_id],
-                            minimum_successes,
-                        )
-                    )
-                if max_consecutive_failures[endpoint_id] > maximum_consecutive_failures:
-                    violations.append(
-                        "%s consecutive interval scrape failures %d > %d" % (
-                            endpoint_id,
-                            max_consecutive_failures[endpoint_id],
-                            maximum_consecutive_failures,
-                        )
-                    )
+            violations = monitoring["violations"]
             if violations:
                 raise Phase3AError(
                     "load monitoring coverage invalid for %s: %s" %
@@ -785,6 +1151,34 @@ class Phase3AHarness:
         require_streaming = bool(
             self.config.get("client", {}).get("require_real_decode_streaming", False)
         )
+        require_logical_id = bool(self.config.get("client", {}).get(
+            "require_logical_request_id_propagation", False
+        ))
+        client_request_ids = []
+        for requests_path in sorted((self.run_dir / "client").glob("*/requests.jsonl")):
+            for line in requests_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                result = json.loads(line)
+                if result.get("ok"):
+                    client_request_ids.append(str(
+                        result.get("logical_request_id")
+                        or result.get("trace_request_id")
+                        or ""
+                    ))
+        diagnostic_request_ids = [
+            str(record.get("logical_request_id") or record.get("request_id") or "")
+            for record in records
+        ]
+        if require_logical_id:
+            if any(not request_id for request_id in client_request_ids):
+                violations.append("successful client result is missing logical request ID")
+            if any(not request_id for request_id in diagnostic_request_ids):
+                violations.append("proxy diagnostic is missing logical request ID")
+            if sorted(client_request_ids) != sorted(diagnostic_request_ids):
+                violations.append(
+                    "client and proxy logical request ID multisets do not match"
+                )
         if require_streaming:
             timestamp_order = (
                 "request_received",
@@ -834,6 +1228,12 @@ class Phase3AHarness:
             "expected_successful_requests": expected,
             "diagnostic_record_count": len(records),
             "require_real_decode_streaming": require_streaming,
+            "require_logical_request_id_propagation": require_logical_id,
+            "client_logical_request_id_count": len(client_request_ids),
+            "diagnostic_logical_request_id_count": len(diagnostic_request_ids),
+            "logical_request_ids_exactly_match": (
+                sorted(client_request_ids) == sorted(diagnostic_request_ids)
+            ),
             "completed_real_sse_records": sum(
                 1 for record in records
                 if record.get("outcome") == "completed"
@@ -900,6 +1300,13 @@ class Phase3AHarness:
                     "endpoint_id": record["endpoint_id"],
                     "reset_metrics": record["window"]["reset_metrics"],
                 })
+        scrape_schedule_records: Dict[str, list[dict]] = {
+            item.endpoint_id: [] for item in self.endpoints
+        }
+        scrapes_path = self.run_dir / "derived" / "scrapes.jsonl"
+        for line in scrapes_path.read_text(encoding="utf-8").splitlines():
+            record = json.loads(line)
+            scrape_schedule_records[record["endpoint_id"]].append(record)
         behavior = {}
         stale_threshold = float(
             self.config.get(
@@ -908,6 +1315,7 @@ class Phase3AHarness:
             )
         )
         for endpoint_id, records in endpoint_windows.items():
+            schedule_records = scrape_schedule_records[endpoint_id]
             snapshots = [record["snapshot"] for record in records]
             valid_windows = [record["window"] for record in records if record["window"]["valid"]]
             mono_starts = [record["central_monotonic_start_s"] for record in records]
@@ -955,6 +1363,29 @@ class Phase3AHarness:
                 ),
                 "staleness_threshold_s": stale_threshold,
                 "stale_gap_count": sum(gap > stale_threshold for gap in scrape_gaps),
+                "missed_scrape_count": sum(
+                    record.get("status") == "missed"
+                    for record in schedule_records
+                ),
+                "late_scrape_count": sum(
+                    record.get("late") is True for record in schedule_records
+                ),
+                "max_scheduling_drift_s": max(
+                    (
+                        record["scheduling_drift_s"]
+                        for record in schedule_records
+                        if record.get("scheduling_drift_s") is not None
+                    ),
+                    default=None,
+                ),
+                "max_scrape_latency_s": max(
+                    (
+                        record["scrape_latency_s"]
+                        for record in schedule_records
+                        if record.get("scrape_latency_s") is not None
+                    ),
+                    default=None,
+                ),
                 "missing_metrics_observed": sorted({
                     metric for item in snapshots for metric in item["missing_metrics"]
                 }),
@@ -967,6 +1398,14 @@ class Phase3AHarness:
             "semantic_probe_count": len(self.semantic_records),
             "load_probe_count": len(self.load_records),
             "scrape_error_count": len(self.scrape_errors),
+            "missed_scrape_count": sum(
+                behavior[endpoint_id]["missed_scrape_count"]
+                for endpoint_id in behavior
+            ),
+            "late_scrape_count": sum(
+                behavior[endpoint_id]["late_scrape_count"]
+                for endpoint_id in behavior
+            ),
             "load_monitoring": self.load_monitoring_records,
             "proxy_diagnostics_audit": self.proxy_diagnostics_audit,
             "reset_or_discontinuity_observations": resets,
@@ -1142,7 +1581,9 @@ def write_run_summary_markdown(run_dir: Path, summary: Mapping[str, Any]) -> Non
     for endpoint_id, behavior in sorted(summary["endpoint_window_behavior"].items()):
         lines.append(
             "- %s: scrapes=%s, valid_windows=%s, max_running=%s, max_waiting=%s, "
-            "max_KV=%s, max_TTFT_P99_ms=%s, max_TBT_P99_ms=%s, stale_gaps=%s." % (
+            "max_KV=%s, max_TTFT_P99_ms=%s, max_TBT_P99_ms=%s, stale_gaps=%s, "
+            "late_scrapes=%s, missed_scrapes=%s, max_drift_s=%s, "
+            "max_scrape_latency_s=%s." % (
                 endpoint_id,
                 behavior["scrape_count"],
                 behavior["valid_window_count"],
@@ -1152,6 +1593,10 @@ def write_run_summary_markdown(run_dir: Path, summary: Mapping[str, Any]) -> Non
                 behavior["max_window_ttft_p99_ms"],
                 behavior["max_window_tbt_p99_ms"],
                 behavior["stale_gap_count"],
+                behavior["late_scrape_count"],
+                behavior["missed_scrape_count"],
+                behavior["max_scheduling_drift_s"],
+                behavior["max_scrape_latency_s"],
             )
         )
     lines.extend([
