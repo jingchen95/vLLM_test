@@ -1,0 +1,37 @@
+{
+  "output_root": "results/xpyd_energy",
+  "phase3a_config": "paper/configs/xpyd_phase3b_preflight_phase3a.json",
+  "sampling": {
+    "period_s": 0.2,
+    "late_tolerance_s": 0.05,
+    "maximum_gap_s": 0.5,
+    "maximum_boundary_gap_s": 0.4,
+    "minimum_coverage_ratio": 0.9
+  },
+  "windows": {
+    "capability_s": 1.0,
+    "idle_s": 10.0,
+    "cooldown_s": 3.0
+  },
+  "endpoints": [
+    {
+      "endpoint_id": "P0",
+      "role": "prefill",
+      "node": "neptune",
+      "cuda_visible_device": "0",
+      "expected_gpu_name": "L40S"
+    },
+    {
+      "endpoint_id": "D0",
+      "role": "decode",
+      "node": "europa",
+      "cuda_visible_device": "0",
+      "expected_gpu_name": "L4"
+    }
+  ],
+  "claim_boundaries": {
+    "measurement_scope": "GPU board only",
+    "preflight_is_comparison": false,
+    "scheduler_routing_or_dvfs_changed": false
+  }
+}

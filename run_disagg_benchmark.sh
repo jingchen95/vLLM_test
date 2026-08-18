@@ -56,13 +56,20 @@ SYNC_BIN="${SYNC_BIN:-/bin/sync}"
 PYTHON_BIN="${PYTHON_BIN:-$(command -v python3 || command -v python)}"
 SCONTROL_BIN="${SCONTROL_BIN:-/usr/bin/scontrol}"
 # When set, Experiment E starts the existing P/D/proxy lifecycle and hands
-# control to the read-only Phase 3A harness.  That path performs no GPU clock,
-# persistence, reset, or NVML-monitor operations.
+# control to a read-only Phase 3A/3B harness. Those paths perform no GPU clock,
+# persistence, or reset operations. Phase 3B starts only isolated query-only
+# NVML monitor processes.
 XPYD_PHASE3A_CONFIG="${XPYD_PHASE3A_CONFIG:-}"
 XPYD_PHASE3A_MODE="${XPYD_PHASE3A_MODE:-all}"
 XPYD_PHASE3A_SEMANTIC_PROBE_ID="${XPYD_PHASE3A_SEMANTIC_PROBE_ID:-}"
+XPYD_PHASE3B_CONFIG="${XPYD_PHASE3B_CONFIG:-}"
+XPYD_PHASE3B_RUN_ID="${XPYD_PHASE3B_RUN_ID:-}"
 XPYD_NO_GPU_MUTATION="${XPYD_NO_GPU_MUTATION:-0}"
-[ -n "${XPYD_PHASE3A_CONFIG}" ] && XPYD_NO_GPU_MUTATION=1
+if [ -n "${XPYD_PHASE3A_CONFIG}" ] && [ -n "${XPYD_PHASE3B_CONFIG}" ]; then
+    echo "ERROR: choose either XPYD_PHASE3A_CONFIG or XPYD_PHASE3B_CONFIG, not both" >&2
+    exit 2
+fi
+[ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}" ] && XPYD_NO_GPU_MUTATION=1
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -79,7 +86,7 @@ DISAGG_PROXY_MODULE="xpyd.disagg_proxy"
 _reset_gpu_state() {
     local node="$1"
     if [ "${XPYD_NO_GPU_MUTATION}" -eq 1 ]; then
-        echo "  Phase 3A: skipping GPU reset/app-clock mutation on ${node}"
+        echo "  XpYd observation path: skipping GPU reset/app-clock mutation on ${node}"
         return 0
     fi
     local _reset_cmd="set -e; ${SUDO_BIN} ${NVIDIA_SMI_BIN} --gpu-reset 2>/dev/null || ${SUDO_BIN} ${NVIDIA_SMI_BIN} -rac 2>/dev/null"
@@ -1293,8 +1300,8 @@ run_experiment_E() {
     local vllm_ver
     vllm_ver=$("${PYTHON_BIN}" -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "unknown")
     echo "  vLLM version: ${vllm_ver}"
-    if [ -n "${XPYD_PHASE3A_CONFIG}" ] && [ "${vllm_ver}" != "0.15.1" ]; then
-        echo "  ERROR: Phase 3A requires observed vLLM version 0.15.1 (got ${vllm_ver})"
+    if [ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}" ] && [ "${vllm_ver}" != "0.15.1" ]; then
+        echo "  ERROR: XpYd observation path requires vLLM version 0.15.1 (got ${vllm_ver})"
         return 1
     fi
 
@@ -1533,7 +1540,7 @@ EOF
 
         # Phase 3A observes the scheduler/runtime default and must not issue
         # clock commands.  The regular Experiment E path remains unchanged.
-        if [ -z "${XPYD_PHASE3A_CONFIG}" ]; then
+        if [ -z "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}" ]; then
             set_gpu_freq "${L40S_NODE}" "${l40s_freq}" "${tp}" "${L40S_MEM_FREQ}"
             set_gpu_freq "${L4_NODE}"   "${l4_freq}"   "${tp}" "${L4_MEM_FREQ}"
         else
@@ -1594,13 +1601,38 @@ EOF
         done
         echo "  Proxy ready (${elapsed}s)"
 
-        if [ -n "${XPYD_PHASE3A_CONFIG}" ]; then
+        if [ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}" ]; then
             export XPYD_P_HTTP_URI="http://${proxy_prefill_host}:${PREFILL_PORT}"
             export XPYD_D_HTTP_URI="http://${proxy_decode_host}:${DECODE_PORT}"
             export XPYD_PROXY_URI="http://127.0.0.1:${PROXY_PORT}"
             export XPYD_P_SERVER_LOG="${RESULT_DIR}/vllm_${L40S_NODE}_${PREFILL_PORT}.log"
             export XPYD_D_SERVER_LOG="${RESULT_DIR}/vllm_${L4_NODE}_${DECODE_PORT}.log"
             export PYTHONPATH="${SCRIPT_DIR}/paper/scripts${PYTHONPATH:+:${PYTHONPATH}}"
+        fi
+
+        if [ -n "${XPYD_PHASE3B_CONFIG}" ]; then
+            echo "  Phase 3B: running isolated read-only energy preflight"
+            local phase3b_status=0
+            local phase3b_args=(
+                -m xpyd.phase3b_energy preflight
+                --config "${XPYD_PHASE3B_CONFIG}"
+            )
+            if [ -n "${XPYD_PHASE3B_RUN_ID}" ]; then
+                phase3b_args+=(--run-id "${XPYD_PHASE3B_RUN_ID}")
+            fi
+            "${PYTHON_BIN}" "${phase3b_args[@]}" || phase3b_status=$?
+            kill "${PROXY_PID}" 2>/dev/null || true
+            wait "${PROXY_PID}" 2>/dev/null || true
+            stop_server "${L40S_NODE}" "${PREFILL_PORT}"
+            stop_server "${L4_NODE}" "${DECODE_PORT}"
+            if [ "${phase3b_status}" -ne 0 ]; then
+                echo "  ERROR: Phase 3B preflight failed with status ${phase3b_status}"
+                return "${phase3b_status}"
+            fi
+            break
+        fi
+
+        if [ -n "${XPYD_PHASE3A_CONFIG}" ]; then
             echo "  Phase 3A: running read-only observability harness"
             local phase3a_status=0
             local phase3a_args=(
@@ -1736,7 +1768,7 @@ for _node in "${ACTIVE_NODES[@]}"; do
 done
 sleep 3
 
-# Phase 3A must not issue any nvidia-smi mutation, including persistence mode.
+# Phase 3A/3B must not issue any nvidia-smi mutation, including persistence mode.
 if [ "${XPYD_NO_GPU_MUTATION}" -eq 0 ]; then
     for _node in "${ACTIVE_NODES[@]}"; do
         if [ "${_node}" = "${LOCAL_NODE}" ]; then
@@ -1748,7 +1780,7 @@ if [ "${XPYD_NO_GPU_MUTATION}" -eq 0 ]; then
     done
     echo "GPU persistence mode enabled on active nodes."
 else
-    echo "Phase 3A: GPU persistence/clock/reset mutations disabled."
+    echo "XpYd observation path: GPU persistence/clock/reset mutations disabled."
 fi
 echo ""
 
