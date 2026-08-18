@@ -164,6 +164,25 @@ class Phase3AFixtureTests(unittest.TestCase):
             with self.assertRaisesRegex(Phase3AError, "exact server completion-token usage"):
                 harness._validate_client_result(client_dir, 0)
 
+    def test_required_real_streaming_rejects_invalid_latency(self):
+        with tempfile.TemporaryDirectory() as temp:
+            strict_config = config(Path(temp))
+            strict_config["client"]["require_real_decode_streaming"] = True
+            harness = FixtureHarness(strict_config, run_id="strict-stream")
+            client_dir = Path(temp) / "client"
+            client_dir.mkdir()
+            (client_dir / "summary.json").write_text(json.dumps({
+                "successful_requests": 1,
+                "failed_requests": 0,
+                "decode_stream_available_requests": 0,
+                "client_ttft_valid_requests": 0,
+                "client_tpot_valid_requests": 0,
+                "client_itl_valid_requests": 0,
+            }), encoding="utf-8")
+
+            with self.assertRaisesRegex(Phase3AError, "real decode streaming required"):
+                harness._validate_client_result(client_dir, 0)
+
     def test_phase_warmup_precedes_preflight_and_is_excluded(self):
         baseline = prom(1000, 500, 20)
         source = ScrapeSequence({

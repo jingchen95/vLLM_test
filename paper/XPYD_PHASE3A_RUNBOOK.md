@@ -75,6 +75,7 @@ latest_run="$(find results/xpyd_observability -mindepth 1 -maxdepth 1 -type d | 
 python3 -m json.tool "$latest_run/metadata.json"
 python3 -m json.tool "$latest_run/derived/summary.json"
 python3 -m json.tool "$latest_run/derived/semantic_summary.json"
+sed -n '1,20p' "$latest_run/derived/proxy_diagnostics.jsonl"
 sed -n '1,240p' "$latest_run/derived/semantic_summary.md"
 wc -l "$latest_run"/P0/raw_metrics/*.prom "$latest_run"/D0/raw_metrics/*.prom
 ```
@@ -89,6 +90,13 @@ available bucket-resolution bound.
 Confirm each client `summary.json` reports every successful request under
 `completion_token_sources.server_usage`. The canonical config fails instead of
 silently accepting lossy text re-tokenization.
+
+Also confirm `decode_stream_available_requests` and all three client latency
+validity counts equal `successful_requests`. In each proxy diagnostic record,
+the incoming/outgoing stream flags must be true, D Content-Type must be
+`text/event-stream`, and first-real-chunk timestamps must precede the last chunk
+and response completion. A non-SSE D response is an explicit failure; never
+interpret it as measured TTFT/TPOT/ITL.
 
 For short loads, inspect `endpoint_window_behavior`, queue/running/KV maxima,
 rate maxima, tail bounds, missing metric unions, and `max_central_scrape_gap_s`.

@@ -160,17 +160,43 @@ async def consume_sse_completion(
     send_unix_s = time.time()
     send_mono = time.perf_counter()
     first_token_mono: float | None = None
+    token_event_monos: list[float] = []
     text_chunks: list[str] = []
     server_completion_tokens: int | None = None
+    stream_error: str | None = None
 
     async with session.post(url, json=payload) as resp:
+        incoming_client_stream = resp.headers.get(
+            "X-Xpyd-Incoming-Client-Stream"
+        )
+        outgoing_decode_stream = resp.headers.get(
+            "X-Xpyd-Outgoing-Decode-Stream"
+        )
+        decode_content_type = resp.headers.get("X-Xpyd-Decode-Content-Type")
+        decode_stream_header = resp.headers.get(
+            "X-Xpyd-Decode-Stream-Available"
+        )
+        decode_stream_available = (
+            None if decode_stream_header is None
+            else decode_stream_header.lower() == "true"
+        )
         if resp.status != 200:
             detail = await resp.text()
+            complete_unix_s = time.time()
+            complete_mono = time.perf_counter()
             return {
                 "ok": False,
                 "send_unix_s": send_unix_s,
-                "complete_unix_s": time.time(),
+                "complete_unix_s": complete_unix_s,
+                "e2e_latency_ms": (complete_mono - send_mono) * 1000.0,
                 "error": f"http_{resp.status}: {detail[:300]}",
+                "incoming_client_stream": incoming_client_stream,
+                "outgoing_decode_stream": outgoing_decode_stream,
+                "decode_content_type": decode_content_type,
+                "decode_stream_available": decode_stream_available,
+                "client_ttft_valid": False,
+                "client_tpot_valid": False,
+                "client_itl_valid": False,
             }
 
         async for raw_line in resp.content:
@@ -184,6 +210,9 @@ async def consume_sse_completion(
                 obj = json.loads(data)
             except Exception:
                 continue
+            if obj.get("error") is not None:
+                stream_error = str(obj["error"])
+                continue
             usage = obj.get("usage")
             if isinstance(usage, dict) and usage.get("completion_tokens") is not None:
                 reported = int(usage["completion_tokens"])
@@ -195,12 +224,28 @@ async def consume_sse_completion(
                 continue
             text = choices[0].get("text") or ""
             if text:
+                token_event_monos.append(time.perf_counter())
                 if first_token_mono is None:
-                    first_token_mono = time.perf_counter()
+                    first_token_mono = token_event_monos[-1]
                 text_chunks.append(text)
 
     complete_unix_s = time.time()
     complete_mono = time.perf_counter()
+    if stream_error is not None:
+        return {
+            "ok": False,
+            "send_unix_s": send_unix_s,
+            "complete_unix_s": complete_unix_s,
+            "e2e_latency_ms": (complete_mono - send_mono) * 1000.0,
+            "error": f"stream_error: {stream_error}",
+            "incoming_client_stream": incoming_client_stream,
+            "outgoing_decode_stream": outgoing_decode_stream,
+            "decode_content_type": decode_content_type,
+            "decode_stream_available": decode_stream_available,
+            "client_ttft_valid": False,
+            "client_tpot_valid": False,
+            "client_itl_valid": False,
+        }
     full_text = "".join(text_chunks)
     if server_completion_tokens is not None:
         completion_tokens = server_completion_tokens
@@ -217,6 +262,12 @@ async def consume_sse_completion(
         ttft_ms = (first_token_mono - send_mono) * 1000.0
         if completion_tokens > 1:
             tpot_ms = ((complete_mono - first_token_mono) / (completion_tokens - 1)) * 1000.0
+    itls_ms = [
+        (later - earlier) * 1000.0
+        for earlier, later in zip(token_event_monos, token_event_monos[1:])
+    ]
+    mean_itl_ms = mean(itls_ms)
+    latency_stream_valid = decode_stream_available is not False
 
     return {
         "ok": True,
@@ -225,8 +276,17 @@ async def consume_sse_completion(
         "e2e_latency_ms": (complete_mono - send_mono) * 1000.0,
         "ttft_ms": ttft_ms,
         "tpot_ms": tpot_ms,
+        "mean_itl_ms": mean_itl_ms,
         "completion_tokens": completion_tokens,
         "completion_token_source": completion_token_source,
+        "incoming_client_stream": incoming_client_stream,
+        "outgoing_decode_stream": outgoing_decode_stream,
+        "decode_content_type": decode_content_type,
+        "decode_stream_available": decode_stream_available,
+        "client_ttft_valid": latency_stream_valid and ttft_ms is not None,
+        "client_tpot_valid": latency_stream_valid and tpot_ms is not None,
+        "client_itl_valid": latency_stream_valid and bool(itls_ms),
+        "streamed_text_event_count": len(token_event_monos),
     }
 
 
@@ -328,6 +388,12 @@ async def replay_trace(
         for r in results
         if r.get("ok") and r.get("e2e_latency_ms") is not None
     ]
+    itls = [
+        float(r["mean_itl_ms"])
+        for r in results
+        if r.get("ok") and r.get("client_itl_valid")
+        and r.get("mean_itl_ms") is not None
+    ]
     successes = sum(1 for r in results if r.get("ok"))
     failures = len(results) - successes
     input_tokens_total = sum(
@@ -357,6 +423,8 @@ async def replay_trace(
         "p99_ttft_ms": percentile(ttfts, 99.0),
         "mean_tpot_ms": mean(tpots),
         "p99_tpot_ms": percentile(tpots, 99.0),
+        "mean_itl_ms": mean(itls),
+        "p99_itl_ms": percentile(itls, 99.0),
         "mean_e2e_latency_ms": mean(e2e_latencies),
         "p99_e2e_latency_ms": percentile(e2e_latencies, 99.0),
         "trace_duration_s": requests[-1].arrival_time_s if requests else 0.0,
@@ -366,6 +434,18 @@ async def replay_trace(
         "requested_output_tokens_total": requested_output_tokens_total,
         "output_tokens_total": output_tokens_total,
         "completion_token_sources": completion_token_sources,
+        "decode_stream_available_requests": sum(
+            1 for r in results if r.get("ok") and r.get("decode_stream_available") is True
+        ),
+        "client_ttft_valid_requests": sum(
+            1 for r in results if r.get("ok") and r.get("client_ttft_valid")
+        ),
+        "client_tpot_valid_requests": sum(
+            1 for r in results if r.get("ok") and r.get("client_tpot_valid")
+        ),
+        "client_itl_valid_requests": sum(
+            1 for r in results if r.get("ok") and r.get("client_itl_valid")
+        ),
         "request_results": results,
     }
 
@@ -387,6 +467,8 @@ def write_text_summary(path: Path, trace_csv: Path, summary: dict[str, Any]) -> 
         f"P99 TTFT (ms):                           {format_metric(summary['p99_ttft_ms'])}",
         f"Mean TPOT (ms):                          {format_metric(summary['mean_tpot_ms'])}",
         f"P99 TPOT (ms):                           {format_metric(summary['p99_tpot_ms'])}",
+        f"Mean ITL (ms):                           {format_metric(summary['mean_itl_ms'])}",
+        f"P99 ITL (ms):                            {format_metric(summary['p99_itl_ms'])}",
         f"Mean E2E latency (ms):                   {format_metric(summary['mean_e2e_latency_ms'])}",
         f"P99 E2E latency (ms):                    {format_metric(summary['p99_e2e_latency_ms'])}",
         f"Replay trace duration (s):               {summary['trace_duration_s']:.3f}",

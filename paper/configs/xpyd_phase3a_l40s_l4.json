@@ -13,7 +13,8 @@
     "base_url": "$XPYD_PROXY_URI",
     "script": "paper/scripts/replay_synthetic_trace.py",
     "protocol": "OpenAI-compatible streaming /v1/completions through existing disagg_proxy.py",
-    "require_server_token_usage": true
+    "require_server_token_usage": true,
+    "require_real_decode_streaming": true
   },
   "phase_warmup": {
     "enabled": true,
@@ -58,6 +59,7 @@
     "P0": "$XPYD_P_SERVER_LOG",
     "D0": "$XPYD_D_SERVER_LOG"
   },
+  "proxy_diagnostics_log": "$XPYD_PROXY_DIAGNOSTICS_LOG",
   "physical_context": {
     "scheduler": "Slurm",
     "slurm_job_id": "$SLURM_JOB_ID",

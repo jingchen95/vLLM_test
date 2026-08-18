@@ -258,6 +258,7 @@ class Phase3AHarness:
             "phase_warmup": self.config.get("phase_warmup", {"enabled": False}),
             "physical_context": self.config.get("physical_context", {}),
             "server_logs": self.config.get("server_logs", {}),
+            "proxy_diagnostics_log": self.config.get("proxy_diagnostics_log"),
             "dry_run": {
                 "enabled": self.dry_controller is not None,
                 "actuation_permitted": False,
@@ -407,6 +408,21 @@ class Phase3AHarness:
                     "exact server completion-token usage required for every successful "
                     "request: got %d of %d" % (exact, successes)
                 )
+        if bool(self.config.get("client", {}).get("require_real_decode_streaming", False)):
+            successes = int(summary.get("successful_requests", 0))
+            for field in (
+                "decode_stream_available_requests",
+                "client_ttft_valid_requests",
+                "client_tpot_valid_requests",
+                "client_itl_valid_requests",
+            ):
+                observed = int(summary.get(field, 0))
+                if observed != successes:
+                    raise Phase3AError(
+                        "real decode streaming required for every successful request: "
+                        "%s=%d, successful_requests=%d" %
+                        (field, observed, successes)
+                    )
         return summary
 
     def _run_client(self, probe: Mapping[str, Any], trace_path: Path) -> dict:
@@ -561,6 +577,27 @@ class Phase3AHarness:
                 errors.append(message)
         return errors
 
+    def _copy_proxy_diagnostics(self, strict: bool = True) -> list[str]:
+        source_value = self.config.get("proxy_diagnostics_log")
+        if not source_value:
+            return []
+        source = Path(source_value)
+        if not source.is_file():
+            message = "configured proxy diagnostics log is unavailable: %s" % source
+            if strict:
+                raise Phase3AError(message)
+            return [message]
+        try:
+            shutil.copyfile(
+                source, self.run_dir / "derived" / "proxy_diagnostics.jsonl"
+            )
+        except OSError as exc:
+            message = "failed to copy proxy diagnostics log %s: %s" % (source, exc)
+            if strict:
+                raise Phase3AError(message) from exc
+            return [message]
+        return []
+
     def _summary(self) -> dict:
         latest = {}
         thresholds_s = {
@@ -701,12 +738,14 @@ class Phase3AHarness:
             if "load" in normalized:
                 self.run_load()
             self._copy_server_logs()
+            self._copy_proxy_diagnostics()
             summary = self._summary()
             _write_json(self.run_dir / "derived" / "summary.json", summary)
             write_run_summary_markdown(self.run_dir, summary)
             write_semantic_summary(self.run_dir)
         except Exception as exc:
             log_capture_errors = self._copy_server_logs(strict=False)
+            log_capture_errors.extend(self._copy_proxy_diagnostics(strict=False))
             _write_json(self.run_dir / "derived" / "failure.json", {
                 "completed": False,
                 "error_type": type(exc).__name__,

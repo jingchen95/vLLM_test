@@ -14,8 +14,8 @@ The implementation reuses the existing Experiment E physical path:
   `P2pNcclConnector`, `kv_producer`, and synchronous `PUT`;
 - D0 is the vLLM OpenAI server on the L4 node (`europa`, HTTP 8200), with
   `P2pNcclConnector` and `kv_consumer`;
-- the existing local proxy listens on 8000, sends a one-token prefill request,
-  then streams the decode request/result to the client;
+- the checked-in local proxy listens on 8000, sends a non-streaming one-token
+  prefill request, then forwards the decode endpoint's real OpenAI SSE bytes;
 - the existing server startup, health checks, diagnostic connector patches,
   proxy, server logs, and graceful process cleanup are retained.
 
@@ -43,10 +43,11 @@ light/moderate load or endpoint capacity.
 The trace client records request success/failure, exact requested input/output
 lengths, actual output tokens, TTFT, TPOT when multiple output tokens are
 observed, E2E latency, and send/completion times.  These values are obtained
-from the client stream, never from Prometheus. The proxy derives exact actual
-output counts from decode token IDs and emits them as final stream usage. The
-canonical client rejects runs where any successful request falls back to lossy
-text re-tokenization.
+from the client stream, never from Prometheus. The decode endpoint derives exact
+actual output counts and emits them in final OpenAI stream usage; the proxy
+forwards that event unchanged. The canonical client rejects runs where any
+successful request falls back to lossy text re-tokenization or lacks audited
+real decode streaming.
 
 One configured phase-level request initializes lazy cross-node NCCL/runtime
 state before the first preflight scrape. Its client artifacts and summary are
@@ -90,6 +91,7 @@ results/xpyd_observability/<run_id>/
     semantic_deltas.json          # semantic mode
     load_runs.json                # load mode
     phase_warmup.json             # when configured
+    proxy_diagnostics.jsonl       # proxy monotonic streaming audit
     semantic_summary.json
     semantic_summary.md
     summary.json
@@ -107,6 +109,12 @@ rates, reconstructed tail upper bounds, central scrape gaps, reset-like
 discontinuities, all actual histogram boundaries, and whether exact 300/500/
 1000 ms TTFT and 100/200 ms inter-token boundaries are visible.  These target
 values are inspection points only; the harness does not enforce them as SLOs.
+
+Each `proxy_diagnostics.jsonl` record captures incoming/outgoing stream flags,
+the actual D Content-Type, stream availability, request/prefill/decode/header/
+first-chunk/last-chunk/completion monotonic timestamps, first-chunk forwarding
+delay, and request/decode durations. These diagnostics audit the path; they are
+never substituted for client TTFT, TPOT, or ITL.
 
 ## Interpretation and reset boundary
 
@@ -129,9 +137,22 @@ the coordinator is intentionally not a general process manager.
 
 P0/D0 unreachability, non-200/empty metrics, parse ambiguity, client nonzero
 exit, any request failure, absent client summary, missing exact server token
-usage when required, absent configured server log, or result-write error fails
-the run. Missing individual vLLM metric families do not fabricate zeros: they
-remain `null` and are listed for analysis.
+usage or real decode streaming when required, absent configured server/proxy
+diagnostic log, or result-write error fails the run. Missing individual vLLM
+metric families do not fabricate zeros: they remain `null` and are listed for
+analysis.
+
+## Streaming correctness boundary
+
+vLLM 0.15.1 accepts a `stream` field on `/inference/v1/generate`, but its
+`ServingTokens` implementation explicitly consumes the full engine generator
+and returns JSON. The earlier proxy sent `stream=true` there, buffered that JSON,
+then fabricated token timing by replaying decoded tokens with sleeps. Phase 3A
+now follows the version-matched vLLM disaggregated proxy pattern instead: both P
+and D use `/v1/completions` with the same `X-Request-Id`; P remains
+`stream=false,max_tokens=1`, while D uses real `stream=true` and its response
+bytes are forwarded incrementally. A non-SSE D response fails closed with
+TTFT/TPOT/ITL invalid rather than being replayed.
 
 ## Model provenance
 

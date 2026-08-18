@@ -36,8 +36,9 @@ class FakeContent:
 class FakeResponse:
     status = 200
 
-    def __init__(self, events):
+    def __init__(self, events, headers=None):
         self.content = FakeContent(events)
+        self.headers = headers or {}
 
     async def __aenter__(self):
         return self
@@ -97,6 +98,32 @@ class StreamingTokenAccountingTests(unittest.TestCase):
         self.assertEqual(tokenizer.encode_calls, 0)
         self.assertIsNotNone(result["ttft_ms"])
         self.assertIsNotNone(result["tpot_ms"])
+
+    def test_real_stream_headers_mark_latency_as_valid(self):
+        tokenizer = FakeTokenizer(retokenized_count=2)
+        events = [
+            sse({"choices": [{"text": "a"}]}),
+            sse({"choices": [{"text": "b"}]}),
+            sse({"choices": [], "usage": {"completion_tokens": 2}}),
+            "data: [DONE]\n\n",
+        ]
+        headers = {
+            "X-Xpyd-Incoming-Client-Stream": "true",
+            "X-Xpyd-Outgoing-Decode-Stream": "true",
+            "X-Xpyd-Decode-Content-Type": "text/event-stream",
+            "X-Xpyd-Decode-Stream-Available": "true",
+        }
+
+        session = FakeSession(events)
+        session.response.headers = headers
+        result = asyncio.run(consume_sse_completion(
+            session, "http://proxy/v1/completions", {}, tokenizer,
+        ))
+        self.assertTrue(result["decode_stream_available"])
+        self.assertTrue(result["client_ttft_valid"])
+        self.assertTrue(result["client_tpot_valid"])
+        self.assertTrue(result["client_itl_valid"])
+        self.assertEqual(result["streamed_text_event_count"], 2)
 
     def test_missing_usage_is_explicitly_marked_as_fallback(self):
         tokenizer = FakeTokenizer(retokenized_count=7)
