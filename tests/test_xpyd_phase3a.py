@@ -372,6 +372,10 @@ vllm:request_success_total{model_name="model-a"} 1
         })
         with tempfile.TemporaryDirectory() as temp:
             load_config = config(Path(temp))
+            # Leave enough wall-clock separation that a briefly descheduled
+            # test runner cannot create an unintended third interval scrape.
+            load_config["scrape_interval_s"] = 0.1
+            load_config["scrape_late_tolerance_s"] = 0.02
             load_config["load_probes"] = [{
                 "id": "load", "input_len": 128, "output_len": 128,
                 "rate_rps": 1.0, "duration_s": 1.0, "max_concurrency": 1,
@@ -380,7 +384,7 @@ vllm:request_success_total{model_name="model-a"} 1
                 load_config, run_id="transient", scrape_source=source,
                 sleeper=lambda _: None,
             )
-            harness.active_polls = 2
+            harness.active_polls = 3
             run_dir = harness.run(("load",))
 
             errors = [
@@ -408,6 +412,8 @@ vllm:request_success_total{model_name="model-a"} 1
         })
         with tempfile.TemporaryDirectory() as temp:
             load_config = config(Path(temp))
+            load_config["scrape_interval_s"] = 0.1
+            load_config["scrape_late_tolerance_s"] = 0.02
             load_config["load_monitoring"] = {
                 "minimum_interval_scrapes_per_endpoint": 1,
                 "maximum_consecutive_failures_per_endpoint": 1,
@@ -420,7 +426,7 @@ vllm:request_success_total{model_name="model-a"} 1
                 load_config, run_id="outage", scrape_source=source,
                 sleeper=lambda _: None,
             )
-            harness.active_polls = 2
+            harness.active_polls = 3
             with self.assertRaisesRegex(Phase3AError, "load monitoring coverage invalid"):
                 harness.run(("load",))
 

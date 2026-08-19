@@ -4,7 +4,6 @@ import io
 import json
 import math
 from pathlib import Path
-import signal
 import tempfile
 import threading
 import time
@@ -422,18 +421,28 @@ class SamplerTests(unittest.TestCase):
 
 
 class RuntimeGuardTests(unittest.TestCase):
-    def test_cross_node_monitor_stop_falls_back_to_graceful_sigint(self):
+    def test_cross_node_monitor_stop_uses_control_pipe(self):
+        class FakeControl:
+            def __init__(self, process):
+                self.process = process
+                self.value = ""
+
+            def write(self, value):
+                self.value += value
+
+            def flush(self):
+                self.process.returncode = 0
+
+            def close(self):
+                return None
+
         class FakeProcess:
             def __init__(self):
                 self.returncode = None
-                self.signals = []
+                self.stdin = FakeControl(self)
 
             def poll(self):
                 return self.returncode
-
-            def send_signal(self, signum):
-                self.signals.append(signum)
-                self.returncode = 0
 
             def wait(self, timeout=None):
                 del timeout
@@ -449,7 +458,7 @@ class RuntimeGuardTests(unittest.TestCase):
             )
             stop_text = stop_file.read_text(encoding="utf-8")
         self.assertEqual(errors, [])
-        self.assertEqual(process.signals, [signal.SIGINT])
+        self.assertEqual(process.stdin.value, "stop\n")
         self.assertEqual(stop_text, "stop\n")
 
     def test_phase3b_runtime_has_no_mutation_symbols_or_legacy_monitor_import(self):

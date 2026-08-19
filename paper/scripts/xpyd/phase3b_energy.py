@@ -10,6 +10,7 @@ import math
 import os
 from pathlib import Path
 import queue
+import select
 import signal
 import socket
 import subprocess
@@ -530,17 +531,24 @@ def _monitor_command(args: argparse.Namespace) -> int:
         previous[signum] = signal.signal(signum, request_stop)
     watcher_stop = threading.Event()
 
-    def watch_stop_file() -> None:
-        if not args.stop_file:
-            return
-        stop_path = Path(args.stop_file)
+    def watch_stop_request() -> None:
+        stop_path = Path(args.stop_file) if args.stop_file else None
+        stop_stream = sys.stdin if args.stop_stdin else None
         while not watcher_stop.wait(min(0.05, args.period_s / 4.0)):
-            if stop_path.exists():
+            if stop_path is not None and stop_path.exists():
                 sampler.stop()
                 return
+            if stop_stream is not None:
+                readable, _, _ = select.select([stop_stream], [], [], 0.0)
+                if readable:
+                    line = stop_stream.readline()
+                    if line:
+                        sampler.stop()
+                        return
+                    stop_stream = None
 
     watcher = threading.Thread(
-        target=watch_stop_file, name="xpyd-energy-stop-watcher", daemon=True
+        target=watch_stop_request, name="xpyd-energy-stop-watcher", daemon=True
     )
     watcher.start()
     try:
@@ -875,6 +883,7 @@ def _monitor_argv(
         "--output", (endpoint_dir / "samples.jsonl").as_posix(),
         "--capability-output", (endpoint_dir / "capability.json").as_posix(),
         "--stop-file", (endpoint_dir / "stop.requested").as_posix(),
+        "--stop-stdin",
     ]
     if endpoint.get("expected_uuid"):
         command += ["--expected-uuid", str(endpoint["expected_uuid"])]
@@ -899,7 +908,10 @@ def _launch_monitor(
         ]
     log = (endpoint_dir / "monitor.log").open("x", encoding="utf-8")
     try:
-        process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+        process = subprocess.Popen(
+            command, stdin=subprocess.PIPE, stdout=log,
+            stderr=subprocess.STDOUT, text=True,
+        )
     except Exception:
         log.close()
         raise
@@ -939,20 +951,24 @@ def _stop_monitors(
     errors = []
     for endpoint, process in processes.items():
         if process.poll() is None:
+            control = process.stdin
+            if control is not None:
+                try:
+                    control.write("stop\n")
+                    control.flush()
+                    control.close()
+                except (BrokenPipeError, OSError):
+                    pass
             stop_files[endpoint].write_text("stop\n", encoding="utf-8")
     # A stop file is cheap and sufficient on the local node.  On Minerva the
     # cross-node shared-filesystem attribute cache can hide a newly-created
-    # marker for longer than the shutdown timeout.  SIGINT to srun is its
-    # supported graceful path: it forwards SIGINT to the one remote task, whose
-    # monitor handler stops the sampler and drains the asynchronous writer.
+    # marker for longer than the shutdown timeout, so stdin is the primary
+    # cross-node control path.  srun forwards it to the one remote task.
     marker_deadline = time.monotonic() + marker_grace_s
     while any(process.poll() is None for process in processes.values()):
         if time.monotonic() >= marker_deadline:
             break
         time.sleep(0.05)
-    for process in processes.values():
-        if process.poll() is None:
-            process.send_signal(signal.SIGINT)
     # Leave enough time for the asynchronous writer to drain a short shared-FS
     # backlog while remaining bounded if a remote step is genuinely stuck.
     deadline = time.monotonic() + shutdown_timeout_s
@@ -968,7 +984,7 @@ def _stop_monitors(
         try:
             returncode = process.wait(timeout=5)
             if required_signal:
-                errors.append("%s monitor ignored marker and graceful SIGINT" % endpoint)
+                errors.append("%s monitor ignored graceful stdin/marker stop" % endpoint)
             elif returncode != 0:
                 errors.append("%s monitor exit status %s" % (endpoint, returncode))
         except subprocess.TimeoutExpired:
@@ -1097,6 +1113,7 @@ def build_parser() -> argparse.ArgumentParser:
     monitor.add_argument("--output", required=True)
     monitor.add_argument("--capability-output", required=True)
     monitor.add_argument("--stop-file")
+    monitor.add_argument("--stop-stdin", action="store_true")
     monitor.set_defaults(handler=_monitor_command)
 
     preflight = subparsers.add_parser("preflight", help="run the one minimal physical preflight")
