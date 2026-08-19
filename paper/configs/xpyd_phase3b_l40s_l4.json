@@ -4,6 +4,7 @@
   "sampling": {
     "period_s": 0.2,
     "late_tolerance_s": 0.05,
+    "readiness_timeout_s": 120.0,
     "maximum_gap_s": 0.5,
     "maximum_boundary_gap_s": 0.4,
     "minimum_coverage_ratio": 0.9

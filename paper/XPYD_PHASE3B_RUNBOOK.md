@@ -43,6 +43,8 @@ read-only monitor per node. The sequence is a 1 s capability interval, about
 10 s idle, one excluded IL128/OL128 warm-up, one IL128/OL128 semantic request,
 five IL128/OL128 light-load requests at 0.5 request/s, and 3 s cooldown. Existing
 Phase 3A Prometheus, real-SSE, request-ID, proxy, and token audits are retained.
+Monitor readiness allows up to 120 s for cross-node shared-filesystem visibility;
+this does not change the 200 ms fixed sampling period or any measurement window.
 
 Monitor without changing the job:
 

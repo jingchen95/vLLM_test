@@ -973,7 +973,11 @@ def run_preflight(config_path: Path, run_id: Optional[str] = None) -> Path:
             processes[endpoint_id] = process
             stop_files[endpoint_id] = run_dir / endpoint_id / "stop.requested"
             logs.append(log)
-        _wait_capabilities(processes, run_dir)
+        _wait_capabilities(
+            processes,
+            run_dir,
+            timeout_s=float(config["sampling"].get("readiness_timeout_s", 30.0)),
+        )
 
         capability_duration = float(config["windows"].get("capability_s", 1.0))
         boundaries["capability_start"] = time.time()
