@@ -1,13 +1,18 @@
-# XpYd Phase 3B controlled workload characterization
+# XpYd Phase 3B fixed-frequency workload characterization
 
 This phase measures whether P0 and D0 GPU-board energy contributions change
-with workload shape. It is measurement-only and model-free: no model is
-trained, no routing changes, and no scheduler or feedback policy is enabled.
+with workload shape. It is **fixed-frequency characterization using sustainable
+hardware operating points** and remains measurement-only/model-free: no model
+is trained, no routing changes, and no scheduler or feedback policy is enabled.
 
 ## Controlled topology and clocks
 
-- P0: Neptune GPU 0, NVIDIA L40S, graphics 2520 MHz, memory 9001 MHz.
-- D0: Europa GPU 0, NVIDIA L4, graphics 2040 MHz, memory 6251 MHz.
+- P0: Uranus GPU 0, NVIDIA L40S, graphics 2520 MHz, memory 9001 MHz. The
+  existing 2520 MHz operating point is verified by the active-workload clock
+  audit in every smoke/repeat window.
+- D0: Europa GPU 0, NVIDIA L4, graphics 1500 MHz, memory 6251 MHz. 1500 MHz
+  is the sustainable active-decode operating point established by the Europa
+  frequency probe; it is a D0 setting, not a P0 setting.
 - Serving: Mistral-7B, vLLM 0.15.1, P2pNcclConnector, TP=1.
 
 The characterization branch is explicitly actuated, unlike the read-only
@@ -26,11 +31,11 @@ order rotates deterministically between repeat blocks. Each repeat has a
 three-second cooldown, ten-second idle window, one excluded same-shape warmup,
 and one measured workload window.
 
-Run the four-cell smoke first:
+Run the four-cell smoke first (one request per workload):
 
 ```bash
-sbatch --nodelist=neptune,europa \
-  --export=ALL,EXP=E,L40S_NODE=neptune,L4_NODE=europa,RESULT_DIR=results/xpyd_phase3b_characterization_smoke_runtime,XPYD_PHASE3B_CHARACTERIZATION_CONFIG=paper/configs/xpyd_phase3b_characterization_l40s_l4.json,XPYD_PHASE3B_CHARACTERIZATION_REPEATS=1,XPYD_PHASE3B_CHARACTERIZATION_REQUESTS=1 \
+sbatch --nodelist=uranus,europa \
+  --export=ALL,EXP=E,L40S_NODE=uranus,L4_NODE=europa,RESULT_DIR=results/xpyd_phase3b_characterization_smoke_runtime,XPYD_PHASE3B_CHARACTERIZATION_CONFIG=paper/configs/xpyd_phase3b_characterization_l40s_l4.json,XPYD_PHASE3B_CHARACTERIZATION_REPEATS=1,XPYD_PHASE3B_CHARACTERIZATION_REQUESTS=1 \
   run_disagg_benchmark.sh
 ```
 
@@ -43,8 +48,9 @@ override variables. Use a unique `RESULT_DIR` and
 Each repeat retains real-SSE client TTFT/TPOT/ITL, endpoint Prometheus queue/KV
 windows, exact logical request IDs, P0/D0 request and token deltas, endpoint
 energy and idle windows, coverage/drift/missed/error counts, and workload clock
-match fractions. A repeat is valid only when both energy windows, both clock
-audits, the Phase 3A audit, token accounting, and P0+D0 aggregation pass.
+match fractions. A repeat is valid only when both energy windows, both active-
+workload clock audits, the Phase 3A audit, token accounting, and P0+D0
+aggregation pass.
 
 Primary energy is gross GPU-board hardware-counter energy. Idle-adjusted energy
 is a separately labelled estimate. `P/(P+D)` and `D/(P+D)` are limited

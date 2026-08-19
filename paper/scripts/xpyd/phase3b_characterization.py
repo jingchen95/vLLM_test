@@ -1,4 +1,4 @@
-"""Controlled fixed-clock XpYd workload characterization.
+"""Fixed-frequency XpYd characterization at sustainable hardware operating points.
 
 The GPU clock actuation is deliberately outside this module, in the guarded
 Slurm lifecycle.  This process only orchestrates the accepted Phase 3A client
@@ -208,11 +208,11 @@ def _write_report(run_dir: Path, audit: Mapping[str, Any], summary: Mapping[str,
         return ("%%.%df" % digits) % float(value) if isinstance(value, (int, float)) else "unavailable"
 
     lines = [
-        "# XpYd Phase 3B controlled fixed-clock characterization",
+        "# XpYd Phase 3B fixed-frequency characterization",
         "",
         "Verdict: **%s**" % ("PASS" if audit["valid"] else "FAIL"),
         "",
-        "GPU-board telemetry only. Measurement-only/model-free; no adaptive routing, training, or DVFS policy.",
+        "Fixed-frequency characterization using sustainable hardware operating points. GPU-board telemetry only; measurement-only/model-free with no adaptive routing, training, or DVFS policy.",
         "",
         "| Workload | Valid repeats | P energy median (J) | D energy median (J) | P share median | TTFT median (ms) | TPOT median (ms) |",
         "|---|---:|---:|---:|---:|---:|---:|",
@@ -383,7 +383,7 @@ def analyze_characterization(run_dir: Path, config: Mapping[str, Any]) -> dict[s
             in capabilities[endpoint_id]["identity"]["gpu_name"].lower()
             for endpoint_id in ("P0", "D0")
         ),
-        "fixed_clock_policy": "set once before serving; no runtime changes; reset on job exit",
+        "fixed_clock_policy": "sustainable hardware operating points; set once before serving; no runtime changes; reset on job exit",
         "feedback_or_model_updates": False,
     }
     if not audit["identity_mapping_valid"]:

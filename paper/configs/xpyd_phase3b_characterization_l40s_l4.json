@@ -18,7 +18,7 @@
     {
       "endpoint_id": "P0",
       "role": "prefill",
-      "node": "neptune",
+      "node": "uranus",
       "cuda_visible_device": "0",
       "expected_gpu_name": "L40S"
     },
@@ -39,7 +39,7 @@
     },
     "D0": {
       "expected_gpu_name": "L4",
-      "graphics_mhz": 2040,
+      "graphics_mhz": 1500,
       "memory_mhz": 6251,
       "minimum_workload_match_fraction": 0.95
     }
