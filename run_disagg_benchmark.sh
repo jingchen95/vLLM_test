@@ -354,6 +354,25 @@ else
     )
 fi
 
+# Controlled Phase 3B characterization owns its fixed operating points in the
+# characterization JSON.  Keep the outer E smoke envelope, but derive the
+# actual P0/D0 lock frequencies from that source of truth so the launcher and
+# the workload clock audit cannot silently diverge (for example, D0=1500 MHz).
+if [ -n "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" ]; then
+    read -r _xpyd_characterization_p0_freq _xpyd_characterization_d0_freq < <(
+        "${PYTHON_BIN}" - "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    config = json.load(handle)
+clocks = config["fixed_clocks"]
+print(int(clocks["P0"]["graphics_mhz"]), int(clocks["D0"]["graphics_mhz"]))
+PY
+    )
+    E_DISAGG_CONFIGS=("${_xpyd_characterization_p0_freq} ${_xpyd_characterization_d0_freq}")
+fi
+
 # Shared filesystem path to gpu_monitor.py (must be accessible from all nodes)
 GPU_MONITOR_SCRIPT="$(${REALPATH_BIN} gpu_monitor.py)"
 MONITOR_INTERVAL=0.05   # 50ms — matches phase2_characterization.sh
