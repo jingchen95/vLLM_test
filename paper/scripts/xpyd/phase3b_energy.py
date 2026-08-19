@@ -932,14 +932,30 @@ def _stop_monitors(
     processes: Mapping[str, subprocess.Popen[Any]],
     logs: Iterable[Any],
     stop_files: Mapping[str, Path],
+    *,
+    marker_grace_s: float = 2.0,
+    shutdown_timeout_s: float = 45.0,
 ) -> list[str]:
     errors = []
     for endpoint, process in processes.items():
         if process.poll() is None:
             stop_files[endpoint].write_text("stop\n", encoding="utf-8")
+    # A stop file is cheap and sufficient on the local node.  On Minerva the
+    # cross-node shared-filesystem attribute cache can hide a newly-created
+    # marker for longer than the shutdown timeout.  SIGINT to srun is its
+    # supported graceful path: it forwards SIGINT to the one remote task, whose
+    # monitor handler stops the sampler and drains the asynchronous writer.
+    marker_deadline = time.monotonic() + marker_grace_s
+    while any(process.poll() is None for process in processes.values()):
+        if time.monotonic() >= marker_deadline:
+            break
+        time.sleep(0.05)
+    for process in processes.values():
+        if process.poll() is None:
+            process.send_signal(signal.SIGINT)
     # Leave enough time for the asynchronous writer to drain a short shared-FS
     # backlog while remaining bounded if a remote step is genuinely stuck.
-    deadline = time.monotonic() + 45.0
+    deadline = time.monotonic() + shutdown_timeout_s
     while any(process.poll() is None for process in processes.values()):
         if time.monotonic() >= deadline:
             break
@@ -952,7 +968,7 @@ def _stop_monitors(
         try:
             returncode = process.wait(timeout=5)
             if required_signal:
-                errors.append("%s monitor ignored graceful stop marker" % endpoint)
+                errors.append("%s monitor ignored marker and graceful SIGINT" % endpoint)
             elif returncode != 0:
                 errors.append("%s monitor exit status %s" % (endpoint, returncode))
         except subprocess.TimeoutExpired:

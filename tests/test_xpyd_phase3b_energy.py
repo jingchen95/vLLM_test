@@ -4,6 +4,7 @@ import io
 import json
 import math
 from pathlib import Path
+import signal
 import tempfile
 import threading
 import time
@@ -14,6 +15,7 @@ from xpyd.phase3b_energy import (
     AsyncFlushingStream,
     FixedPeriodEnergySampler,
     WindowSpec,
+    _stop_monitors,
     add_idle_adjustment,
     aggregate_endpoint_workload,
     summarize_window,
@@ -420,6 +422,36 @@ class SamplerTests(unittest.TestCase):
 
 
 class RuntimeGuardTests(unittest.TestCase):
+    def test_cross_node_monitor_stop_falls_back_to_graceful_sigint(self):
+        class FakeProcess:
+            def __init__(self):
+                self.returncode = None
+                self.signals = []
+
+            def poll(self):
+                return self.returncode
+
+            def send_signal(self, signum):
+                self.signals.append(signum)
+                self.returncode = 0
+
+            def wait(self, timeout=None):
+                del timeout
+                return self.returncode
+
+        with tempfile.TemporaryDirectory() as temp:
+            process = FakeProcess()
+            log = io.StringIO()
+            stop_file = Path(temp) / "stop.requested"
+            errors = _stop_monitors(
+                {"P0": process}, [log], {"P0": stop_file},
+                marker_grace_s=0.0, shutdown_timeout_s=0.1,
+            )
+            stop_text = stop_file.read_text(encoding="utf-8")
+        self.assertEqual(errors, [])
+        self.assertEqual(process.signals, [signal.SIGINT])
+        self.assertEqual(stop_text, "stop\n")
+
     def test_phase3b_runtime_has_no_mutation_symbols_or_legacy_monitor_import(self):
         root = Path(__file__).resolve().parents[1]
         paths = [
