@@ -91,7 +91,7 @@ class CharacterizationTests(unittest.TestCase):
         )
         self.assertEqual(config["experiment"]["repeats"], 5)
         self.assertEqual(len(config["workloads"]), 4)
-        self.assertEqual(config["endpoints"][0]["node"], "uranus")
+        self.assertEqual(config["endpoints"][0]["node"], "neptune")
         self.assertEqual(config["fixed_clocks"]["D0"]["graphics_mhz"], 1500)
 
     def test_invalid_duplicate_workload_ids_fail(self):

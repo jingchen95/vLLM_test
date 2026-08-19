@@ -18,7 +18,7 @@
     {
       "endpoint_id": "P0",
       "role": "prefill",
-      "node": "uranus",
+      "node": "neptune",
       "cuda_visible_device": "0",
       "expected_gpu_name": "L40S"
     },
