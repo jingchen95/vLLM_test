@@ -64,12 +64,24 @@ XPYD_PHASE3A_MODE="${XPYD_PHASE3A_MODE:-all}"
 XPYD_PHASE3A_SEMANTIC_PROBE_ID="${XPYD_PHASE3A_SEMANTIC_PROBE_ID:-}"
 XPYD_PHASE3B_CONFIG="${XPYD_PHASE3B_CONFIG:-}"
 XPYD_PHASE3B_RUN_ID="${XPYD_PHASE3B_RUN_ID:-}"
+XPYD_PHASE3B_CHARACTERIZATION_CONFIG="${XPYD_PHASE3B_CHARACTERIZATION_CONFIG:-}"
+XPYD_PHASE3B_CHARACTERIZATION_RUN_ID="${XPYD_PHASE3B_CHARACTERIZATION_RUN_ID:-}"
+XPYD_PHASE3B_CHARACTERIZATION_REPEATS="${XPYD_PHASE3B_CHARACTERIZATION_REPEATS:-}"
+XPYD_PHASE3B_CHARACTERIZATION_REQUESTS="${XPYD_PHASE3B_CHARACTERIZATION_REQUESTS:-}"
 XPYD_NO_GPU_MUTATION="${XPYD_NO_GPU_MUTATION:-0}"
-if [ -n "${XPYD_PHASE3A_CONFIG}" ] && [ -n "${XPYD_PHASE3B_CONFIG}" ]; then
-    echo "ERROR: choose either XPYD_PHASE3A_CONFIG or XPYD_PHASE3B_CONFIG, not both" >&2
+_xpyd_mode_count=0
+[ -n "${XPYD_PHASE3A_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
+[ -n "${XPYD_PHASE3B_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
+[ -n "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
+if [ "${_xpyd_mode_count}" -gt 1 ]; then
+    echo "ERROR: choose exactly one XpYd Phase 3A, Phase 3B preflight, or characterization config" >&2
     exit 2
 fi
-[ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}" ] && XPYD_NO_GPU_MUTATION=1
+[ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" ] && XPYD_NO_GPU_MUTATION=1
+XPYD_CHARACTERIZATION_CLOCKS_REQUESTED=0
+[ -n "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" ] && XPYD_CHARACTERIZATION_CLOCKS_REQUESTED=1
+XPYD_FIXED_CLOCK_EVIDENCE="${XPYD_FIXED_CLOCK_EVIDENCE:-}"
+export XPYD_FIXED_CLOCK_EVIDENCE
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -117,6 +129,10 @@ _trap_cleanup() {
     [ -n "${L4_SERVER_PID:-}"   ] && kill -KILL "${L4_SERVER_PID}"   2>/dev/null || true
     "${PKILL_BIN}" -KILL -f 'vllm.entrypoints.openai.api_server' 2>/dev/null || true
     "${PKILL_BIN}" -KILL -f 'python.*vllm' 2>/dev/null || true
+    if [ "${XPYD_CHARACTERIZATION_CLOCKS_REQUESTED:-0}" -eq 1 ]; then
+        [ -n "${L40S_NODE:-}" ] && reset_characterization_clocks "${L40S_NODE}" P0 || true
+        [ -n "${L4_NODE:-}" ] && reset_characterization_clocks "${L4_NODE}" D0 || true
+    fi
     local _node
     for _node in "${ACTIVE_NODES[@]:-}"; do
         [ -n "${_node}" ] || continue
@@ -154,6 +170,10 @@ NUM_WARMUPS="${NUM_WARMUPS:-1}"        # 1 warmup sufficient for steady-state me
 # ---------------------------------------------------------------------------
 RESULT_DIR="${RESULT_DIR:-results/disagg_20260321_v2}"
 mkdir -p "${RESULT_DIR}"
+if [ "${XPYD_CHARACTERIZATION_CLOCKS_REQUESTED}" -eq 1 ] && [ -z "${XPYD_FIXED_CLOCK_EVIDENCE}" ]; then
+    XPYD_FIXED_CLOCK_EVIDENCE="${RESULT_DIR}/fixed_clock_evidence.log"
+    export XPYD_FIXED_CLOCK_EVIDENCE
+fi
 if [ "${WORKLOAD_MODE}" != "random" ] && [ "${WORKLOAD_MODE}" != "trace" ]; then
     echo "ERROR: WORKLOAD_MODE must be 'random' or 'trace' (got '${WORKLOAD_MODE_RAW}')."
     exit 1
@@ -303,6 +323,10 @@ E_FULL_MATRIX="${E_FULL_MATRIX:-0}"
 E_NUM_PROMPTS="${E_NUM_PROMPTS:-200}"
 E_NUM_WARMUPS="${E_NUM_WARMUPS:-1}"
 
+# Characterization owns its workload matrix and repeat counts.  The outer E
+# lifecycle must therefore start exactly one fixed P0+D0 serving stack.
+[ -n "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" ] && E_SMOKE=1
+
 if [ "${E_SMOKE}" = "1" ]; then
     E_NUM_PROMPTS=20
     E_NUM_WARMUPS=1
@@ -432,7 +456,7 @@ _bg_start() {
     local node="$1"
     local -n _arr="$2"   # nameref to caller's array
     shift 2
-    if [ "${node}" = "${LOCAL_NODE}" ]; then
+    if [ "${node}" = "${LOCAL_NODE:-}" ]; then
         # Local node: run directly — zero SLURM step overhead, no "busy" risk.
         "$@" &
         _arr+=($!)
@@ -525,6 +549,72 @@ set_gpu_freq() {
     else
         srun --overlap --nodes=1 --ntasks=1 --nodelist="${node}" "${BASH_BIN}" -c "${_freq_cmd}"
     fi
+}
+
+# ---------------------------------------------------------------------------
+# Phase 3B controlled-characterization clock lock.
+#
+# This is intentionally separate from set_gpu_freq(): it does not enable
+# persistence mode, alter power limits, or participate in a feedback loop.
+# The selected graphics and memory clocks are locked once before serving and
+# reset unconditionally by the EXIT trap.  The read-only Phase 3B NVML module
+# remains free of all mutation operations.
+# ---------------------------------------------------------------------------
+_run_characterization_clock_command() {
+    local node="$1"
+    local command="$2"
+    if [ "${node}" = "${LOCAL_NODE:-}" ]; then
+        "${BASH_BIN}" -c "${command}"
+    else
+        srun --overlap --nodes=1 --ntasks=1 --nodelist="${node}" \
+            "${BASH_BIN}" -c "${command}"
+    fi
+}
+
+set_characterization_clocks() {
+    local node="$1"
+    local endpoint="$2"
+    local gpu_freq="$3"
+    local mem_freq="$4"
+    local evidence="${XPYD_FIXED_CLOCK_EVIDENCE}"
+    echo "  [${node}] Controlled characterization clock lock: GPU=${gpu_freq} MHz, MEM=${mem_freq} MHz"
+    local command="
+        set -euo pipefail
+        {
+            echo 'endpoint=${endpoint} node=${node} event=before_lock'
+            ${NVIDIA_SMI_BIN} -i 0 --query-gpu=index,name,uuid,pci.bus_id,clocks.current.graphics,clocks.current.memory --format=csv,noheader,nounits
+            ${NVIDIA_SMI_BIN} -i 0 -q -d SUPPORTED_CLOCKS || true
+        } >> '${evidence}' 2>&1
+        ${SUDO_BIN} ${NVIDIA_SMI_BIN} -i 0 -lgc '${gpu_freq},${gpu_freq}'
+        ${SUDO_BIN} ${NVIDIA_SMI_BIN} -i 0 -lmc '${mem_freq},${mem_freq}'
+        {
+            echo 'endpoint=${endpoint} node=${node} event=after_lock target_graphics_mhz=${gpu_freq} target_memory_mhz=${mem_freq}'
+            ${NVIDIA_SMI_BIN} -i 0 --query-gpu=index,name,uuid,pci.bus_id,clocks.current.graphics,clocks.current.memory --format=csv,noheader,nounits
+        } >> '${evidence}' 2>&1
+    "
+    _run_characterization_clock_command "${node}" "${command}"
+}
+
+reset_characterization_clocks() {
+    local node="$1"
+    local endpoint="$2"
+    local evidence="${XPYD_FIXED_CLOCK_EVIDENCE}"
+    [ -n "${evidence}" ] || return 0
+    echo "  [${node}] Restoring default graphics and memory clocks"
+    local command="
+        set +e
+        ${SUDO_BIN} ${NVIDIA_SMI_BIN} -i 0 -rgc
+        rc_graphics=\$?
+        ${SUDO_BIN} ${NVIDIA_SMI_BIN} -i 0 -rmc
+        rc_memory=\$?
+        {
+            echo 'endpoint=${endpoint} node=${node} event=after_reset'
+            ${NVIDIA_SMI_BIN} -i 0 --query-gpu=index,name,uuid,pci.bus_id,clocks.current.graphics,clocks.current.memory --format=csv,noheader,nounits
+            echo reset_graphics_rc=\${rc_graphics} reset_memory_rc=\${rc_memory}
+        } >> '${evidence}' 2>&1
+        [ \${rc_graphics} -eq 0 ] && [ \${rc_memory} -eq 0 ]
+    "
+    _run_characterization_clock_command "${node}" "${command}"
 }
 
 # ---------------------------------------------------------------------------
@@ -1300,7 +1390,7 @@ run_experiment_E() {
     local vllm_ver
     vllm_ver=$("${PYTHON_BIN}" -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "unknown")
     echo "  vLLM version: ${vllm_ver}"
-    if [ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}" ] && [ "${vllm_ver}" != "0.15.1" ]; then
+    if [ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" ] && [ "${vllm_ver}" != "0.15.1" ]; then
         echo "  ERROR: XpYd observation path requires vLLM version 0.15.1 (got ${vllm_ver})"
         return 1
     fi
@@ -1540,11 +1630,14 @@ EOF
 
         # Phase 3A observes the scheduler/runtime default and must not issue
         # clock commands.  The regular Experiment E path remains unchanged.
-        if [ -z "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}" ]; then
+        if [ -n "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" ]; then
+            set_characterization_clocks "${L40S_NODE}" P0 "${l40s_freq}" "${L40S_MEM_FREQ}"
+            set_characterization_clocks "${L4_NODE}" D0 "${l4_freq}" "${L4_MEM_FREQ}"
+        elif [ -z "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}" ]; then
             set_gpu_freq "${L40S_NODE}" "${l40s_freq}" "${tp}" "${L40S_MEM_FREQ}"
             set_gpu_freq "${L4_NODE}"   "${l4_freq}"   "${tp}" "${L4_MEM_FREQ}"
         else
-            echo "  Phase 3A: leaving both GPU clocks untouched"
+            echo "  XpYd observation path: leaving both GPU clocks untouched"
         fi
 
         # Start prefill instance (L40S) — P2pNcclConnector (V1 engine native)
@@ -1601,13 +1694,41 @@ EOF
         done
         echo "  Proxy ready (${elapsed}s)"
 
-        if [ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}" ]; then
+        if [ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" ]; then
             export XPYD_P_HTTP_URI="http://${proxy_prefill_host}:${PREFILL_PORT}"
             export XPYD_D_HTTP_URI="http://${proxy_decode_host}:${DECODE_PORT}"
             export XPYD_PROXY_URI="http://127.0.0.1:${PROXY_PORT}"
             export XPYD_P_SERVER_LOG="${RESULT_DIR}/vllm_${L40S_NODE}_${PREFILL_PORT}.log"
             export XPYD_D_SERVER_LOG="${RESULT_DIR}/vllm_${L4_NODE}_${DECODE_PORT}.log"
             export PYTHONPATH="${SCRIPT_DIR}/paper/scripts${PYTHONPATH:+:${PYTHONPATH}}"
+        fi
+
+        if [ -n "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" ]; then
+            echo "  Phase 3B: running controlled fixed-clock workload characterization"
+            local characterization_status=0
+            local characterization_args=(
+                -m xpyd.phase3b_characterization run
+                --config "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}"
+            )
+            if [ -n "${XPYD_PHASE3B_CHARACTERIZATION_RUN_ID}" ]; then
+                characterization_args+=(--run-id "${XPYD_PHASE3B_CHARACTERIZATION_RUN_ID}")
+            fi
+            if [ -n "${XPYD_PHASE3B_CHARACTERIZATION_REPEATS}" ]; then
+                characterization_args+=(--repeats "${XPYD_PHASE3B_CHARACTERIZATION_REPEATS}")
+            fi
+            if [ -n "${XPYD_PHASE3B_CHARACTERIZATION_REQUESTS}" ]; then
+                characterization_args+=(--requests-per-repeat "${XPYD_PHASE3B_CHARACTERIZATION_REQUESTS}")
+            fi
+            "${PYTHON_BIN}" "${characterization_args[@]}" || characterization_status=$?
+            kill "${PROXY_PID}" 2>/dev/null || true
+            wait "${PROXY_PID}" 2>/dev/null || true
+            stop_server "${L40S_NODE}" "${PREFILL_PORT}"
+            stop_server "${L4_NODE}" "${DECODE_PORT}"
+            if [ "${characterization_status}" -ne 0 ]; then
+                echo "  ERROR: Phase 3B characterization failed with status ${characterization_status}"
+                return "${characterization_status}"
+            fi
+            break
         fi
 
         if [ -n "${XPYD_PHASE3B_CONFIG}" ]; then
@@ -1780,7 +1901,11 @@ if [ "${XPYD_NO_GPU_MUTATION}" -eq 0 ]; then
     done
     echo "GPU persistence mode enabled on active nodes."
 else
-    echo "XpYd observation path: GPU persistence/clock/reset mutations disabled."
+    if [ "${XPYD_CHARACTERIZATION_CLOCKS_REQUESTED}" -eq 1 ]; then
+        echo "XpYd characterization: legacy persistence/reset mutations disabled; one fixed-clock lock will be applied."
+    else
+        echo "XpYd observation path: GPU persistence/clock/reset mutations disabled."
+    fi
 fi
 echo ""
 
