@@ -1,7 +1,9 @@
 # XpYd Phase 3B minimal physical-preflight runbook
 
-The checked-in command is deliberately one small L40S P0 to L4 D0 validation,
-not a workload sweep.
+The checked-in command is deliberately one small Uranus L40S P0 to Europa L4
+D0 validation, not a workload sweep. Uranus is the accepted L40S endpoint
+because its read-only NVML capability probe supports both cumulative energy and
+direct power; Neptune's current driver/device state does not.
 
 ## CPU validation
 
@@ -30,7 +32,8 @@ cd /data/users/chjing/vLLM_test
 source ~/.bashrc
 conda activate cuda-env
 git status --short
-sbatch --export=ALL,EXP=E,E_SMOKE=1,XPYD_PHASE3B_CONFIG=paper/configs/xpyd_phase3b_l40s_l4.json \
+sbatch --nodelist=uranus,europa \
+  --export=ALL,EXP=E,E_SMOKE=1,L40S_NODE=uranus,L4_NODE=europa,XPYD_PHASE3B_CONFIG=paper/configs/xpyd_phase3b_l40s_l4.json \
   run_disagg_benchmark.sh
 ```
 

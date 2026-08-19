@@ -30,7 +30,7 @@
   "endpoints": [
     {
       "endpoint_id": "P0", "role": "prefill", "gpu_type": "NVIDIA L40S",
-      "node": "neptune", "gpu_ids": [0], "tp_degree": 1,
+      "node": "uranus", "gpu_ids": [0], "tp_degree": 1,
       "http_uri": "$XPYD_P_HTTP_URI", "kv_connector": "P2pNcclConnector"
     },
     {
@@ -50,7 +50,7 @@
   "physical_context": {
     "scheduler": "Slurm",
     "slurm_job_id": "$SLURM_JOB_ID",
-    "allocation": "exclusive neptune + europa",
+    "allocation": "exclusive uranus + europa",
     "prefill_kv_role": "kv_producer",
     "decode_kv_role": "kv_consumer",
     "frequency_policy": "untouched",
