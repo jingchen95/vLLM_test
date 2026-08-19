@@ -6,7 +6,7 @@ trained, no routing changes, and no scheduler or feedback policy is enabled.
 
 ## Controlled topology and clocks
 
-- P0: Uranus GPU 0, NVIDIA L40S, graphics 2520 MHz, memory 9001 MHz.
+- P0: Neptune GPU 0, NVIDIA L40S, graphics 2520 MHz, memory 9001 MHz.
 - D0: Europa GPU 0, NVIDIA L4, graphics 2040 MHz, memory 6251 MHz.
 - Serving: Mistral-7B, vLLM 0.15.1, P2pNcclConnector, TP=1.
 
@@ -29,8 +29,8 @@ and one measured workload window.
 Run the four-cell smoke first:
 
 ```bash
-sbatch --nodelist=uranus,europa \
-  --export=ALL,EXP=E,L40S_NODE=uranus,L4_NODE=europa,RESULT_DIR=results/xpyd_phase3b_characterization_smoke_runtime,XPYD_PHASE3B_CHARACTERIZATION_CONFIG=paper/configs/xpyd_phase3b_characterization_l40s_l4.json,XPYD_PHASE3B_CHARACTERIZATION_REPEATS=1,XPYD_PHASE3B_CHARACTERIZATION_REQUESTS=1 \
+sbatch --nodelist=neptune,europa \
+  --export=ALL,EXP=E,L40S_NODE=neptune,L4_NODE=europa,RESULT_DIR=results/xpyd_phase3b_characterization_smoke_runtime,XPYD_PHASE3B_CHARACTERIZATION_CONFIG=paper/configs/xpyd_phase3b_characterization_l40s_l4.json,XPYD_PHASE3B_CHARACTERIZATION_REPEATS=1,XPYD_PHASE3B_CHARACTERIZATION_REQUESTS=1 \
   run_disagg_benchmark.sh
 ```
 
