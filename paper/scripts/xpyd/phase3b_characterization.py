@@ -302,9 +302,13 @@ def analyze_characterization(run_dir: Path, config: Mapping[str, Any]) -> dict[s
         phase3a_valid = (
             bool(phase3a_summary.get("completed"))
             and bool(proxy_audit.get("valid"))
-            and int(phase3a_summary.get("scrape_error_count", -1)) == 0
-            and int(phase3a_summary.get("missed_scrape_count", -1)) == 0
         )
+        auxiliary_telemetry = {
+            "claim_boundary": "auxiliary telemetry; not a Phase 3B hard gate",
+            "scrape_error_count": int(phase3a_summary.get("scrape_error_count", 0)),
+            "missed_scrape_count": int(phase3a_summary.get("missed_scrape_count", 0)),
+            "load_monitoring": phase3a_summary.get("load_monitoring", []),
+        }
         aggregate = aggregate_endpoint_workload(
             [endpoints["P0"]["workload"], endpoints["D0"]["workload"]],
             logical_requests=int(client["successful_requests"]),
@@ -322,6 +326,7 @@ def analyze_characterization(run_dir: Path, config: Mapping[str, Any]) -> dict[s
             "valid": valid,
             "client": client,
             "phase3a_valid": phase3a_valid,
+            "phase3a_auxiliary_telemetry": auxiliary_telemetry,
             "proxy_audit": proxy_audit,
             "token_audit": token_audit,
             "endpoints": endpoints,
@@ -496,6 +501,17 @@ def run_characterization(
                 "repeat_index": repeat_index,
                 "fixed_clock_state_external": True,
                 "adaptive_dvfs": False,
+            }
+            phase3a_config["phase3b_acceptance"] = {
+                "prometheus_scrapes_auxiliary": True,
+                "hard_gates": [
+                    "real_sse",
+                    "logical_request_id_and_token_accounting",
+                    "client_ttft_tpot_e2e",
+                    "endpoint_energy_windows_and_sampling_coverage",
+                    "fixed_clock_audit",
+                    "no_invalidating_thermal_or_hw_slowdown",
+                ],
             }
             phase3a_run_id = "%s-%s-r%02d-phase3a" % (run_id, workload_id, repeat_index)
             phase3a_run_dir = Phase3AHarness(phase3a_config, run_id=phase3a_run_id).run(("load",))

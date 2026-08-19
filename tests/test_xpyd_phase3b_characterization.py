@@ -94,6 +94,14 @@ class CharacterizationTests(unittest.TestCase):
         self.assertEqual(config["endpoints"][0]["node"], "neptune")
         self.assertEqual(config["fixed_clocks"]["D0"]["graphics_mhz"], 1500)
 
+    def test_phase3b_claim_boundary_keeps_prometheus_auxiliary(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "paper/scripts/xpyd/phase3b_characterization.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"prometheus_scrapes_auxiliary": True', source)
+        self.assertIn('"endpoint_energy_windows_and_sampling_coverage"', source)
+
     def test_invalid_duplicate_workload_ids_fail(self):
         root = Path(__file__).resolve().parents[1]
         source = json.loads(

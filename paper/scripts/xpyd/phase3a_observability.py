@@ -1050,14 +1050,24 @@ class Phase3AHarness:
             finally:
                 stream.close()
             after = self._scrape_round("load_after", probe_id)
+            client = self._validate_client_result(trace.parent, returncode, probe)
+            violations = monitoring["violations"]
+            auxiliary_telemetry = bool(
+                self.config.get("phase3b_acceptance", {}).get(
+                    "prometheus_scrapes_auxiliary", False
+                )
+            )
+            monitoring["prometheus_scrapes_auxiliary"] = auxiliary_telemetry
+            monitoring["claim_boundary"] = (
+                "auxiliary telemetry; not a Phase 3B hard gate"
+                if auxiliary_telemetry else "Phase 3A load-monitoring gate"
+            )
             self.load_monitoring_records.append(monitoring)
             _write_json(
                 self.run_dir / "derived" / "load_monitoring.json",
                 self.load_monitoring_records,
             )
-            client = self._validate_client_result(trace.parent, returncode, probe)
-            violations = monitoring["violations"]
-            if violations:
+            if violations and not auxiliary_telemetry:
                 raise Phase3AError(
                     "load monitoring coverage invalid for %s: %s" %
                     (probe_id, "; ".join(violations))
@@ -1408,6 +1418,7 @@ class Phase3AHarness:
             ),
             "load_monitoring": self.load_monitoring_records,
             "proxy_diagnostics_audit": self.proxy_diagnostics_audit,
+            "phase3b_acceptance": self.config.get("phase3b_acceptance", {}),
             "reset_or_discontinuity_observations": resets,
             "endpoint_window_behavior": behavior,
             "interpretation_boundary": (

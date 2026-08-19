@@ -53,6 +53,14 @@ match fractions. A repeat is valid only when both energy windows, both active-
 workload clock audits, the Phase 3A audit, token accounting, and P0+D0
 aggregation pass.
 
+For Phase 3B, continuous Phase 3A `/metrics` scraping is auxiliary telemetry:
+scrape success, misses, longest gaps, queue, and KV observations are retained
+and reported, but temporary scrape timeouts do not invalidate an otherwise
+complete offline energy window. The hard gates remain real SSE, exact logical
+ID/token accounting, client TTFT/TPOT/E2E validity, P0/D0 energy-window and
+sampling validity, fixed-clock validity, and absence of an invalidating
+thermal/HW slowdown.
+
 Primary energy is gross GPU-board hardware-counter energy. Idle-adjusted energy
 is a separately labelled estimate. `P/(P+D)` and `D/(P+D)` are limited
 GPU-board contribution shares, not whole-system attribution. CPU/node, NIC,

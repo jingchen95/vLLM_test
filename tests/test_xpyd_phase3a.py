@@ -441,6 +441,43 @@ vllm:request_success_total{model_name="model-a"} 1
             self.assertEqual(monitoring["maximum_consecutive_failures"]["D0"], 2)
             self.assertTrue((run_dir / "derived/failure.json").is_file())
 
+    def test_phase3b_auxiliary_scrape_outage_is_reported_not_failed(self):
+        baseline = prom(1000, 500, 20)
+        interval = prom(1100, 550, 22)
+        final = prom(1200, 600, 24)
+        source = ScrapeSequence({
+            "P0": [baseline, baseline, interval, interval, final],
+            "D0": [baseline, baseline, OSError("busy-1"), OSError("busy-2"), final],
+        })
+        with tempfile.TemporaryDirectory() as temp:
+            load_config = config(Path(temp))
+            load_config["phase3b_acceptance"] = {
+                "prometheus_scrapes_auxiliary": True,
+            }
+            load_config["scrape_interval_s"] = 0.1
+            load_config["scrape_late_tolerance_s"] = 0.02
+            load_config["load_monitoring"] = {
+                "minimum_interval_scrapes_per_endpoint": 1,
+                "maximum_consecutive_failures_per_endpoint": 1,
+            }
+            load_config["load_probes"] = [{
+                "id": "load", "input_len": 128, "output_len": 128,
+                "rate_rps": 1.0, "duration_s": 1.0, "max_concurrency": 1,
+            }]
+            harness = LoadFixtureHarness(
+                load_config, run_id="auxiliary-outage", scrape_source=source,
+            )
+            harness.active_polls = 3
+            run_dir = harness.run(("load",))
+            monitoring = json.loads(
+                (run_dir / "derived/load_monitoring.json").read_text()
+            )[0]
+            self.assertTrue(monitoring["prometheus_scrapes_auxiliary"])
+            self.assertTrue(monitoring["violations"])
+            summary = json.loads((run_dir / "derived/summary.json").read_text())
+            self.assertTrue(summary["completed"])
+            self.assertTrue(summary["phase3b_acceptance"]["prometheus_scrapes_auxiliary"])
+
     def test_proxy_diagnostics_audit_matches_successful_real_stream_requests(self):
         baseline = prom(1000, 500, 20)
         source = ScrapeSequence({
