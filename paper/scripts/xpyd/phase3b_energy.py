@@ -45,7 +45,17 @@ def _append_jsonl(stream: Any, record: Mapping[str, Any]) -> None:
 
 
 class AsyncFlushingStream:
-    """Keep shared-filesystem flush latency off the sampling deadline path."""
+    """Keep shared-filesystem flush latency off the sampling deadline path.
+
+    Records are flushed in bounded batches.  Flushing every JSONL record made
+    the writer fall minutes behind on Minerva's shared filesystem even though
+    sampling itself remained on schedule; shutdown then had to drain that
+    backlog.  A batch is still made visible at least four times per second,
+    while the sentinel path drains every queued record before returning.
+    """
+
+    _MAX_BATCH_RECORDS = 256
+    _MAX_BATCH_AGE_S = 0.25
 
     def __init__(self, stream: Any) -> None:
         self.stream = stream
@@ -62,8 +72,23 @@ class AsyncFlushingStream:
                 item = self.items.get()
                 if item is None:
                     break
-                self.stream.write(item)
+                batch = [item]
+                deadline = time.monotonic() + self._MAX_BATCH_AGE_S
+                closing = False
+                while len(batch) < self._MAX_BATCH_RECORDS:
+                    timeout = max(0.0, deadline - time.monotonic())
+                    try:
+                        item = self.items.get(timeout=timeout)
+                    except queue.Empty:
+                        break
+                    if item is None:
+                        closing = True
+                        break
+                    batch.append(item)
+                self.stream.write("".join(batch))
                 self.stream.flush()
+                if closing:
+                    break
         except BaseException as exc:
             self.error = exc
 
@@ -520,7 +545,9 @@ def _monitor_command(args: argparse.Namespace) -> int:
     watcher.start()
     try:
         _write_json(capability_path, source.capability_record())
-        with output.open("x", encoding="utf-8", buffering=1) as raw_stream:
+        # Explicit batch flushes above provide visibility; line buffering here
+        # would turn one batch back into one shared-filesystem flush per line.
+        with output.open("x", encoding="utf-8") as raw_stream:
             stream = AsyncFlushingStream(raw_stream)
             try:
                 sampler.run(stream, duration_s=args.duration_s)

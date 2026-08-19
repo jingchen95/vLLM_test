@@ -395,6 +395,29 @@ class SamplerTests(unittest.TestCase):
         self.assertGreaterEqual(len(records), 5)
         self.assertFalse(any(item["missed"] for item in records))
 
+    def test_async_writer_batches_and_drains_large_backlog(self):
+        class CountingStream(io.StringIO):
+            def __init__(self):
+                super().__init__()
+                self.flush_count = 0
+
+            def flush(self):
+                self.flush_count += 1
+                time.sleep(0.001)
+                return super().flush()
+
+        raw = CountingStream()
+        stream = AsyncFlushingStream(raw)
+        records = [json.dumps({"sequence": index}) + "\n" for index in range(2000)]
+        for record_text in records:
+            stream.write(record_text)
+        started = time.monotonic()
+        stream.close()
+        elapsed = time.monotonic() - started
+        self.assertEqual(raw.getvalue(), "".join(records))
+        self.assertLessEqual(raw.flush_count, 9)
+        self.assertLess(elapsed, 1.0)
+
 
 class RuntimeGuardTests(unittest.TestCase):
     def test_phase3b_runtime_has_no_mutation_symbols_or_legacy_monitor_import(self):
