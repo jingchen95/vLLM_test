@@ -178,4 +178,4 @@ classifiers, latency regressors, and power estimators were trained from
 monolithic single-pool Phase-2 rows spanning balanced and phase-dominant shapes;
 none was trained solely from phase-dominant, phase-only, or physically
 disaggregated measurements.  The artifact-level matrix and reuse status remain
-in `CODEBASE_AUDIT.md` and `XPYD_RUNTIME_DESIGN.md`.
+in `docs/CODEBASE_AUDIT.md` and `XPYD_RUNTIME_DESIGN.md`.

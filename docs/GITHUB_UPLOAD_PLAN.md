@@ -114,8 +114,8 @@ First archive the current directory or ensure the raw artifacts have another ver
 cd /Users/chjing/Downloads/vLLM_test
 git init
 git switch -c main
-git add .gitignore CODEBASE_AUDIT.md RESEARCH_GAP_ANALYSIS.md GITHUB_UPLOAD_PLAN.md HANDOFF_FOR_CHATGPT.md github_manifest.txt external_artifacts_manifest.tsv
-git add calibrate_trace_rates.py gpu_monitor.py parse_disagg_results.py plot_section42.py plot_section45.py prepare_azure_trace.py run_disagg_benchmark.sh run_rhocap_ablation.py run_trace_sanity_suite.sh smoke_test_strategies.py summarize_trace_sanity.py validate_obs2_l4.sh sweep_llm_issue_checklist.md sweep_llm_top_tier_review_and_trim_plan.md
+git add .gitignore README.md docs github_manifest.txt external_artifacts_manifest.tsv
+git add calibrate_trace_rates.py gpu_monitor.py parse_disagg_results.py plot_section42.py plot_section45.py prepare_azure_trace.py run_disagg_benchmark.sh run_rhocap_ablation.py run_trace_sanity_suite.sh smoke_test_strategies.py summarize_trace_sanity.py validate_obs2_l4.sh
 git add paper artifacts/paper/models calibration_out Phase2_Results_L40S/master_results.csv Phase2_Results_L4/master_results.csv Obs2_Validation_L4/obs2_validation_results.csv traces/azure_production traces/azure_diurnal results/paper/analyses results/paper/synthetic_traces
 git add results/paper/section42_frozen_main/summary.csv results/paper/prod_conv_frozen/summary.csv results/paper/prod_code_frozen/summary.csv results/paper/prod_diurnal_frozen/summary.csv results/paper/section45_ablation/summary.csv results/paper/section47_overhead/summary.csv
 git status --short

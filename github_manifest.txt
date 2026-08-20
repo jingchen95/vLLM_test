@@ -4,10 +4,8 @@
 
 # Audit/handoff and curation metadata
 .gitignore
-CODEBASE_AUDIT.md
-RESEARCH_GAP_ANALYSIS.md
-GITHUB_UPLOAD_PLAN.md
-HANDOFF_FOR_CHATGPT.md
+README.md
+docs/
 github_manifest.txt
 external_artifacts_manifest.tsv
 
@@ -24,8 +22,6 @@ run_trace_sanity_suite.sh
 smoke_test_strategies.py
 summarize_trace_sanity.py
 validate_obs2_l4.sh
-sweep_llm_issue_checklist.md
-sweep_llm_top_tier_review_and_trim_plan.md
 
 # Paper source, scheduler/model code, experiment drivers, documentation, and
 # publication-sized figures. Exclude paper/build and paper/main.{aux,log,...}.

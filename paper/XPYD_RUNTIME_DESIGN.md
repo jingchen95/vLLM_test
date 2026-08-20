@@ -494,7 +494,7 @@ bash -n run_disagg_benchmark.sh: OK
 ```
 
 The known path-integrity check failed only on the same three absent generated
-sources already documented in `CODEBASE_AUDIT.md`:
+sources already documented in `docs/CODEBASE_AUDIT.md`:
 
 ```text
 $ make -C paper check-paths
