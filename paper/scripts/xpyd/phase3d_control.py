@@ -120,7 +120,7 @@ class NvidiaSmiClockBackend:
     """Small guarded nvidia-smi backend with node-local Slurm execution."""
 
     _identity_re = re.compile(
-        r"^IDENTITY=(.*?),([^,]+),([^,]+),(\d+)\s*$", re.MULTILINE
+        r"^IDENTITY=(.*?),([^,]+),([^,]+),\s*(\d+)[ \t]*$", re.MULTILINE
     )
 
     def __init__(
@@ -155,7 +155,11 @@ class NvidiaSmiClockBackend:
     def _parse_readback(self, endpoint_id: str, node: str, gpu_id: int, output: str) -> GPUReadback:
         match = self._identity_re.search(output)
         if match is None:
-            raise Phase3DError("missing or malformed GPU identity/readback on %s" % node)
+            identity_context = output.split("SUPPORTED_BEGIN", 1)[0].strip()[-1000:]
+            raise Phase3DError(
+                "missing or malformed GPU identity/readback on %s: %r"
+                % (node, identity_context)
+            )
         name, uuid, bus, graphics = (item.strip() for item in match.groups())
         return GPUReadback(
             endpoint_id=endpoint_id, node=node, gpu_id=gpu_id,

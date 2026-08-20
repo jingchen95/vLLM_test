@@ -126,7 +126,10 @@ class ActuatorPrimitiveTests(unittest.TestCase):
             PerEndpointClockActuator(FakeClockBackend(caps), caps, 0.0)
 
     def test_node_backend_requires_fresh_matching_readback(self):
-        output = "IDENTITY=NVIDIA L4,GPU-a,00000000:01:00.0,1500\n"
+        output = (
+            "[NVGPUFREQ][INFO] fixture plugin message\n"
+            "IDENTITY=NVIDIA L4, GPU-a, 00000000:01:00.0, 1500\n"
+        )
 
         def runner(command):
             return subprocess.CompletedProcess(command, 0, output)
