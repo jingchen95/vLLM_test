@@ -31,6 +31,9 @@ class FakeNVML:
     NVML_CLOCK_GRAPHICS = 0
     NVML_CLOCK_MEM = 1
     NVML_TEMPERATURE_GPU = 0
+    nvmlClocksThrottleReasonGpuIdle = 1
+    nvmlClocksThrottleReasonSwPowerCap = 4
+    nvmlClocksThrottleReasonHwSlowdown = 8
 
     class PCI:
         def __init__(self, bus_id):
@@ -97,6 +100,9 @@ class FakeNVML:
 
     def nvmlDeviceGetUtilizationRates(self, handle):
         return self.Utilization()
+
+    def nvmlDeviceGetCurrentClocksThrottleReasons(self, handle):
+        return self.nvmlClocksThrottleReasonGpuIdle
 
 
 class FakeFieldPowerNVML(FakeNVML):
@@ -193,6 +199,14 @@ class ReadOnlyNVMLTests(unittest.TestCase):
             self.assertTrue(source.capabilities.power_supported)
             self.assertTrue(source.capabilities.total_energy_error["not_supported"])
             self.assertIsNone(source.query()["total_energy_mj"])
+
+    def test_multi_endpoint_identity_and_throttle_reasons_are_read_only(self):
+        binding = FakeNVML()
+        with ReadOnlyNVMLSource("P1", "prefill", "0", binding=binding) as source:
+            sample = source.query()
+        self.assertEqual(sample["clock_throttle_reasons"], ["gpu_idle"])
+        self.assertFalse(sample["invalidating_thermal_or_hw_slowdown"])
+        self.assertFalse(binding.setter_accessed)
 
     def test_uuid_pci_mapping_and_mismatch_fail_loudly(self):
         with ReadOnlyNVMLSource("P0", "prefill", "00000000:01:00.0", binding=FakeNVML()) as source:

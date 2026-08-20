@@ -82,8 +82,8 @@ class ReadOnlyNVMLSource:
         binding: Any = None,
         hostname: Optional[str] = None,
     ) -> None:
-        if endpoint not in ("P0", "D0"):
-            raise ValueError("endpoint must be P0 or D0")
+        if not endpoint.strip():
+            raise ValueError("endpoint must be non-empty")
         if role not in ("prefill", "decode"):
             raise ValueError("role must be prefill or decode")
         visible = str(cuda_visible_device).strip()
@@ -263,6 +263,9 @@ class ReadOnlyNVMLSource:
             "gpu_utilization_pct": None,
             "memory_utilization_pct": None,
             "temperature_c": None,
+            "clock_throttle_reasons_mask": None,
+            "clock_throttle_reasons": [],
+            "invalidating_thermal_or_hw_slowdown": None,
             "field_errors": {},
         }
         try:
@@ -309,6 +312,41 @@ class ReadOnlyNVMLSource:
             result["memory_utilization_pct"] = float(utilization.memory)
         except Exception as exc:
             result["field_errors"]["utilization"] = structured_error(exc)
+        try:
+            mask = int(
+                self.binding.nvmlDeviceGetCurrentClocksThrottleReasons(
+                    self.handle
+                )
+            )
+            reason_constants = {
+                "gpu_idle": "nvmlClocksThrottleReasonGpuIdle",
+                "applications_clocks_setting": "nvmlClocksThrottleReasonApplicationsClocksSetting",
+                "sw_power_cap": "nvmlClocksThrottleReasonSwPowerCap",
+                "hw_slowdown": "nvmlClocksThrottleReasonHwSlowdown",
+                "sync_boost": "nvmlClocksThrottleReasonSyncBoost",
+                "sw_thermal_slowdown": "nvmlClocksThrottleReasonSwThermalSlowdown",
+                "hw_thermal_slowdown": "nvmlClocksThrottleReasonHwThermalSlowdown",
+                "hw_power_brake_slowdown": "nvmlClocksThrottleReasonHwPowerBrakeSlowdown",
+                "display_clock_setting": "nvmlClocksThrottleReasonDisplayClockSetting",
+            }
+            reasons = []
+            invalidating = False
+            invalidating_names = {
+                "hw_slowdown",
+                "sw_thermal_slowdown",
+                "hw_thermal_slowdown",
+                "hw_power_brake_slowdown",
+            }
+            for name, attribute in reason_constants.items():
+                bit = int(getattr(self.binding, attribute, 0))
+                if bit and mask & bit:
+                    reasons.append(name)
+                    invalidating = invalidating or name in invalidating_names
+            result["clock_throttle_reasons_mask"] = mask
+            result["clock_throttle_reasons"] = reasons
+            result["invalidating_thermal_or_hw_slowdown"] = invalidating
+        except Exception as exc:
+            result["field_errors"]["clock_throttle_reasons"] = structured_error(exc)
         return result
 
     def close(self) -> None:

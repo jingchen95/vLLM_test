@@ -68,18 +68,21 @@ XPYD_PHASE3B_CHARACTERIZATION_CONFIG="${XPYD_PHASE3B_CHARACTERIZATION_CONFIG:-}"
 XPYD_PHASE3B_CHARACTERIZATION_RUN_ID="${XPYD_PHASE3B_CHARACTERIZATION_RUN_ID:-}"
 XPYD_PHASE3B_CHARACTERIZATION_REPEATS="${XPYD_PHASE3B_CHARACTERIZATION_REPEATS:-}"
 XPYD_PHASE3B_CHARACTERIZATION_REQUESTS="${XPYD_PHASE3B_CHARACTERIZATION_REQUESTS:-}"
+XPYD_PHASE3C_CONFIG="${XPYD_PHASE3C_CONFIG:-}"
+XPYD_PHASE3C_RUN_ID="${XPYD_PHASE3C_RUN_ID:-}"
 XPYD_NO_GPU_MUTATION="${XPYD_NO_GPU_MUTATION:-0}"
 _xpyd_mode_count=0
 [ -n "${XPYD_PHASE3A_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
 [ -n "${XPYD_PHASE3B_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
 [ -n "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
+[ -n "${XPYD_PHASE3C_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
 if [ "${_xpyd_mode_count}" -gt 1 ]; then
     echo "ERROR: choose exactly one XpYd Phase 3A, Phase 3B preflight, or characterization config" >&2
     exit 2
 fi
-[ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" ] && XPYD_NO_GPU_MUTATION=1
+[ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}" ] && XPYD_NO_GPU_MUTATION=1
 XPYD_CHARACTERIZATION_CLOCKS_REQUESTED=0
-[ -n "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" ] && XPYD_CHARACTERIZATION_CLOCKS_REQUESTED=1
+[ -n "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}" ] && XPYD_CHARACTERIZATION_CLOCKS_REQUESTED=1
 XPYD_FIXED_CLOCK_EVIDENCE="${XPYD_FIXED_CLOCK_EVIDENCE:-}"
 export XPYD_FIXED_CLOCK_EVIDENCE
 
@@ -120,8 +123,10 @@ _reset_gpu_state() {
 _trap_cleanup() {
     echo "[trap] Cleaning up servers and monitors..."
     _bg_kill TERM "${MONITOR_PIDS[@]}" 2>/dev/null || true
+    _bg_kill TERM "${PHASE3C_SERVER_PIDS[@]}" 2>/dev/null || true
     sleep 1
     _bg_kill KILL "${MONITOR_PIDS[@]}" 2>/dev/null || true
+    _bg_kill KILL "${PHASE3C_SERVER_PIDS[@]}" 2>/dev/null || true
     [ -n "${L40S_SERVER_PID:-}" ] && kill -TERM "${L40S_SERVER_PID}" 2>/dev/null || true
     [ -n "${L4_SERVER_PID:-}"   ] && kill -TERM "${L4_SERVER_PID}"   2>/dev/null || true
     sleep 10
@@ -130,8 +135,12 @@ _trap_cleanup() {
     "${PKILL_BIN}" -KILL -f 'vllm.entrypoints.openai.api_server' 2>/dev/null || true
     "${PKILL_BIN}" -KILL -f 'python.*vllm' 2>/dev/null || true
     if [ "${XPYD_CHARACTERIZATION_CLOCKS_REQUESTED:-0}" -eq 1 ]; then
-        [ -n "${L40S_NODE:-}" ] && reset_characterization_clocks "${L40S_NODE}" P0 || true
-        [ -n "${L4_NODE:-}" ] && reset_characterization_clocks "${L4_NODE}" D0 || true
+        [ -n "${L40S_NODE:-}" ] && reset_characterization_clocks "${L40S_NODE}" P0 0 || true
+        [ -n "${L4_NODE:-}" ] && reset_characterization_clocks "${L4_NODE}" D0 0 || true
+        if [ -n "${XPYD_PHASE3C_CONFIG:-}" ]; then
+            reset_characterization_clocks "${L40S_NODE}" P1 1 || true
+            reset_characterization_clocks "${L4_NODE}" D1 1 || true
+        fi
     fi
     local _node
     for _node in "${ACTIVE_NODES[@]:-}"; do
@@ -416,6 +425,7 @@ CD_EXTENDED_NAMES="${CD_EXTENDED_NAMES:-0}"
 
 # Global monitor PID arrays (cleared per experiment)
 MONITOR_PIDS=()
+PHASE3C_SERVER_PIDS=()
 
 # Per-node server PIDs — set by start_vllm_server, cleared by stop_server.
 # Used by the EXIT trap and by stop_server for precise kill (not broad pkill).
@@ -595,20 +605,21 @@ set_characterization_clocks() {
     local endpoint="$2"
     local gpu_freq="$3"
     local mem_freq="$4"
+    local gpu_id="${5:-0}"
     local evidence="${XPYD_FIXED_CLOCK_EVIDENCE}"
     echo "  [${node}] Controlled characterization clock lock: GPU=${gpu_freq} MHz, MEM=${mem_freq} MHz"
     local command="
         set -euo pipefail
         {
             echo 'endpoint=${endpoint} node=${node} event=before_lock'
-            ${NVIDIA_SMI_BIN} -i 0 --query-gpu=index,name,uuid,pci.bus_id,clocks.current.graphics,clocks.current.memory --format=csv,noheader,nounits
-            ${NVIDIA_SMI_BIN} -i 0 -q -d SUPPORTED_CLOCKS || true
+            ${NVIDIA_SMI_BIN} -i ${gpu_id} --query-gpu=index,name,uuid,pci.bus_id,clocks.current.graphics,clocks.current.memory --format=csv,noheader,nounits
+            ${NVIDIA_SMI_BIN} -i ${gpu_id} -q -d SUPPORTED_CLOCKS || true
         } >> '${evidence}' 2>&1
-        ${SUDO_BIN} ${NVIDIA_SMI_BIN} -i 0 -lgc '${gpu_freq},${gpu_freq}'
-        ${SUDO_BIN} ${NVIDIA_SMI_BIN} -i 0 -lmc '${mem_freq},${mem_freq}'
+        ${SUDO_BIN} ${NVIDIA_SMI_BIN} -i ${gpu_id} -lgc '${gpu_freq},${gpu_freq}'
+        ${SUDO_BIN} ${NVIDIA_SMI_BIN} -i ${gpu_id} -lmc '${mem_freq},${mem_freq}'
         {
             echo 'endpoint=${endpoint} node=${node} event=after_lock target_graphics_mhz=${gpu_freq} target_memory_mhz=${mem_freq}'
-            ${NVIDIA_SMI_BIN} -i 0 --query-gpu=index,name,uuid,pci.bus_id,clocks.current.graphics,clocks.current.memory --format=csv,noheader,nounits
+            ${NVIDIA_SMI_BIN} -i ${gpu_id} --query-gpu=index,name,uuid,pci.bus_id,clocks.current.graphics,clocks.current.memory --format=csv,noheader,nounits
         } >> '${evidence}' 2>&1
     "
     _run_characterization_clock_command "${node}" "${command}"
@@ -617,18 +628,19 @@ set_characterization_clocks() {
 reset_characterization_clocks() {
     local node="$1"
     local endpoint="$2"
+    local gpu_id="${3:-0}"
     local evidence="${XPYD_FIXED_CLOCK_EVIDENCE}"
     [ -n "${evidence}" ] || return 0
     echo "  [${node}] Restoring default graphics and memory clocks"
     local command="
         set +e
-        ${SUDO_BIN} ${NVIDIA_SMI_BIN} -i 0 -rgc
+        ${SUDO_BIN} ${NVIDIA_SMI_BIN} -i ${gpu_id} -rgc
         rc_graphics=\$?
-        ${SUDO_BIN} ${NVIDIA_SMI_BIN} -i 0 -rmc
+        ${SUDO_BIN} ${NVIDIA_SMI_BIN} -i ${gpu_id} -rmc
         rc_memory=\$?
         {
             echo 'endpoint=${endpoint} node=${node} event=after_reset'
-            ${NVIDIA_SMI_BIN} -i 0 --query-gpu=index,name,uuid,pci.bus_id,clocks.current.graphics,clocks.current.memory --format=csv,noheader,nounits
+            ${NVIDIA_SMI_BIN} -i ${gpu_id} --query-gpu=index,name,uuid,pci.bus_id,clocks.current.graphics,clocks.current.memory --format=csv,noheader,nounits
             echo reset_graphics_rc=\${rc_graphics} reset_memory_rc=\${rc_memory}
         } >> '${evidence}' 2>&1
         [ \${rc_graphics} -eq 0 ] && [ \${rc_memory} -eq 0 ]
@@ -758,6 +770,7 @@ start_vllm_server() {
     # 5th arg: "log" = enable request logging (for debug); anything else = suppress
     local req_log_flag="--disable-log-requests"
     [ "${5:-}" = "log" ] && req_log_flag=""
+    local explicit_cuda_devs="${6:-}"
     local log_file="${RESULT_DIR}/vllm_${node}_${port}.log"
 
     # Pin GPU indices explicitly so TP=2/4 always gets the intended devices.
@@ -765,7 +778,9 @@ start_vllm_server() {
     # TP=2: use GPUs 0,1 on io node.
     local cuda_devs
     local gpu_override=""
-    if [ "${node}" = "${L40S_NODE}" ] && [ -n "${L40S_GPU_IDS}" ]; then
+    if [ -n "${explicit_cuda_devs}" ]; then
+        gpu_override="${explicit_cuda_devs}"
+    elif [ "${node}" = "${L40S_NODE}" ] && [ -n "${L40S_GPU_IDS}" ]; then
         gpu_override="${L40S_GPU_IDS}"
     elif [ "${node}" = "${L4_NODE}" ] && [ -n "${L4_GPU_IDS}" ]; then
         gpu_override="${L4_GPU_IDS}"
@@ -795,13 +810,25 @@ start_vllm_server() {
             ${extra_args} \
             > "${log_file}" 2>&1 &
         _server_pid=$!
+        [ -n "${XPYD_PHASE3C_CONFIG:-}" ] && PHASE3C_SERVER_PIDS+=("${_server_pid}")
         # Record in the appropriate global for the EXIT trap
         if [ "${port}" = "${PREFILL_PORT}" ]; then L40S_SERVER_PID=${_server_pid}
         else                                        L4_SERVER_PID=${_server_pid}; fi
     else
+        local step_gpu_count="${tp}"
+        local step_gpu_bind="map_gpu:${cuda_devs}"
+        local step_environment=()
+        if [ -n "${XPYD_PHASE3C_CONFIG:-}" ]; then
+            # Both Phase 3C servers on this node need cgroup access to the
+            # explicitly pinned GPU0/1 set. Each process still sees one GPU.
+            step_gpu_count=2
+            step_gpu_bind="none"
+            step_environment=(env "CUDA_VISIBLE_DEVICES=${cuda_devs}")
+        fi
         srun --overlap --nodes=1 --ntasks=1 --nodelist="${node}" \
-            --gpus-per-node="${tp}" \
-            --gpu-bind="map_gpu:${cuda_devs}" \
+            --gpus-per-node="${step_gpu_count}" \
+            --gpu-bind="${step_gpu_bind}" \
+            "${step_environment[@]}" \
             "${PYTHON_BIN}" -m vllm.entrypoints.openai.api_server \
                 --model "${MODEL}" \
                 --host 0.0.0.0 \
@@ -812,6 +839,7 @@ start_vllm_server() {
                 ${extra_args} \
             > "${log_file}" 2>&1 &
         _server_pid=$!
+        [ -n "${XPYD_PHASE3C_CONFIG:-}" ] && PHASE3C_SERVER_PIDS+=("${_server_pid}")
         if [ "${port}" = "${PREFILL_PORT}" ]; then L40S_SERVER_PID=${_server_pid}
         else                                        L4_SERVER_PID=${_server_pid}; fi
     fi
@@ -1397,6 +1425,77 @@ run_experiment_CD() {
 # Monitors both L40S and L4 nodes per workload using gpu_monitor.py,
 # with t_start/t_end timestamps and hardware energy counter — same
 # pattern as A/B/CD, but with two independent PID arrays.
+# ---------------------------------------------------------------------------
+# Phase 3C: smallest extension of the accepted Experiment E lifecycle.
+# Two persistent TP=1 producers and two persistent TP=1 consumers are pinned
+# to GPUs 0/1 on the already allocated L40S/L4 nodes. The existing proxy core,
+# client, metrics parser, and NVML monitor are reused by the Phase 3C harness.
+# ---------------------------------------------------------------------------
+run_phase3c_substrate() {
+    local p_ip d_ip p_http d_http
+    p_ip=$(get_node_ip "${L40S_NODE}")
+    d_ip=$(get_node_ip "${L4_NODE}")
+    p_http="${p_ip}"
+    d_http="${d_ip}"
+    [ "${LOCAL_NODE}" = "${L40S_NODE}" ] && p_http="127.0.0.1"
+    [ "${LOCAL_NODE}" = "${L4_NODE}" ] && d_http="127.0.0.1"
+
+    export XPYD_P0_HTTP_HOST="${p_http}" XPYD_P1_HTTP_HOST="${p_http}"
+    export XPYD_D0_HTTP_HOST="${d_http}" XPYD_D1_HTTP_HOST="${d_http}"
+    export XPYD_P_ADDR_HOST="${p_ip}" XPYD_D_ADDR_HOST="${d_ip}"
+    export XPYD_PROXY_URI="http://127.0.0.1:${PROXY_PORT}"
+    export XPYD_PROXY_DIAGNOSTICS_LOG="${RESULT_DIR}/xpyd_phase3c_proxy_${SLURM_JOB_ID:-local}.jsonl"
+    export XPYD_P0_SERVER_LOG="${RESULT_DIR}/vllm_${L40S_NODE}_8100.log"
+    export XPYD_P1_SERVER_LOG="${RESULT_DIR}/vllm_${L40S_NODE}_8101.log"
+    export XPYD_D0_SERVER_LOG="${RESULT_DIR}/vllm_${L4_NODE}_8200.log"
+    export XPYD_D1_SERVER_LOG="${RESULT_DIR}/vllm_${L4_NODE}_8201.log"
+    export PYTHONPATH="${SCRIPT_DIR}/paper/scripts${PYTHONPATH:+:${PYTHONPATH}}"
+
+    set_characterization_clocks "${L40S_NODE}" P0 2520 "${L40S_MEM_FREQ}" 0
+    set_characterization_clocks "${L40S_NODE}" P1 2520 "${L40S_MEM_FREQ}" 1
+    set_characterization_clocks "${L4_NODE}" D0 1500 "${L4_MEM_FREQ}" 0
+    set_characterization_clocks "${L4_NODE}" D1 1500 "${L4_MEM_FREQ}" 1
+
+    local p0_kv p1_kv d0_kv d1_kv
+    p0_kv='{"kv_connector":"P2pNcclConnector","kv_role":"kv_producer","kv_port":14579,"kv_connector_extra_config":{"send_type":"PUT"}}'
+    p1_kv='{"kv_connector":"P2pNcclConnector","kv_role":"kv_producer","kv_port":14580,"kv_connector_extra_config":{"send_type":"PUT"}}'
+    d0_kv='{"kv_connector":"P2pNcclConnector","kv_role":"kv_consumer","kv_port":14579}'
+    d1_kv='{"kv_connector":"P2pNcclConnector","kv_role":"kv_consumer","kv_port":14580}'
+
+    start_vllm_server "${L40S_NODE}" 8100 1 "--kv-transfer-config ${p0_kv}" "" 0
+    start_vllm_server "${L40S_NODE}" 8101 1 "--kv-transfer-config ${p1_kv}" "" 1
+    export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+    start_vllm_server "${L4_NODE}" 8200 1 "--kv-transfer-config ${d0_kv} --gpu-memory-utilization 0.82" log 0
+    start_vllm_server "${L4_NODE}" 8201 1 "--kv-transfer-config ${d1_kv} --gpu-memory-utilization 0.82" log 1
+    unset PYTORCH_CUDA_ALLOC_CONF
+
+    "${PYTHON_BIN}" -m xpyd.disagg_proxy \
+        --multi-endpoint-config "${XPYD_PHASE3C_CONFIG}" \
+        --proxy-port "${PROXY_PORT}" \
+        --diagnostics-log "${XPYD_PROXY_DIAGNOSTICS_LOG}" &
+    local proxy_pid=$!
+    PHASE3C_SERVER_PIDS+=("${proxy_pid}")
+    local elapsed=0
+    while ! "${CURL_BIN}" -s --connect-timeout 2 "http://127.0.0.1:${PROXY_PORT}/health" >/dev/null 2>&1; do
+        sleep 2
+        elapsed=$((elapsed + 2))
+        if [ "${elapsed}" -ge 60 ]; then
+            echo "  ERROR: Phase 3C proxy failed readiness"
+            return 1
+        fi
+    done
+
+    local args=(-m xpyd.phase3c_substrate --config "${XPYD_PHASE3C_CONFIG}")
+    [ -n "${XPYD_PHASE3C_RUN_ID}" ] && args+=(--run-id "${XPYD_PHASE3C_RUN_ID}")
+    local status=0
+    "${PYTHON_BIN}" "${args[@]}" || status=$?
+    kill "${proxy_pid}" 2>/dev/null || true
+    wait "${proxy_pid}" 2>/dev/null || true
+    stop_server "${L40S_NODE}" 8100
+    stop_server "${L4_NODE}" 8200
+    return "${status}"
+}
+
 # ===========================================================================
 run_experiment_E() {
     echo "=================================="
@@ -1409,7 +1508,7 @@ run_experiment_E() {
     local vllm_ver
     vllm_ver=$("${PYTHON_BIN}" -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "unknown")
     echo "  vLLM version: ${vllm_ver}"
-    if [ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" ] && [ "${vllm_ver}" != "0.15.1" ]; then
+    if [ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}" ] && [ "${vllm_ver}" != "0.15.1" ]; then
         echo "  ERROR: XpYd observation path requires vLLM version 0.15.1 (got ${vllm_ver})"
         return 1
     fi
@@ -1582,6 +1681,19 @@ print(f"  [patch] _tensor_key canonical fix applied to {path}")
 CONNECTOR_PATCH_EOF
     else
         echo "  WARNING: could not locate p2p_nccl_connector.py — skipping _tensor_key patch"
+    fi
+
+    # Phase 3C reuses all connector patches above, then owns its 2P2D lifecycle.
+    if [ -n "${XPYD_PHASE3C_CONFIG}" ]; then
+        export NCCL_IB_DISABLE=1
+        export NCCL_SOCKET_IFNAME=^lo
+        export NCCL_DEBUG=INFO
+        local phase3c_status=0
+        run_phase3c_substrate || phase3c_status=$?
+        if [ "${phase3c_status}" -eq 0 ]; then
+            echo "phase3c_complete" > "${exp_dir}/status.txt"
+        fi
+        return "${phase3c_status}"
     fi
 
     # NCCL tuning for cross-node Ethernet (10.1.0.x subnet, no InfiniBand).

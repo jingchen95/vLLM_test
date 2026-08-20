@@ -176,6 +176,12 @@ async def consume_sse_completion(
         echoed_logical_request_id = resp.headers.get(
             "X-Xpyd-Logical-Request-Id"
         )
+        selected_prefill_endpoint_id = resp.headers.get(
+            "X-Xpyd-Prefill-Endpoint"
+        )
+        selected_decode_endpoint_id = resp.headers.get(
+            "X-Xpyd-Decode-Endpoint"
+        )
         incoming_client_stream = resp.headers.get(
             "X-Xpyd-Incoming-Client-Stream"
         )
@@ -209,6 +215,8 @@ async def consume_sse_completion(
                 "client_itl_valid": False,
                 "logical_request_id": logical_request_id,
                 "echoed_logical_request_id": echoed_logical_request_id,
+                "selected_prefill_endpoint_id": selected_prefill_endpoint_id,
+                "selected_decode_endpoint_id": selected_decode_endpoint_id,
                 "logical_request_id_propagated": (
                     logical_request_id is not None
                     and echoed_logical_request_id == logical_request_id
@@ -263,6 +271,8 @@ async def consume_sse_completion(
             "client_itl_valid": False,
             "logical_request_id": logical_request_id,
             "echoed_logical_request_id": echoed_logical_request_id,
+            "selected_prefill_endpoint_id": selected_prefill_endpoint_id,
+            "selected_decode_endpoint_id": selected_decode_endpoint_id,
             "logical_request_id_propagated": (
                 logical_request_id is not None
                 and echoed_logical_request_id == logical_request_id
@@ -311,6 +321,8 @@ async def consume_sse_completion(
         "streamed_text_event_count": len(token_event_monos),
         "logical_request_id": logical_request_id,
         "echoed_logical_request_id": echoed_logical_request_id,
+        "selected_prefill_endpoint_id": selected_prefill_endpoint_id,
+        "selected_decode_endpoint_id": selected_decode_endpoint_id,
         "logical_request_id_propagated": (
             logical_request_id is not None
             and echoed_logical_request_id == logical_request_id

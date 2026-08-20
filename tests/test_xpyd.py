@@ -2,7 +2,9 @@
 
 import unittest
 
-from xpyd.compatibility import CompatibilityTable, ConnectorCompatibility
+from xpyd.compatibility import (
+    CompatibilityTable, ConnectorCompatibility, EndpointPairCompatibility,
+)
 from xpyd.hardware import GPUTypeProfile, HardwareProfile, NodeProfile, from_gpu_specs
 from xpyd.mock_runtime import build_example_runtime, example_decisions
 from xpyd.registry import EndpointRegistry, GPUAllocationConflictError
@@ -134,6 +136,19 @@ class RoutingAndCompatibilityTests(unittest.TestCase):
         runtime = build_example_runtime()
         with self.assertRaises(ValueError):
             runtime.select("P0", "D0", 800, 800)
+
+    def test_exact_pair_evidence_fails_closed_for_unlisted_same_tp_pair(self):
+        p0 = endpoint("P0", "prefill", (0,), 1)
+        p1 = endpoint("P1", "prefill", (1,), 1)
+        d0 = endpoint("D0", "decode", (2,), 1)
+        table = CompatibilityTable(
+            entries=(ConnectorCompatibility("test-kv", 1, 1, True, "generic"),),
+            endpoint_pairs=(EndpointPairCompatibility(
+                "P0", "D0", "test-kv", 1, 1, True, "physical smoke",
+            ),),
+        )
+        self.assertTrue(table.is_compatible(p0, d0))
+        self.assertFalse(table.is_compatible(p1, d0))
 
 
 class HardwareIndependenceTests(unittest.TestCase):

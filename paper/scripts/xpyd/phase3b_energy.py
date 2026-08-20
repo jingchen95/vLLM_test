@@ -901,9 +901,21 @@ def _launch_monitor(
     local_host = socket.gethostname().split(".")[0]
     node = str(endpoint["node"])
     if node != local_host:
+        physical_gpu = str(endpoint["cuda_visible_device"])
+        if not physical_gpu.isdigit():
+            raise Phase3BEnergyError(
+                "remote monitor gpu-bind requires a numeric physical GPU index"
+            )
+        allocation_gpu_count = int(endpoint.get("monitor_gpu_allocation_count", 1))
+        gpu_bind = (
+            "none" if allocation_gpu_count > 1
+            else "map_gpu:%s" % physical_gpu
+        )
         command = [
             "srun", "--overlap", "--nodes=1", "--ntasks=1",
-            "--nodelist=%s" % node, "--gpus-per-node=1", "--gpu-bind=map_gpu:0",
+            "--nodelist=%s" % node,
+            "--gpus-per-node=%d" % allocation_gpu_count,
+            "--gpu-bind=%s" % gpu_bind,
             *command,
         ]
     log = (endpoint_dir / "monitor.log").open("x", encoding="utf-8")

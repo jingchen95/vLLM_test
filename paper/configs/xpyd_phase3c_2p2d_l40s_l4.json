@@ -1,0 +1,85 @@
+{
+  "model": "mistralai/Mistral-7B-v0.1",
+  "tokenizer_model": "mistralai/Mistral-7B-v0.1",
+  "vllm_version": "0.15.1",
+  "output_root": "results/xpyd_phase3c_substrate",
+  "proxy_uri": "$XPYD_PROXY_URI",
+  "proxy_diagnostics_log": "$XPYD_PROXY_DIAGNOSTICS_LOG",
+  "scrape_interval_s": 1.0,
+  "collector": {"timeout_s": 5.0},
+  "pre_window_s": 1.0,
+  "post_window_s": 0.5,
+  "sampling": {
+    "period_s": 0.2,
+    "late_tolerance_s": 0.05,
+    "readiness_timeout_s": 120.0,
+    "maximum_gap_s": 0.5,
+    "maximum_boundary_gap_s": 0.4,
+    "minimum_coverage_ratio": 0.9
+  },
+  "client": {
+    "script": "paper/scripts/replay_synthetic_trace.py",
+    "max_concurrency": 1,
+    "request_timeout_s": 900
+  },
+  "endpoints": [
+    {
+      "endpoint_id": "P0", "role": "prefill", "node": "neptune",
+      "gpu_type": "NVIDIA L40S", "gpu_ids": [0], "cuda_visible_device": "0",
+      "tp_degree": 1, "http_uri": "http://$XPYD_P0_HTTP_HOST:8100",
+      "http_host": "$XPYD_P0_HTTP_HOST", "http_port": 8100,
+      "addr_host": "$XPYD_P_ADDR_HOST", "kv_port": 14579,
+      "kv_connector": "P2pNcclConnector", "configured_frequency_mhz": 2520,
+      "expected_gpu_name": "L40S"
+    },
+    {
+      "endpoint_id": "P1", "role": "prefill", "node": "neptune",
+      "gpu_type": "NVIDIA L40S", "gpu_ids": [1], "cuda_visible_device": "1",
+      "tp_degree": 1, "http_uri": "http://$XPYD_P1_HTTP_HOST:8101",
+      "http_host": "$XPYD_P1_HTTP_HOST", "http_port": 8101,
+      "addr_host": "$XPYD_P_ADDR_HOST", "kv_port": 14580,
+      "kv_connector": "P2pNcclConnector", "configured_frequency_mhz": 2520,
+      "expected_gpu_name": "L40S"
+    },
+    {
+      "endpoint_id": "D0", "role": "decode", "node": "io",
+      "gpu_type": "NVIDIA L4", "gpu_ids": [0], "cuda_visible_device": "0",
+      "monitor_gpu_allocation_count": 2,
+      "tp_degree": 1, "http_uri": "http://$XPYD_D0_HTTP_HOST:8200",
+      "http_host": "$XPYD_D0_HTTP_HOST", "http_port": 8200,
+      "addr_host": "$XPYD_D_ADDR_HOST", "kv_port": 14579,
+      "kv_connector": "P2pNcclConnector", "configured_frequency_mhz": 1500,
+      "expected_gpu_name": "L4"
+    },
+    {
+      "endpoint_id": "D1", "role": "decode", "node": "io",
+      "gpu_type": "NVIDIA L4", "gpu_ids": [1], "cuda_visible_device": "1",
+      "monitor_gpu_allocation_count": 2,
+      "tp_degree": 1, "http_uri": "http://$XPYD_D1_HTTP_HOST:8201",
+      "http_host": "$XPYD_D1_HTTP_HOST", "http_port": 8201,
+      "addr_host": "$XPYD_D_ADDR_HOST", "kv_port": 14580,
+      "kv_connector": "P2pNcclConnector", "configured_frequency_mhz": 1500,
+      "expected_gpu_name": "L4"
+    }
+  ],
+  "fixed_clocks": {
+    "P0": {"graphics_mhz": 2520, "memory_mhz": 9001, "minimum_workload_match_fraction": 0.95},
+    "P1": {"graphics_mhz": 2520, "memory_mhz": 9001, "minimum_workload_match_fraction": 0.95},
+    "D0": {"graphics_mhz": 1500, "memory_mhz": 6251, "minimum_workload_match_fraction": 0.95},
+    "D1": {"graphics_mhz": 1500, "memory_mhz": 6251, "minimum_workload_match_fraction": 0.95}
+  },
+  "compatible_pairs": [
+    {"prefill_endpoint_id": "P0", "decode_endpoint_id": "D0", "connector": "P2pNcclConnector", "prefill_tp": 1, "decode_tp": 1, "supported": true, "reason": "explicit Phase 3C validation envelope; accepted vLLM 0.15.1 synchronous-PUT TP1 contract"},
+    {"prefill_endpoint_id": "P0", "decode_endpoint_id": "D1", "connector": "P2pNcclConnector", "prefill_tp": 1, "decode_tp": 1, "supported": true, "reason": "explicit Phase 3C validation envelope; accepted vLLM 0.15.1 synchronous-PUT TP1 contract"},
+    {"prefill_endpoint_id": "P1", "decode_endpoint_id": "D0", "connector": "P2pNcclConnector", "prefill_tp": 1, "decode_tp": 1, "supported": true, "reason": "explicit Phase 3C validation envelope; accepted vLLM 0.15.1 synchronous-PUT TP1 contract"},
+    {"prefill_endpoint_id": "P1", "decode_endpoint_id": "D1", "connector": "P2pNcclConnector", "prefill_tp": 1, "decode_tp": 1, "supported": true, "reason": "explicit Phase 3C validation envelope; accepted vLLM 0.15.1 synchronous-PUT TP1 contract"}
+  ],
+  "workloads": [
+    {"id": "small", "input_len": 128, "output_len": 128, "count": 4, "rate_rps": 0.5},
+    {"id": "prefill_heavy", "input_len": 2048, "output_len": 128, "count": 4, "rate_rps": 0.5}
+  ],
+  "server_logs": {
+    "P0": "$XPYD_P0_SERVER_LOG", "P1": "$XPYD_P1_SERVER_LOG",
+    "D0": "$XPYD_D0_SERVER_LOG", "D1": "$XPYD_D1_SERVER_LOG"
+  }
+}

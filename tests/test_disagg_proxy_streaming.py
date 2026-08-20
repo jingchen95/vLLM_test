@@ -10,10 +10,15 @@ import unittest
 
 from xpyd.disagg_proxy import (
     DisaggProxyCore,
+    EndpointTransport,
+    MultiEndpointDisaggProxyCore,
     ProxyConfig,
     ProxyUpstreamError,
     ingress_logical_request_id,
 )
+from xpyd.compatibility import CompatibilityTable, EndpointPairCompatibility
+from xpyd.registry import EndpointRegistry
+from xpyd.types import EndpointSpec, EndpointState, LifecycleState
 
 
 class StepClock:
@@ -91,6 +96,56 @@ def config():
 
 
 class DisaggProxyStreamingTests(unittest.TestCase):
+    def test_multi_endpoint_round_robin_uses_only_exact_compatible_pairs(self):
+        registry = EndpointRegistry()
+        transports = {}
+        for endpoint_id, role, gpu_id, http_port, kv_port in (
+            ("P0", "prefill", 0, 8100, 14579),
+            ("P1", "prefill", 1, 8101, 14580),
+            ("D0", "decode", 2, 8200, 14579),
+            ("D1", "decode", 3, 8201, 14580),
+        ):
+            spec = EndpointSpec(
+                endpoint_id, role, "fixture", "node", (gpu_id,), 1,
+                kv_connector="test-kv",
+            )
+            registry.register(spec, EndpointState(
+                endpoint_id, 1500, LifecycleState.ACTIVE, True,
+            ))
+            transports[endpoint_id] = EndpointTransport(
+                endpoint_id, "host", http_port, "10.0.0.1", kv_port,
+            )
+        pairs = (("P0", "D0"), ("P0", "D1"), ("P1", "D0"), ("P1", "D1"))
+        table = CompatibilityTable(endpoint_pairs=tuple(
+            EndpointPairCompatibility(p, d, "test-kv", 1, 1, True, "fixture")
+            for p, d in pairs
+        ))
+        factory = SessionFactory([
+            response
+            for _ in pairs
+            for response in (
+                FakeResponse(),
+                FakeResponse(content_type="application/json", body=b"{}"),
+            )
+        ])
+        core = MultiEndpointDisaggProxyCore(
+            registry, table, transports, pairs, factory, clock=StepClock(),
+            diagnostic_sink=lambda _: None,
+        )
+
+        prepared = [
+            asyncio.run(core.prepare({"prompt": "x", "stream": False}, "r%d" % index))
+            for index in range(4)
+        ]
+        self.assertEqual(
+            [(item.diagnostics.selected_prefill_endpoint_id, item.diagnostics.selected_decode_endpoint_id) for item in prepared],
+            list(pairs),
+        )
+        self.assertIn("___prefill_addr_10.0.0.1:14579", prepared[0].diagnostics.vllm_request_id)
+        self.assertIn("___decode_addr_10.0.0.1:14580", prepared[1].diagnostics.vllm_request_id)
+        self.assertEqual(prepared[3].headers["X-Xpyd-Prefill-Endpoint"], "P1")
+        self.assertEqual(prepared[3].headers["X-Xpyd-Decode-Endpoint"], "D1")
+
     def test_ingress_reuses_one_id_and_rejects_conflicting_domains(self):
         self.assertEqual(
             ingress_logical_request_id({"X-Request-Id": "client-1"}),
