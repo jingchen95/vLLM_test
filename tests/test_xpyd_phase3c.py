@@ -1,5 +1,6 @@
 """CPU-only Phase 3C configuration and audit primitives."""
 
+from pathlib import Path
 import unittest
 
 from xpyd.phase3c_substrate import _throttle_audit, build_registry_and_compatibility
@@ -53,6 +54,22 @@ class Phase3CSubstrateTests(unittest.TestCase):
         self.assertEqual(set(pairs), {
             ("P0", "D0"), ("P0", "D1"), ("P1", "D0"), ("P1", "D1"),
         })
+
+    def test_dynamic_2p2d_launch_disables_endpoint_local_prefix_cache(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "run_disagg_benchmark.sh").read_text(encoding="utf-8")
+        phase3c_launch = source.split("run_phase3c_substrate()", 1)[1].split(
+            "# ===========================================================================\n"
+            "run_experiment_E()",
+            1,
+        )[0]
+        self.assertIn('no_local_prefix_cache="--no-enable-prefix-caching"', phase3c_launch)
+        for port in (8100, 8101, 8200, 8201):
+            launch_line = next(
+                line for line in phase3c_launch.splitlines()
+                if "start_vllm_server" in line and " %d " % port in line
+            )
+            self.assertIn("${no_local_prefix_cache}", launch_line)
 
 
 if __name__ == "__main__":

@@ -1482,11 +1482,17 @@ run_phase3c_substrate() {
     d0_kv='{"kv_connector":"P2pNcclConnector","kv_role":"kv_consumer","kv_port":14579}'
     d1_kv='{"kv_connector":"P2pNcclConnector","kv_role":"kv_consumer","kv_port":14580}'
 
-    start_vllm_server "${L40S_NODE}" 8100 1 "--kv-transfer-config ${p0_kv}" "" 0
-    start_vllm_server "${L40S_NODE}" 8101 1 "--kv-transfer-config ${p1_kv}" "" 1
+    # P2pNcclConnector does not provide cache-coherence metadata across a
+    # dynamically selected P->D pair.  A producer-local prefix-cache hit can
+    # therefore suppress the KV send even though the newly selected consumer
+    # does not own that prefix.  Keep prefix caching disabled on the dynamic
+    # 2P2D path until distributed cache affinity/coherence is implemented.
+    local no_local_prefix_cache="--no-enable-prefix-caching"
+    start_vllm_server "${L40S_NODE}" 8100 1 "--kv-transfer-config ${p0_kv} ${no_local_prefix_cache}" "" 0
+    start_vllm_server "${L40S_NODE}" 8101 1 "--kv-transfer-config ${p1_kv} ${no_local_prefix_cache}" "" 1
     export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
-    start_vllm_server "${L4_NODE}" 8200 1 "--kv-transfer-config ${d0_kv} --gpu-memory-utilization 0.82" log 0
-    start_vllm_server "${L4_NODE}" 8201 1 "--kv-transfer-config ${d1_kv} --gpu-memory-utilization 0.82" log 1
+    start_vllm_server "${L4_NODE}" 8200 1 "--kv-transfer-config ${d0_kv} --gpu-memory-utilization 0.82 ${no_local_prefix_cache}" log 0
+    start_vllm_server "${L4_NODE}" 8201 1 "--kv-transfer-config ${d1_kv} --gpu-memory-utilization 0.82 ${no_local_prefix_cache}" log 1
     unset PYTORCH_CUDA_ALLOC_CONF
 
     "${PYTHON_BIN}" -m xpyd.disagg_proxy \

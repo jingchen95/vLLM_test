@@ -42,6 +42,13 @@ At startup or without sufficient feedback the controller uses only previously
 validated pairs at conservative HIGH clocks; missing data is never treated as
 zero load or available headroom.
 
+The dynamic 2P2D launch explicitly disables endpoint-local prefix caching.
+The current P2pNcclConnector does not carry cache-coherence or cache-affinity
+state across a route change: a prefix cached on one P endpoint can suppress a
+KV send even though the newly selected D endpoint does not own that prefix.
+Disabling this optimization is the conservative correctness policy for the
+Phase 3C/3D routing substrate; it does not alter the feedback scheduler.
+
 The smoke contains only light -> moderate -> light windows. Its outputs are
 under `results/phase3d_closed_loop_smoke/<run-id>/` and include the requested
 control iterations, request/routes, endpoint telemetry, DVFS actions, energy,
