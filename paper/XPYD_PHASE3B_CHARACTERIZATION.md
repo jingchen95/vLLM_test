@@ -70,3 +70,20 @@ The inference unit is the independent repeat, not an individual 200 ms NVML
 sample. The compact summary reports repeat-level median and a deterministic
 bootstrap 95% interval when at least two valid repeats exist. Raw results under
 `results/**` remain ignored and must not be committed.
+
+## Phase 3B.1 prefill-energy identifiability
+
+The follow-up configuration
+`paper/configs/xpyd_phase3b1_prefill_identifiability_l40s_l4.json` reuses the
+same P/D proxy, real-SSE audit, fixed-frequency clocks, and read-only NVML
+samplers. It phase-aligns P0 prefill intervals using proxy wall-clock
+diagnostics and linearly interpolates the cumulative P0 NVML energy counter
+between neighboring samples. Negative incremental values are retained as
+measurement residuals and are never clamped. The analysis writes
+`summary.json`, `summary.md`, `prefill_identifiability.csv`, and the normal
+characterization artifacts in a fresh run directory.
+
+The current launcher sets `--max-model-len 4096`. Therefore IL4096 with OL128,
+IL8192, and IL16384 are explicitly skipped rather than forcing a context-length
+or serving-semantics change. IL3072/OL128 is the largest safe intermediate
+probe in the checked-in configuration.

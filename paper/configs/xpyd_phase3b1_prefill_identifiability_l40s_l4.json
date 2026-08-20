@@ -1,0 +1,83 @@
+{
+  "output_root": "results/xpyd_energy_characterization",
+  "phase3a_config": "paper/configs/xpyd_phase3b_preflight_phase3a.json",
+  "sampling": {
+    "period_s": 0.2,
+    "late_tolerance_s": 0.05,
+    "readiness_timeout_s": 120.0,
+    "maximum_gap_s": 0.5,
+    "maximum_boundary_gap_s": 0.4,
+    "minimum_coverage_ratio": 0.9
+  },
+  "windows": {
+    "capability_s": 1.0,
+    "idle_s": 10.0,
+    "cooldown_s": 3.0
+  },
+  "endpoints": [
+    {
+      "endpoint_id": "P0",
+      "role": "prefill",
+      "node": "neptune",
+      "cuda_visible_device": "0",
+      "expected_gpu_name": "L40S"
+    },
+    {
+      "endpoint_id": "D0",
+      "role": "decode",
+      "node": "europa",
+      "cuda_visible_device": "0",
+      "expected_gpu_name": "L4"
+    }
+  ],
+  "fixed_clocks": {
+    "P0": {
+      "expected_gpu_name": "L40S",
+      "graphics_mhz": 2520,
+      "memory_mhz": 9001,
+      "minimum_workload_match_fraction": 0.95
+    },
+    "D0": {
+      "expected_gpu_name": "L4",
+      "graphics_mhz": 1500,
+      "memory_mhz": 6251,
+      "minimum_workload_match_fraction": 0.95
+    }
+  },
+  "workloads": [
+    {"id": "il128_ol128", "input_len": 128, "output_len": 128, "class": "prefill_identifiability"},
+    {"id": "il2048_ol128", "input_len": 2048, "output_len": 128, "class": "prefill_identifiability"},
+    {"id": "il3072_ol128", "input_len": 3072, "output_len": 128, "class": "prefill_identifiability_intermediate"}
+  ],
+  "experiment": {
+    "repeats": 5,
+    "requests_per_repeat": 10,
+    "max_concurrency": 1,
+    "offered_rate_rps": 1.0,
+    "order_strategy": "deterministic_cyclic_blocks",
+    "inference_unit": "repeat",
+    "training_or_model_update": false,
+    "adaptive_routing": false,
+    "adaptive_dvfs": false
+  },
+  "analysis": {
+    "kind": "phase3b1_prefill_identifiability",
+    "runtime_max_model_len": 4096,
+    "requested_input_lengths": [128, 2048, 4096, 8192, 16384],
+    "skipped_input_lengths": [
+      {
+        "input_len": 4096,
+        "reason": "current launcher sets --max-model-len 4096; IL4096 plus OL128 exceeds the configured context length"
+      },
+      {
+        "input_len": 8192,
+        "reason": "current launcher max-model-len is 4096"
+      },
+      {
+        "input_len": 16384,
+        "reason": "current launcher max-model-len is 4096"
+      }
+    ],
+    "chosen_input_lengths": [128, 2048, 3072]
+  }
+}

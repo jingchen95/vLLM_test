@@ -8,6 +8,8 @@ and Prometheus audits plus the read-only Phase 3B NVML monitors.
 from __future__ import annotations
 
 import argparse
+import bisect
+import csv
 from copy import deepcopy
 from datetime import datetime, timezone
 import json
@@ -196,10 +198,194 @@ def _metric_summary(values: Sequence[float], seed: str) -> dict[str, Any]:
     return {
         "n": len(clean),
         "mean": statistics.fmean(clean) if clean else None,
+        "std": statistics.stdev(clean) if len(clean) >= 2 else None,
         "median": statistics.median(clean) if clean else None,
         "minimum": min(clean) if clean else None,
         "maximum": max(clean) if clean else None,
         "bootstrap_median_ci95": _bootstrap_median_ci(clean, seed),
+    }
+
+
+def _sample_interval_summary(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Describe the observed endpoint-local NVML sampling cadence."""
+    times = sorted(
+        float(item["actual_start_local_monotonic_s"])
+        for item in records
+        if item.get("status") == "success"
+        and isinstance(item.get("actual_start_local_monotonic_s"), (int, float))
+    )
+    intervals = [right - left for left, right in zip(times, times[1:]) if right > left]
+    if not intervals:
+        return {
+            "n_intervals": 0,
+            "median_s": None,
+            "mean_s": None,
+            "minimum_s": None,
+            "maximum_s": None,
+            "p95_s": None,
+        }
+    ordered = sorted(intervals)
+    p95_index = min(len(ordered) - 1, max(0, math.ceil(0.95 * len(ordered)) - 1))
+    return {
+        "n_intervals": len(intervals),
+        "median_s": statistics.median(intervals),
+        "mean_s": statistics.fmean(intervals),
+        "minimum_s": min(intervals),
+        "maximum_s": max(intervals),
+        "p95_s": ordered[p95_index],
+    }
+
+
+def _interpolated_counter_value(
+    records: Sequence[Mapping[str, Any]], wall_time_s: float
+) -> Optional[float]:
+    """Linearly interpolate the cumulative energy counter at a wall time."""
+    points = sorted(
+        (
+            float(item["actual_start_wall_s"]),
+            float(item["total_energy_mj"]),
+        )
+        for item in records
+        if item.get("status") == "success"
+        and isinstance(item.get("actual_start_wall_s"), (int, float))
+        and isinstance(item.get("total_energy_mj"), (int, float))
+    )
+    if not points:
+        return None
+    times = [item[0] for item in points]
+    index = bisect.bisect_left(times, wall_time_s)
+    if index < len(points) and math.isclose(points[index][0], wall_time_s, abs_tol=1e-9):
+        return points[index][1]
+    if index == 0 or index >= len(points):
+        return None
+    left_time, left_value = points[index - 1]
+    right_time, right_value = points[index]
+    if right_time <= left_time:
+        return None
+    fraction = (wall_time_s - left_time) / (right_time - left_time)
+    return left_value + fraction * (right_value - left_value)
+
+
+def _prefill_request_energy(
+    p0_records: Sequence[Mapping[str, Any]],
+    start_wall_s: float,
+    end_wall_s: float,
+) -> dict[str, Any]:
+    """Estimate one phase-aligned P0 energy interval without clamping."""
+    successful = [
+        item for item in p0_records
+        if item.get("status") == "success"
+        and isinstance(item.get("actual_start_wall_s"), (int, float))
+        and isinstance(item.get("actual_finish_wall_s"), (int, float))
+    ]
+    overlap = [
+        item for item in successful
+        if float(item["actual_start_wall_s"]) <= end_wall_s
+        and float(item["actual_finish_wall_s"]) >= start_wall_s
+    ]
+    start_counter = _interpolated_counter_value(p0_records, start_wall_s)
+    end_counter = _interpolated_counter_value(p0_records, end_wall_s)
+    gross = (
+        (end_counter - start_counter) / 1000.0
+        if start_counter is not None and end_counter is not None
+        else None
+    )
+    return {
+        "prefill_start_wall_s": start_wall_s,
+        "prefill_complete_wall_s": end_wall_s,
+        "prefill_duration_ms": max(0.0, end_wall_s - start_wall_s) * 1000.0,
+        "p0_samples_during_prefill": len(overlap),
+        "p0_counter_start_mj": start_counter,
+        "p0_counter_complete_mj": end_counter,
+        "prefill_gross_energy_j": gross,
+        "energy_method": "linear_interpolation_of_cumulative_nvml_counter",
+        "sampling_support_sufficient": len(overlap) >= 3,
+        "valid": gross is not None,
+    }
+
+
+def _prefill_identifiability(
+    phase3a_dir: Path,
+    probe_id: str,
+    expected_requests: int,
+    p0_records: Sequence[Mapping[str, Any]],
+    idle: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Extract phase-aligned prefill intervals and P0 energy candidates."""
+    diagnostics_path = phase3a_dir / "derived" / "proxy_diagnostics.jsonl"
+    reasons: list[str] = []
+    diagnostics = _read_jsonl(diagnostics_path) if diagnostics_path.exists() else []
+    prefix = "%s-" % probe_id
+    requests = sorted(
+        [
+            item for item in diagnostics
+            if str(item.get("logical_request_id", "")).startswith(prefix)
+            and item.get("outcome") == "completed"
+        ],
+        key=lambda item: float(
+            (item.get("timestamps_wall_s") or {}).get("prefill_started", float("inf"))
+        ),
+    )
+    if len(requests) != expected_requests:
+        reasons.append(
+            "prefill diagnostic request count %d != expected %d"
+            % (len(requests), expected_requests)
+        )
+
+    request_windows = []
+    for diagnostic in requests:
+        stamps = diagnostic.get("timestamps_wall_s") or {}
+        start = stamps.get("prefill_started")
+        end = stamps.get("prefill_completed")
+        if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+            reasons.append("prefill wall timestamps unavailable")
+            continue
+        window = _prefill_request_energy(p0_records, float(start), float(end))
+        window["logical_request_id"] = diagnostic.get("logical_request_id")
+        window["reported_prefill_duration_ms"] = (
+            diagnostic.get("durations_ms") or {}
+        ).get("prefill")
+        request_windows.append(window)
+
+    gross_values = [
+        item["prefill_gross_energy_j"]
+        for item in request_windows
+        if isinstance(item.get("prefill_gross_energy_j"), (int, float))
+    ]
+    duration_s = sum(item["prefill_duration_ms"] for item in request_windows) / 1000.0
+    idle_power = idle.get("mean_power_w") if idle.get("valid") else None
+    if not idle.get("valid"):
+        reasons.append("immediate idle window invalid")
+    if len(gross_values) != len(request_windows):
+        reasons.append("one or more prefill counter intervals cannot be interpolated")
+    gross = sum(gross_values) if len(gross_values) == len(request_windows) else None
+    incremental = (
+        gross - float(idle_power) * duration_s
+        if gross is not None and isinstance(idle_power, (int, float))
+        else None
+    )
+    sample_counts = [item["p0_samples_during_prefill"] for item in request_windows]
+    return {
+        "valid": not reasons and len(request_windows) == expected_requests,
+        "reasons": sorted(set(reasons)),
+        "logical_request_count": len(request_windows),
+        "requests": request_windows,
+        "p0_idle_power_w": idle_power,
+        "prefill_duration_s_total": duration_s,
+        "prefill_duration_ms_mean": (
+            statistics.fmean(item["prefill_duration_ms"] for item in request_windows)
+            if request_windows else None
+        ),
+        "p0_samples_during_prefill_total": sum(sample_counts),
+        "p0_samples_during_prefill_mean": (
+            statistics.fmean(sample_counts) if sample_counts else None
+        ),
+        "p0_samples_during_prefill_min": min(sample_counts) if sample_counts else None,
+        "p0_samples_during_prefill_max": max(sample_counts) if sample_counts else None,
+        "p_prefill_gross_energy_j": gross,
+        "p_prefill_incremental_energy_j": incremental,
+        "positive_incremental": incremental > 0 if incremental is not None else None,
+        "energy_method": "linear_interpolation_of_cumulative_nvml_counter",
     }
 
 
@@ -235,6 +421,214 @@ def _write_report(run_dir: Path, audit: Mapping[str, Any], summary: Mapping[str,
         "CPU/node, NIC/network, KV-transfer-specific, cooling, and facility energy are unobserved.",
     ])
     (run_dir / "characterization_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_prefill_identifiability_outputs(
+    run_dir: Path,
+    config: Mapping[str, Any],
+    repeats_output: Sequence[Mapping[str, Any]],
+    records: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> dict[str, Any]:
+    """Write the compact Phase 3B.1 analysis products."""
+    p0_idle = [
+        float(item["prefill_identifiability"]["p0_idle_power_w"])
+        for item in repeats_output
+        if item.get("prefill_identifiability", {}).get("p0_idle_power_w") is not None
+    ]
+    d0_idle = [
+        float(item["endpoints"]["D0"]["idle"]["mean_power_w"])
+        for item in repeats_output
+        if item["endpoints"]["D0"]["idle"].get("valid")
+        and item["endpoints"]["D0"]["idle"].get("mean_power_w") is not None
+    ]
+    p0_idle_mean = statistics.fmean(p0_idle) if p0_idle else None
+    p0_idle_std = statistics.stdev(p0_idle) if len(p0_idle) >= 2 else None
+    sampling = {
+        endpoint: _sample_interval_summary(records[endpoint])
+        for endpoint in ("P0", "D0")
+    }
+    workloads = {}
+    csv_rows = []
+    for workload in config["workloads"]:
+        workload_id = str(workload["id"])
+        selected = [
+            item["prefill_identifiability"]
+            for item in repeats_output
+            if item["workload_id"] == workload_id
+            and item.get("prefill_identifiability", {}).get("valid")
+        ]
+        durations = [item["prefill_duration_ms_mean"] for item in selected]
+        samples = [item["p0_samples_during_prefill_mean"] for item in selected]
+        gross = [item["p_prefill_gross_energy_j"] for item in selected]
+        incremental = [item["p_prefill_incremental_energy_j"] for item in selected]
+        positive_fraction = (
+            sum(item["positive_incremental"] is True for item in selected) / len(selected)
+            if selected else None
+        )
+        mean_duration_s = (
+            statistics.fmean(item["prefill_duration_s_total"] for item in selected)
+            if selected else None
+        )
+        baseline_uncertainty = (
+            p0_idle_std * mean_duration_s
+            if p0_idle_std is not None and mean_duration_s is not None
+            else None
+        )
+        mean_incremental = statistics.fmean(incremental) if incremental else None
+        mean_samples = statistics.fmean(samples) if samples else None
+        if not selected:
+            classification = "UNDER-RESOLVED"
+            classification_reason = "no valid phase-aligned prefill intervals"
+        elif (
+            mean_samples is not None and mean_samples < 3
+        ) or (
+            baseline_uncertainty is not None
+            and mean_incremental is not None
+            and abs(mean_incremental) <= baseline_uncertainty
+        ) or (positive_fraction is not None and positive_fraction < 0.8):
+            classification = "UNDER-RESOLVED"
+            classification_reason = (
+                "fewer than 3 overlapping P0 samples per request, or signal is within "
+                "repeated-idle baseline uncertainty"
+            )
+        elif (
+            mean_samples is not None and mean_samples >= 3
+            and positive_fraction is not None and positive_fraction >= 0.8
+            and baseline_uncertainty is not None
+            and mean_incremental is not None
+            and mean_incremental > 2.0 * baseline_uncertainty
+        ):
+            classification = "MEASURABLE"
+            classification_reason = "positive signal exceeds twice baseline uncertainty"
+        else:
+            classification = "MARGINAL"
+            classification_reason = "signal is visible but repeat support or variance is insufficient"
+        workloads[workload_id] = {
+            "workload": workload,
+            "valid_repeats": len(selected),
+            "prefill_duration_ms": _metric_summary(durations, workload_id + ":duration"),
+            "p0_samples_during_prefill": _metric_summary(samples, workload_id + ":samples"),
+            "p_prefill_gross_energy_j": _metric_summary(gross, workload_id + ":gross"),
+            "p_prefill_incremental_energy_j": _metric_summary(incremental, workload_id + ":incremental"),
+            "positive_incremental_fraction": positive_fraction,
+            "baseline_uncertainty_j": baseline_uncertainty,
+            "classification": classification,
+            "classification_reason": classification_reason,
+        }
+        for item in selected:
+            csv_rows.append({
+                "workload_id": workload_id,
+                "input_len": workload["input_len"],
+                "output_len": workload["output_len"],
+                "prefill_duration_ms_mean": item["prefill_duration_ms_mean"],
+                "prefill_duration_s_total": item["prefill_duration_s_total"],
+                "p0_idle_power_w": item["p0_idle_power_w"],
+                "p0_samples_during_prefill_total": item["p0_samples_during_prefill_total"],
+                "p0_samples_during_prefill_mean": item["p0_samples_during_prefill_mean"],
+                "p_prefill_gross_energy_j": item["p_prefill_gross_energy_j"],
+                "p_prefill_incremental_energy_j": item["p_prefill_incremental_energy_j"],
+                "positive_incremental": item["positive_incremental"],
+            })
+
+    analysis = {
+        "phase": "3B.1_prefill_energy_identifiability",
+        "run_id": run_dir.name,
+        "fixed_frequency": {
+            "P0_graphics_mhz": config["fixed_clocks"]["P0"]["graphics_mhz"],
+            "D0_graphics_mhz": config["fixed_clocks"]["D0"]["graphics_mhz"],
+        },
+        "measurement_method": {
+            "prefill_time_source": "proxy diagnostics timestamps_wall_s",
+            "energy_source": "P0 cumulative NVML counter",
+            "energy_interpolation": "linear between neighboring P0 counter samples",
+            "baseline_source": "same-repeat immediate idle window mean_power_w",
+            "negative_incremental_values_clamped": False,
+        },
+        "nvml_sampling_interval": sampling,
+        "baseline": {
+            "P0_idle_power_w": {
+                "n_windows": len(p0_idle),
+                "mean": p0_idle_mean,
+                "std": p0_idle_std,
+                "minimum": min(p0_idle) if p0_idle else None,
+                "maximum": max(p0_idle) if p0_idle else None,
+            },
+            "D0_idle_power_w": {
+                "n_windows": len(d0_idle),
+                "mean": statistics.fmean(d0_idle) if d0_idle else None,
+                "std": statistics.stdev(d0_idle) if len(d0_idle) >= 2 else None,
+                "minimum": min(d0_idle) if d0_idle else None,
+                "maximum": max(d0_idle) if d0_idle else None,
+            },
+        },
+        "workloads": workloads,
+        "skipped_input_lengths": config.get("analysis", {}).get("skipped_input_lengths", []),
+        "identifiability_heuristic": {
+            "minimum_overlapping_samples_for_measurable": 3,
+            "positive_repeat_fraction_threshold": 0.8,
+            "signal_to_baseline_uncertainty_threshold": 2.0,
+            "approximate_min_duration_s_from_P0_median_interval": (
+                3.0 * sampling["P0"]["median_s"]
+                if sampling["P0"]["median_s"] is not None else None
+            ),
+        },
+    }
+    _write_json(run_dir / "summary.json", analysis)
+    with (run_dir / "prefill_identifiability.csv").open("w", newline="", encoding="utf-8") as stream:
+        fields = list(csv_rows[0]) if csv_rows else [
+            "workload_id", "input_len", "output_len", "prefill_duration_ms_mean",
+            "prefill_duration_s_total", "p0_idle_power_w",
+            "p0_samples_during_prefill_total", "p0_samples_during_prefill_mean",
+            "p_prefill_gross_energy_j", "p_prefill_incremental_energy_j",
+            "positive_incremental",
+        ]
+        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(csv_rows)
+    lines = [
+        "# Phase 3B.1 prefill energy identifiability",
+        "",
+        "Analysis-only phase-aligned P0 prefill energy using existing fixed-frequency instrumentation.",
+        "",
+        "P0 idle baseline: %s W mean, %s W repeat standard deviation across %d valid idle windows." % (
+            "%.3f" % p0_idle_mean if p0_idle_mean is not None else "unavailable",
+            "%.3f" % p0_idle_std if p0_idle_std is not None else "unavailable",
+            len(p0_idle),
+        ),
+        "NVML interval (P0): median %s ms, mean %s ms, p95 %s ms." % tuple(
+            "%.3f" % (1000.0 * sampling["P0"][key])
+            if sampling["P0"][key] is not None else "unavailable"
+            for key in ("median_s", "mean_s", "p95_s")
+        ),
+        "",
+        "| IL | Prefill ms mean±std | P0 samples/request mean±std | Gross P J mean±std | Incremental P J mean±std | Positive fraction | Classification |",
+        "|---:|---:|---:|---:|---:|---:|---|",
+    ]
+    for workload_id, item in workloads.items():
+        def fmt(metric: Mapping[str, Any], digits: int = 2) -> str:
+            if metric.get("mean") is None:
+                return "unavailable"
+            return "%.{0}f ± %.{0}f".format(digits) % (metric["mean"], metric["std"] or 0.0)
+        lines.append(
+            "| %s | %s | %s | %s | %s | %s | %s |" % (
+                item["workload"]["input_len"],
+                fmt(item["prefill_duration_ms"]),
+                fmt(item["p0_samples_during_prefill"]),
+                fmt(item["p_prefill_gross_energy_j"]),
+                fmt(item["p_prefill_incremental_energy_j"]),
+                "%.2f" % (100.0 * item["positive_incremental_fraction"])
+                if item["positive_incremental_fraction"] is not None else "unavailable",
+                item["classification"],
+            )
+        )
+    lines.extend([
+        "",
+        "Negative incremental values are retained as estimator residuals; they are not physical negative energy.",
+        "Classification heuristic: at least three overlapping P0 samples per request, at least 80% positive repeats, and mean signal above twice the repeated-idle baseline uncertainty.",
+        "",
+    ])
+    (run_dir / "summary.md").write_text("\n".join(lines), encoding="utf-8")
+    return analysis
 
 
 def analyze_characterization(run_dir: Path, config: Mapping[str, Any]) -> dict[str, Any]:
@@ -297,6 +691,13 @@ def analyze_characterization(run_dir: Path, config: Mapping[str, Any]) -> dict[s
             endpoint_validity.append(endpoint_valid)
             endpoints[endpoint_id] = {"idle": idle, "workload": workload, "clock_audit": clock}
 
+        prefill_identifiability = _prefill_identifiability(
+            phase3a_dir,
+            str(cell["probe_id"]),
+            int(client["successful_requests"]),
+            records["P0"],
+            endpoints["P0"]["idle"],
+        )
         token_audit = _token_audit(load_record, client)
         proxy_audit = phase3a_summary.get("proxy_diagnostics_audit") or {}
         phase3a_valid = (
@@ -329,6 +730,7 @@ def analyze_characterization(run_dir: Path, config: Mapping[str, Any]) -> dict[s
             "phase3a_auxiliary_telemetry": auxiliary_telemetry,
             "proxy_audit": proxy_audit,
             "token_audit": token_audit,
+            "prefill_identifiability": prefill_identifiability,
             "endpoints": endpoints,
             "aggregate": aggregate,
             "metrics": {
@@ -348,6 +750,10 @@ def analyze_characterization(run_dir: Path, config: Mapping[str, Any]) -> dict[s
                 "d0_queue_mean_ms": _queue_mean_ms(load_record["endpoints"]["D0"]),
                 "p0_max_kv_cache_usage_frac": behavior["P0"].get("max_kv_cache_usage_frac"),
                 "d0_max_kv_cache_usage_frac": behavior["D0"].get("max_kv_cache_usage_frac"),
+                "p_prefill_gross_energy_j": prefill_identifiability.get("p_prefill_gross_energy_j"),
+                "p_prefill_incremental_energy_j": prefill_identifiability.get("p_prefill_incremental_energy_j"),
+                "prefill_duration_ms_mean": prefill_identifiability.get("prefill_duration_ms_mean"),
+                "p0_samples_during_prefill_mean": prefill_identifiability.get("p0_samples_during_prefill_mean"),
             },
         }
         repeats_output.append(repeat)
@@ -404,6 +810,8 @@ def analyze_characterization(run_dir: Path, config: Mapping[str, Any]) -> dict[s
     _write_json(run_dir / "characterization_audit.json", audit)
     _write_json(run_dir / "characterization_summary.json", summary)
     _write_report(run_dir, audit, summary)
+    if config.get("analysis", {}).get("kind") == "phase3b1_prefill_identifiability":
+        _write_prefill_identifiability_outputs(run_dir, config, repeats_output, records)
     if not audit["valid"]:
         raise CharacterizationError("characterization audit failed: %s" % "; ".join(audit["violations"]))
     return summary

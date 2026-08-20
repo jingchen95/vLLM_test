@@ -199,6 +199,12 @@ class DisaggProxyStreamingTests(unittest.TestCase):
         self.assertEqual(
             diagnostics[0]["logical_request_id"], "trace-request-007"
         )
+        self.assertIn("prefill_started", diagnostics[0]["timestamps_wall_s"])
+        self.assertIn("prefill_completed", diagnostics[0]["timestamps_wall_s"])
+        self.assertLess(
+            diagnostics[0]["timestamps_wall_s"]["prefill_started"],
+            diagnostics[0]["timestamps_wall_s"]["prefill_completed"],
+        )
         self.assertEqual(
             diagnostics[0]["vllm_request_id"],
             prefill_post["headers"]["X-Request-Id"],

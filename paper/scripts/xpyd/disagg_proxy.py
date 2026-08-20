@@ -50,6 +50,8 @@ class ProxyDiagnostics:
     incoming_client_stream: bool
     outgoing_decode_stream: bool
     timestamps_monotonic_s: dict[str, Optional[float]]
+    timestamps_wall_s: dict[str, Optional[float]]
+    wall_clock: Clock = field(default=time.time, repr=False, compare=False)
     decode_content_type: Optional[str] = None
     decode_stream_available: bool = False
     upstream_chunk_count: int = 0
@@ -59,6 +61,7 @@ class ProxyDiagnostics:
 
     def record(self, name: str, value: float) -> None:
         self.timestamps_monotonic_s[name] = value
+        self.timestamps_wall_s[name] = self.wall_clock()
 
     def as_dict(self) -> dict[str, Any]:
         stamps = self.timestamps_monotonic_s
@@ -83,6 +86,7 @@ class ProxyDiagnostics:
             "client_tpot_valid": self.decode_stream_available,
             "client_itl_valid": self.decode_stream_available,
             "timestamps_monotonic_s": dict(stamps),
+            "timestamps_wall_s": dict(self.timestamps_wall_s),
             "durations_ms": {
                 "prefill": duration_ms("prefill_started", "prefill_completed"),
                 "decode_request_to_headers": duration_ms(
@@ -185,11 +189,13 @@ class DisaggProxyCore:
         session_factory: Callable[[], Any],
         *,
         clock: Clock = time.monotonic,
+        wall_clock: Clock = time.time,
         diagnostic_sink: Optional[DiagnosticSink] = None,
     ) -> None:
         self.config = config
         self.session_factory = session_factory
         self.clock = clock
+        self.wall_clock = wall_clock
         self.diagnostic_sink = diagnostic_sink or self._print_diagnostics
 
     @staticmethod
@@ -305,6 +311,18 @@ class DisaggProxyCore:
                 "decode_last_chunk_received": None,
                 "response_completed": None,
             },
+            timestamps_wall_s={
+                "request_received": self.wall_clock(),
+                "prefill_started": None,
+                "prefill_completed": None,
+                "decode_request_started": None,
+                "decode_response_headers_received": None,
+                "decode_first_real_chunk_received": None,
+                "decode_first_real_chunk_forwarded": None,
+                "decode_last_chunk_received": None,
+                "response_completed": None,
+            },
+            wall_clock=self.wall_clock,
         )
         headers = upstream_headers(request_id, vllm_request_id)
 
