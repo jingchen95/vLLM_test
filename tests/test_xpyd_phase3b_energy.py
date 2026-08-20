@@ -18,6 +18,7 @@ from xpyd.phase3b_energy import (
     add_idle_adjustment,
     aggregate_endpoint_workload,
     summarize_window,
+    build_parser,
 )
 
 
@@ -176,6 +177,14 @@ def summarize(records, cap=None, window=None, **limits):
 
 
 class ReadOnlyNVMLTests(unittest.TestCase):
+    def test_monitor_cli_accepts_generic_multi_endpoint_ids(self):
+        args = build_parser().parse_args([
+            "monitor", "--endpoint", "P1", "--role", "prefill",
+            "--output", "samples.jsonl",
+            "--capability-output", "capability.json",
+        ])
+        self.assertEqual(args.endpoint, "P1")
+
     def test_counter_supported_identity_and_read_only_queries(self):
         binding = FakeNVML(energies=[1000, 1100])
         with ReadOnlyNVMLSource(

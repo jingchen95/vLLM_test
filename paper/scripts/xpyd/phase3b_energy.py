@@ -1113,7 +1113,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     monitor = subparsers.add_parser("monitor", help="run one node-local read-only monitor")
-    monitor.add_argument("--endpoint", choices=("P0", "D0"), required=True)
+    # Endpoint identity is generic in ReadOnlyNVMLSource. Phase 3C reuses the
+    # accepted monitor for P1/D1 rather than creating a parallel sampler.
+    monitor.add_argument("--endpoint", required=True)
     monitor.add_argument("--role", choices=("prefill", "decode"), required=True)
     monitor.add_argument("--cuda-visible-device")
     monitor.add_argument("--expected-uuid")
