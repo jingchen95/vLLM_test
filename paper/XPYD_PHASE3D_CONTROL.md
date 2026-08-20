@@ -11,7 +11,8 @@ then selects three supported states at or below the previously validated
 sustainable HIGH point. It validates independent downward and upward
 transitions for P0, P1, D0, and D1. Every action checks endpoint UUID/PCI
 identity and fresh graphics-clock readback. Commands on one physical GPU are
-serialized, minimum dwell is enforced, and all GPUs are explicitly restored
+serialized; fresh actual-clock readback uses a bounded post-command poll so an
+immediate idle sample cannot masquerade as actuator failure. Minimum dwell is enforced, and all GPUs are explicitly restored
 to their conservative validated HIGH state on success or failure. The outer
 Slurm cleanup subsequently restores default graphics and memory clocks.
 

@@ -153,13 +153,16 @@ class NvidiaSmiClockBackend:
         return result.stdout
 
     def _parse_readback(self, endpoint_id: str, node: str, gpu_id: int, output: str) -> GPUReadback:
-        match = self._identity_re.search(output)
-        if match is None:
+        matches = list(self._identity_re.finditer(output))
+        if not matches:
             identity_context = output.split("SUPPORTED_BEGIN", 1)[0].strip()[-1000:]
             raise Phase3DError(
                 "missing or malformed GPU identity/readback on %s: %r"
                 % (node, identity_context)
             )
+        # A bounded post-actuation poll may contain multiple actual-clock
+        # samples. The last one is the freshest hardware observation.
+        match = matches[-1]
         name, uuid, bus, graphics = (item.strip() for item in match.groups())
         return GPUReadback(
             endpoint_id=endpoint_id, node=node, gpu_id=gpu_id,
@@ -167,16 +170,31 @@ class NvidiaSmiClockBackend:
             graphics_clock_mhz=int(graphics), timestamp_unix_s=self.clock(),
         )
 
-    def read(self, endpoint_id: str, node: str, gpu_id: int) -> GPUReadback:
+    def read(
+        self, endpoint_id: str, node: str, gpu_id: int,
+        expected_mhz: Optional[int] = None,
+    ) -> GPUReadback:
         query = (
             f"{self.nvidia_smi} -i {gpu_id} "
             "--query-gpu=name,uuid,pci.bus_id,clocks.current.graphics "
             "--format=csv,noheader,nounits"
         )
-        return self._parse_readback(
-            endpoint_id, node, gpu_id,
-            self._run(node, "set -euo pipefail\nprintf 'IDENTITY='\n" + query),
-        )
+        if expected_mhz is None:
+            script = "set -euo pipefail\nprintf 'IDENTITY='\n" + query
+        else:
+            script = (
+                "set -euo pipefail\nmatched=0\n"
+                "for attempt in 1 2 3 4 5 6 7 8 9 10; do\n"
+                f"  row=\"$({query})\"\n"
+                "  printf 'IDENTITY=%s\\n' \"${row}\"\n"
+                "  actual=$(printf '%s\\n' \"${row}\" | /usr/bin/awk -F, "
+                "'{gsub(/[[:space:]]/, \"\", $4); print $4}')\n"
+                f"  if [ \"${{actual}}\" = \"{int(expected_mhz)}\" ]; then matched=1; break; fi\n"
+                "  sleep 0.2\n"
+                "done\n"
+                "[ \"${matched}\" -eq 1 ]"
+            )
+        return self._parse_readback(endpoint_id, node, gpu_id, self._run(node, script))
 
     def discover(
         self, endpoint_id: str, node: str, gpu_id: int, safe_high_mhz: int,
@@ -217,20 +235,14 @@ class NvidiaSmiClockBackend:
     ) -> GPUReadback:
         if target_mhz not in capability.supported_graphics_mhz:
             raise Phase3DError("requested frequency is not hardware-supported")
-        query = (
-            f"{self.nvidia_smi} -i {capability.gpu_id} "
-            "--query-gpu=name,uuid,pci.bus_id,clocks.current.graphics "
-            "--format=csv,noheader,nounits"
-        )
-        script = (
-            "set -euo pipefail\n"
+        command = (
             f"{self.sudo} {self.nvidia_smi} -i {capability.gpu_id} "
-            f"-lgc {target_mhz},{target_mhz}\n"
-            "printf 'IDENTITY='\n" + query
+            f"-lgc {target_mhz},{target_mhz}"
         )
-        return self._parse_readback(
+        self._run(capability.node, "set -euo pipefail\n" + command)
+        return self.read(
             capability.endpoint_id, capability.node, capability.gpu_id,
-            self._run(capability.node, script),
+            expected_mhz=target_mhz,
         )
 
 
@@ -274,7 +286,10 @@ class PerEndpointClockActuator:
 
     def read(self, endpoint_id: str) -> GPUReadback:
         capability = self.capabilities[endpoint_id]
-        result = self.backend.read(endpoint_id, capability.node, capability.gpu_id)
+        result = self.backend.read(
+            endpoint_id, capability.node, capability.gpu_id,
+            expected_mhz=self.requested.get(endpoint_id),
+        )
         if not self._identity_matches(capability, result):
             raise Phase3DError("endpoint-to-physical-GPU identity changed for %s" % endpoint_id)
         return result

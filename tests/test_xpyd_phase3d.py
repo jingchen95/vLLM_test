@@ -29,7 +29,7 @@ class FakeClockBackend:
         }
         self.fail = False
 
-    def read(self, endpoint_id, node, gpu_id):
+    def read(self, endpoint_id, node, gpu_id, expected_mhz=None):
         capability = self.capabilities[endpoint_id]
         return GPUReadback(
             endpoint_id, node, gpu_id, capability.gpu_name,
@@ -138,6 +138,19 @@ class ActuatorPrimitiveTests(unittest.TestCase):
         result = backend.read("D0", "io", 0)
         self.assertEqual(result.graphics_clock_mhz, 1500)
         self.assertEqual(result.gpu_uuid, "GPU-a")
+
+    def test_bounded_poll_uses_freshest_matching_actual_clock(self):
+        output = (
+            "IDENTITY=NVIDIA L4, GPU-a, 00000000:01:00.0, 210\n"
+            "IDENTITY=NVIDIA L4, GPU-a, 00000000:01:00.0, 1125\n"
+        )
+
+        def runner(command):
+            return subprocess.CompletedProcess(command, 0, output)
+
+        backend = NvidiaSmiClockBackend(runner=runner, clock=lambda: 5.0)
+        result = backend.read("D0", "io", 0, expected_mhz=1125)
+        self.assertEqual(result.graphics_clock_mhz, 1125)
 
 
 def route_fixture():
