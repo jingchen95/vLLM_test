@@ -574,8 +574,16 @@ class Phase3CSubstrateHarness:
             key = "%s->%s" % (item["selected_prefill_endpoint_id"], item["selected_decode_endpoint_id"])
             if key in pair_counts:
                 pair_counts[key] += 1
-        endpoint_coverage = all(route_counts[item.endpoint_id] > 0 for item in self.endpoints)
-        pair_coverage = all(value > 0 for value in pair_counts.values())
+        coverage = dict(self.config.get("coverage_policy", {}))
+        required_endpoint_ids = set(coverage.get(
+            "required_endpoint_ids", [item.endpoint_id for item in self.endpoints]
+        ))
+        required_pairs = {
+            "%s->%s" % tuple(item)
+            for item in coverage.get("required_pairs", [list(item) for item in self.pairs])
+        }
+        endpoint_coverage = all(route_counts.get(endpoint_id, 0) > 0 for endpoint_id in required_endpoint_ids)
+        pair_coverage = all(pair_counts.get(pair, 0) > 0 for pair in required_pairs)
         sse_valid = (
             len(successful_requests) == expected_requests
             and all(

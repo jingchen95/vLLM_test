@@ -70,19 +70,29 @@ XPYD_PHASE3B_CHARACTERIZATION_REPEATS="${XPYD_PHASE3B_CHARACTERIZATION_REPEATS:-
 XPYD_PHASE3B_CHARACTERIZATION_REQUESTS="${XPYD_PHASE3B_CHARACTERIZATION_REQUESTS:-}"
 XPYD_PHASE3C_CONFIG="${XPYD_PHASE3C_CONFIG:-}"
 XPYD_PHASE3C_RUN_ID="${XPYD_PHASE3C_RUN_ID:-}"
+XPYD_PHASE3D_CONFIG="${XPYD_PHASE3D_CONFIG:-}"
+XPYD_PHASE3D_RUN_ID="${XPYD_PHASE3D_RUN_ID:-}"
+XPYD_PHASE3D_STAGE="${XPYD_PHASE3D_STAGE:-}"
+XPYD_PHASE3D_ACCEPTED_ACTUATOR_AUDIT="${XPYD_PHASE3D_ACCEPTED_ACTUATOR_AUDIT:-}"
+XPYD_ROUTING_CONTROL_FILE="${XPYD_ROUTING_CONTROL_FILE:-}"
 XPYD_NO_GPU_MUTATION="${XPYD_NO_GPU_MUTATION:-0}"
 _xpyd_mode_count=0
 [ -n "${XPYD_PHASE3A_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
 [ -n "${XPYD_PHASE3B_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
 [ -n "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
 [ -n "${XPYD_PHASE3C_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
+[ -n "${XPYD_PHASE3D_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
 if [ "${_xpyd_mode_count}" -gt 1 ]; then
-    echo "ERROR: choose exactly one XpYd Phase 3A, Phase 3B preflight, or characterization config" >&2
+    echo "ERROR: choose exactly one XpYd Phase 3A/3B/3C/3D config" >&2
     exit 2
 fi
-[ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}" ] && XPYD_NO_GPU_MUTATION=1
+[ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}${XPYD_PHASE3D_CONFIG}" ] && XPYD_NO_GPU_MUTATION=1
 XPYD_CHARACTERIZATION_CLOCKS_REQUESTED=0
-[ -n "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}" ] && XPYD_CHARACTERIZATION_CLOCKS_REQUESTED=1
+[ -n "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}${XPYD_PHASE3D_CONFIG}" ] && XPYD_CHARACTERIZATION_CLOCKS_REQUESTED=1
+if [ -n "${XPYD_PHASE3D_CONFIG}" ] && [ "${XPYD_PHASE3D_STAGE}" != "A" ] && [ "${XPYD_PHASE3D_STAGE}" != "B" ]; then
+    echo "ERROR: XPYD_PHASE3D_STAGE must be A or B" >&2
+    exit 2
+fi
 XPYD_FIXED_CLOCK_EVIDENCE="${XPYD_FIXED_CLOCK_EVIDENCE:-}"
 export XPYD_FIXED_CLOCK_EVIDENCE
 
@@ -137,7 +147,7 @@ _trap_cleanup() {
     if [ "${XPYD_CHARACTERIZATION_CLOCKS_REQUESTED:-0}" -eq 1 ]; then
         [ -n "${L40S_NODE:-}" ] && reset_characterization_clocks "${L40S_NODE}" P0 0 || true
         [ -n "${L4_NODE:-}" ] && reset_characterization_clocks "${L4_NODE}" D0 0 || true
-        if [ -n "${XPYD_PHASE3C_CONFIG:-}" ]; then
+        if [ -n "${XPYD_PHASE3C_CONFIG:-}${XPYD_PHASE3D_CONFIG:-}" ]; then
             reset_characterization_clocks "${L40S_NODE}" P1 1 || true
             reset_characterization_clocks "${L4_NODE}" D1 1 || true
         fi
@@ -810,7 +820,7 @@ start_vllm_server() {
             ${extra_args} \
             > "${log_file}" 2>&1 &
         _server_pid=$!
-        [ -n "${XPYD_PHASE3C_CONFIG:-}" ] && PHASE3C_SERVER_PIDS+=("${_server_pid}")
+        [ -n "${XPYD_PHASE3C_CONFIG:-}${XPYD_PHASE3D_CONFIG:-}" ] && PHASE3C_SERVER_PIDS+=("${_server_pid}")
         # Record in the appropriate global for the EXIT trap
         if [ "${port}" = "${PREFILL_PORT}" ]; then L40S_SERVER_PID=${_server_pid}
         else                                        L4_SERVER_PID=${_server_pid}; fi
@@ -818,7 +828,7 @@ start_vllm_server() {
         local step_gpu_count="${tp}"
         local step_gpu_bind="map_gpu:${cuda_devs}"
         local step_environment=()
-        if [ -n "${XPYD_PHASE3C_CONFIG:-}" ]; then
+        if [ -n "${XPYD_PHASE3C_CONFIG:-}${XPYD_PHASE3D_CONFIG:-}" ]; then
             # Both Phase 3C servers on this node need cgroup access to the
             # explicitly pinned GPU0/1 set. Each process still sees one GPU.
             step_gpu_count=2
@@ -839,7 +849,7 @@ start_vllm_server() {
                 ${extra_args} \
             > "${log_file}" 2>&1 &
         _server_pid=$!
-        [ -n "${XPYD_PHASE3C_CONFIG:-}" ] && PHASE3C_SERVER_PIDS+=("${_server_pid}")
+        [ -n "${XPYD_PHASE3C_CONFIG:-}${XPYD_PHASE3D_CONFIG:-}" ] && PHASE3C_SERVER_PIDS+=("${_server_pid}")
         if [ "${port}" = "${PREFILL_PORT}" ]; then L40S_SERVER_PID=${_server_pid}
         else                                        L4_SERVER_PID=${_server_pid}; fi
     fi
@@ -1432,6 +1442,7 @@ run_experiment_CD() {
 # client, metrics parser, and NVML monitor are reused by the Phase 3C harness.
 # ---------------------------------------------------------------------------
 run_phase3c_substrate() {
+    local multi_config="${XPYD_PHASE3C_CONFIG:-${XPYD_PHASE3D_CONFIG}}"
     local p_ip d_ip p_http d_http
     p_ip=$(get_node_ip "${L40S_NODE}")
     d_ip=$(get_node_ip "${L4_NODE}")
@@ -1450,6 +1461,15 @@ run_phase3c_substrate() {
     export XPYD_D0_SERVER_LOG="${RESULT_DIR}/vllm_${L4_NODE}_8200.log"
     export XPYD_D1_SERVER_LOG="${RESULT_DIR}/vllm_${L4_NODE}_8201.log"
     export PYTHONPATH="${SCRIPT_DIR}/paper/scripts${PYTHONPATH:+:${PYTHONPATH}}"
+    export XPYD_PHASE3D_ACCEPTED_ACTUATOR_AUDIT
+    if [ -n "${XPYD_PHASE3D_CONFIG}" ]; then
+        if [ "${XPYD_PHASE3D_STAGE}" = "B" ]; then
+            XPYD_ROUTING_CONTROL_FILE="${XPYD_ROUTING_CONTROL_FILE:-${RESULT_DIR}/xpyd_phase3d_route_control_${SLURM_JOB_ID:-local}.json}"
+        else
+            XPYD_ROUTING_CONTROL_FILE=""
+        fi
+        export XPYD_ROUTING_CONTROL_FILE
+    fi
 
     set_characterization_clocks "${L40S_NODE}" P0 2520 "${L40S_MEM_FREQ}" 0
     set_characterization_clocks "${L40S_NODE}" P1 2520 "${L40S_MEM_FREQ}" 1
@@ -1470,7 +1490,7 @@ run_phase3c_substrate() {
     unset PYTORCH_CUDA_ALLOC_CONF
 
     "${PYTHON_BIN}" -m xpyd.disagg_proxy \
-        --multi-endpoint-config "${XPYD_PHASE3C_CONFIG}" \
+        --multi-endpoint-config "${multi_config}" \
         --proxy-port "${PROXY_PORT}" \
         --diagnostics-log "${XPYD_PROXY_DIAGNOSTICS_LOG}" &
     local proxy_pid=$!
@@ -1485,8 +1505,14 @@ run_phase3c_substrate() {
         fi
     done
 
-    local args=(-m xpyd.phase3c_substrate --config "${XPYD_PHASE3C_CONFIG}")
-    [ -n "${XPYD_PHASE3C_RUN_ID}" ] && args+=(--run-id "${XPYD_PHASE3C_RUN_ID}")
+    local args
+    if [ -n "${XPYD_PHASE3D_CONFIG}" ]; then
+        args=(-m xpyd.phase3d_control --config "${XPYD_PHASE3D_CONFIG}" --stage "${XPYD_PHASE3D_STAGE}")
+        [ -n "${XPYD_PHASE3D_RUN_ID}" ] && args+=(--run-id "${XPYD_PHASE3D_RUN_ID}")
+    else
+        args=(-m xpyd.phase3c_substrate --config "${XPYD_PHASE3C_CONFIG}")
+        [ -n "${XPYD_PHASE3C_RUN_ID}" ] && args+=(--run-id "${XPYD_PHASE3C_RUN_ID}")
+    fi
     local status=0
     "${PYTHON_BIN}" "${args[@]}" || status=$?
     kill "${proxy_pid}" 2>/dev/null || true
@@ -1508,7 +1534,7 @@ run_experiment_E() {
     local vllm_ver
     vllm_ver=$("${PYTHON_BIN}" -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "unknown")
     echo "  vLLM version: ${vllm_ver}"
-    if [ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}" ] && [ "${vllm_ver}" != "0.15.1" ]; then
+    if [ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}${XPYD_PHASE3D_CONFIG}" ] && [ "${vllm_ver}" != "0.15.1" ]; then
         echo "  ERROR: XpYd observation path requires vLLM version 0.15.1 (got ${vllm_ver})"
         return 1
     fi
@@ -1683,15 +1709,19 @@ CONNECTOR_PATCH_EOF
         echo "  WARNING: could not locate p2p_nccl_connector.py — skipping _tensor_key patch"
     fi
 
-    # Phase 3C reuses all connector patches above, then owns its 2P2D lifecycle.
-    if [ -n "${XPYD_PHASE3C_CONFIG}" ]; then
+    # Phase 3C/3D reuse all connector patches above, then own the 2P2D lifecycle.
+    if [ -n "${XPYD_PHASE3C_CONFIG}${XPYD_PHASE3D_CONFIG}" ]; then
         export NCCL_IB_DISABLE=1
         export NCCL_SOCKET_IFNAME=^lo
         export NCCL_DEBUG=INFO
         local phase3c_status=0
         run_phase3c_substrate || phase3c_status=$?
         if [ "${phase3c_status}" -eq 0 ]; then
-            echo "phase3c_complete" > "${exp_dir}/status.txt"
+            if [ -n "${XPYD_PHASE3D_CONFIG}" ]; then
+                echo "phase3d_${XPYD_PHASE3D_STAGE}_complete" > "${exp_dir}/status.txt"
+            else
+                echo "phase3c_complete" > "${exp_dir}/status.txt"
+            fi
         fi
         return "${phase3c_status}"
     fi

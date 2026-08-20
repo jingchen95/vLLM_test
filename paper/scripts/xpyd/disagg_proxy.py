@@ -10,6 +10,8 @@ import argparse
 from dataclasses import dataclass, field
 import inspect
 import json
+import os
+from pathlib import Path
 import time
 import threading
 from typing import Any, AsyncIterator, Callable, Mapping, Optional, Sequence
@@ -520,6 +522,58 @@ class RoundRobinCompatiblePairs:
             return pair
 
 
+class FileControlledCompatiblePairs(RoundRobinCompatiblePairs):
+    """Select only compatible pairs named by an atomic controller file.
+
+    The file is read for every request so a separate feedback controller can
+    change the next route without restarting persistent serving endpoints.
+    Missing, stale, malformed, or incompatible control state fails closed.
+    """
+
+    def __init__(
+        self,
+        registry: EndpointRegistry,
+        compatibility: CompatibilityTable,
+        pairs: Sequence[tuple[str, str]],
+        control_file: str,
+        maximum_age_s: float,
+        wall_clock: Clock = time.time,
+    ) -> None:
+        super().__init__(registry, compatibility, pairs)
+        self.control_file = Path(control_file)
+        self.maximum_age_s = float(maximum_age_s)
+        self.wall_clock = wall_clock
+        if self.maximum_age_s <= 0:
+            raise ValueError("routing control maximum age must be positive")
+
+    def choose(self) -> tuple[str, str]:
+        try:
+            value = json.loads(self.control_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("routing control file unavailable or invalid") from exc
+        updated = value.get("updated_unix_s")
+        if not isinstance(updated, (int, float)):
+            raise ValueError("routing control file lacks a valid freshness timestamp")
+        age_s = self.wall_clock() - float(updated)
+        if age_s < -5.0 or age_s > self.maximum_age_s:
+            raise ValueError("routing control file is stale")
+        raw_pairs = value.get("pairs")
+        if not isinstance(raw_pairs, list) or not raw_pairs:
+            raise ValueError("routing control file has no selected pairs")
+        selected = []
+        for raw in raw_pairs:
+            if not isinstance(raw, list) or len(raw) != 2:
+                raise ValueError("routing control pair must contain P and D endpoint IDs")
+            pair = (str(raw[0]), str(raw[1]))
+            if pair not in self.pairs:
+                raise ValueError("routing control selected an incompatible pair")
+            selected.append(pair)
+        with self._lock:
+            pair = selected[self._index % len(selected)]
+            self._index += 1
+            return pair
+
+
 class MultiEndpointDisaggProxyCore:
     """Select one exact compatible pair, then reuse the accepted proxy core."""
 
@@ -532,6 +586,8 @@ class MultiEndpointDisaggProxyCore:
         session_factory: Callable[[], Any],
         *,
         model: str = "mistralai/Mistral-7B-v0.1",
+        routing_control_file: Optional[str] = None,
+        routing_control_maximum_age_s: float = 900.0,
         clock: Clock = time.monotonic,
         wall_clock: Clock = time.time,
         diagnostic_sink: Optional[DiagnosticSink] = None,
@@ -539,7 +595,18 @@ class MultiEndpointDisaggProxyCore:
         self.registry = registry
         self.compatibility = compatibility
         self.transports = dict(transports)
-        self.selector = RoundRobinCompatiblePairs(registry, compatibility, pairs)
+        control_file = os.path.expandvars(str(routing_control_file or ""))
+        if control_file:
+            self.selector = FileControlledCompatiblePairs(
+                registry,
+                compatibility,
+                pairs,
+                control_file,
+                float(routing_control_maximum_age_s),
+                wall_clock=wall_clock,
+            )
+        else:
+            self.selector = RoundRobinCompatiblePairs(registry, compatibility, pairs)
         self.cores: dict[tuple[str, str], DisaggProxyCore] = {}
         for prefill_id, decode_id in self.selector.pairs:
             prefill = self.transports[prefill_id]
@@ -630,6 +697,10 @@ def _build_multi_core(
         pairs,
         session_factory,
         model=str(config.get("model", "mistralai/Mistral-7B-v0.1")),
+        routing_control_file=config.get("routing_control_file"),
+        routing_control_maximum_age_s=float(
+            config.get("routing_control_maximum_age_s", 900.0)
+        ),
         diagnostic_sink=diagnostic_sink,
     )
 

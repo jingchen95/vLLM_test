@@ -46,6 +46,14 @@ class Phase3CSubstrateTests(unittest.TestCase):
         records[0]["invalidating_thermal_or_hw_slowdown"] = True
         self.assertFalse(_throttle_audit(records, 1.0, 3.0)["valid"])
 
+    def test_default_phase3c_config_keeps_full_coverage_policy(self):
+        config = self.config()
+        self.assertNotIn("coverage_policy", config)
+        _, _, pairs = build_registry_and_compatibility(config)
+        self.assertEqual(set(pairs), {
+            ("P0", "D0"), ("P0", "D1"), ("P1", "D0"), ("P1", "D1"),
+        })
+
 
 if __name__ == "__main__":
     unittest.main()
