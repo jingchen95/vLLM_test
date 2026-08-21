@@ -49,6 +49,13 @@ KV send even though the newly selected D endpoint does not own that prefix.
 Disabling this optimization is the conservative correctness policy for the
 Phase 3C/3D routing substrate; it does not alter the feedback scheduler.
 
+Logical request IDs are also namespaced by workload window. The four vLLM
+servers and their KV connectors persist across the complete Stage B sequence,
+so restarting ordinal IDs at `phase3c-0000` in every window would collide with
+connector completion state from an earlier window. Window-qualified IDs remain
+identical end-to-end for correlation while staying unique over that persistent
+server lifetime.
+
 The smoke contains only light -> moderate -> light windows. Its outputs are
 under `results/phase3d_closed_loop_smoke/<run-id>/` and include the requested
 control iterations, request/routes, endpoint telemetry, DVFS actions, energy,

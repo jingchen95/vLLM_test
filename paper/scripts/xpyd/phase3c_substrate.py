@@ -16,6 +16,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import statistics
 import subprocess
@@ -154,7 +155,14 @@ def build_registry_and_compatibility(
     return registry, table, tuple(pairs)
 
 
-def _write_trace(path: Path, workloads: Sequence[Mapping[str, Any]]) -> int:
+def _write_trace(
+    path: Path,
+    workloads: Sequence[Mapping[str, Any]],
+    request_id_namespace: str = "phase3c",
+) -> int:
+    namespace = str(request_id_namespace).strip()
+    if not namespace or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", namespace) is None:
+        raise Phase3CError("request ID namespace must be non-empty and filesystem-safe")
     count = 0
     arrival = 0.0
     rate = 1.0
@@ -171,7 +179,7 @@ def _write_trace(path: Path, workloads: Sequence[Mapping[str, Any]]) -> int:
                 if remaining[index] <= 0:
                     continue
                 writer.writerow({
-                    "request_id": "phase3c-%04d" % count,
+                    "request_id": "%s-%04d" % (namespace, count),
                     "arrival_time_s": arrival,
                     "input_len": int(workload["input_len"]),
                     "output_len": int(workload["output_len"]),
@@ -310,6 +318,7 @@ class Phase3CSubstrateHarness:
             "created_utc": datetime.now(timezone.utc).isoformat(),
             "git_commit": _git_commit(),
             "run_id": self.run_id,
+            "request_id_namespace": "phase3c-%s" % self.run_id,
             "routing_policy": "round_robin_over_explicit_compatible_pairs",
             "endpoints": [asdict(item) for item in self.endpoints],
             "compatible_pairs": [list(item) for item in self.pairs],
@@ -322,7 +331,10 @@ class Phase3CSubstrateHarness:
         proxy_log.parent.mkdir(parents=True, exist_ok=True)
         proxy_log.write_text("", encoding="utf-8")
         trace = self.run_dir / "client" / "trace.csv"
-        expected_requests = _write_trace(trace, self.config["workloads"])
+        request_id_namespace = "phase3c-%s" % self.run_id
+        expected_requests = _write_trace(
+            trace, self.config["workloads"], request_id_namespace
+        )
         _write_json(self.run_dir / "client" / "command.json", {"argv": self._client_command(trace)})
 
         processes: dict[str, Any] = {}

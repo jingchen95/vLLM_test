@@ -1,9 +1,16 @@
 """CPU-only Phase 3C configuration and audit primitives."""
 
+import csv
 from pathlib import Path
+import tempfile
 import unittest
 
-from xpyd.phase3c_substrate import _throttle_audit, build_registry_and_compatibility
+from xpyd.phase3c_substrate import (
+    Phase3CError,
+    _throttle_audit,
+    _write_trace,
+    build_registry_and_compatibility,
+)
 
 
 class Phase3CSubstrateTests(unittest.TestCase):
@@ -70,6 +77,38 @@ class Phase3CSubstrateTests(unittest.TestCase):
                 if "start_vllm_server" in line and " %d " % port in line
             )
             self.assertIn("${no_local_prefix_cache}", launch_line)
+
+    def test_persistent_windows_use_distinct_request_id_namespaces(self):
+        workloads = [{
+            "id": "fixture", "input_len": 128, "output_len": 16,
+            "count": 2, "rate_rps": 1.0,
+        }]
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "first.csv"
+            second = Path(directory) / "second.csv"
+            _write_trace(first, workloads, "phase3c-light-before")
+            _write_trace(second, workloads, "phase3c-moderate")
+            with first.open(newline="", encoding="utf-8") as stream:
+                first_ids = {row["request_id"] for row in csv.DictReader(stream)}
+            with second.open(newline="", encoding="utf-8") as stream:
+                second_ids = {row["request_id"] for row in csv.DictReader(stream)}
+        self.assertEqual(first_ids, {
+            "phase3c-light-before-0000", "phase3c-light-before-0001",
+        })
+        self.assertEqual(second_ids, {
+            "phase3c-moderate-0000", "phase3c-moderate-0001",
+        })
+        self.assertTrue(first_ids.isdisjoint(second_ids))
+
+    def test_request_id_namespace_rejects_unsafe_or_empty_values(self):
+        workloads = [{
+            "id": "fixture", "input_len": 1, "output_len": 1,
+            "count": 1, "rate_rps": 1.0,
+        }]
+        with tempfile.TemporaryDirectory() as directory:
+            for index, value in enumerate(("", "has spaces", "unsafe/slash")):
+                with self.assertRaises(Phase3CError):
+                    _write_trace(Path(directory) / ("%d.csv" % index), workloads, value)
 
 
 if __name__ == "__main__":
