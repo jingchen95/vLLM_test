@@ -43,6 +43,29 @@ class Phase3DError(RuntimeError):
     """A fail-closed Phase 3D configuration, actuation, or audit error."""
 
 
+def audit_connector_concurrency(
+    workloads: list[dict[str, Any]], validated_max_concurrency: int,
+) -> dict[str, Any]:
+    """Audit a smoke sequence against the physically validated connector limit."""
+    if validated_max_concurrency < 1:
+        raise Phase3DError("validated connector max concurrency must be positive")
+    observed = max(
+        (int(workload.get("max_concurrency", 1)) for workload in workloads),
+        default=0,
+    )
+    violations = [
+        str(workload.get("id", "unknown"))
+        for workload in workloads
+        if int(workload.get("max_concurrency", 1)) > validated_max_concurrency
+    ]
+    return {
+        "valid": not violations,
+        "validated_max_concurrency": validated_max_concurrency,
+        "observed_max_concurrency": observed,
+        "violating_workload_ids": violations,
+    }
+
+
 @dataclass(frozen=True)
 class GPUReadback:
     endpoint_id: str
@@ -972,10 +995,19 @@ class Phase3DClosedLoopHarness:
         restoration_valid = False
         sequence = self.config["phase3d"].get("closed_loop_workloads") or [
             {"id": "light_before", "input_len": 128, "output_len": 128, "count": 4, "rate_rps": 0.5, "max_concurrency": 1},
-            {"id": "moderate", "input_len": 2048, "output_len": 256, "count": 8, "rate_rps": 2.0, "max_concurrency": 4},
+            {"id": "moderate", "input_len": 2048, "output_len": 256, "count": 8, "rate_rps": 2.0, "max_concurrency": 1},
             {"id": "light_after", "input_len": 128, "output_len": 128, "count": 4, "rate_rps": 0.5, "max_concurrency": 1},
         ]
+        connector_concurrency = audit_connector_concurrency(
+            sequence,
+            int(self.config["phase3d"].get("validated_connector_max_concurrency", 1)),
+        )
         try:
+            if not connector_concurrency["valid"]:
+                raise Phase3DError(
+                    "closed-loop workload exceeds physically validated connector "
+                    "concurrency: %s" % connector_concurrency["violating_workload_ids"]
+                )
             selected_pairs = self._control_iteration(
                 "control_00", str(sequence[0]["id"]), capabilities,
                 actuator, registry, telemetry, scheduler, initial=True,
@@ -1073,6 +1105,7 @@ class Phase3DClosedLoopHarness:
             "phase3d_a_prerequisite_recorded": bool(
                 self.config["phase3d"].get("accepted_actuator_audit")
             ),
+            "connector_concurrency_within_validated_substrate": connector_concurrency["valid"],
             "all_requests_exactly_attributed": bool(window_audits) and all(
                 item.get("hard_gates", {}).get("endpoint_assignment") for item in window_audits
             ),
@@ -1116,6 +1149,7 @@ class Phase3DClosedLoopHarness:
             "phase": "3D-B_feedback_only_joint_routing_dvfs_smoke",
             "valid": audit_valid, "hard_gates": hard_gates, "error": error,
             "workload_window_audits": window_audits,
+            "connector_concurrency": connector_concurrency,
             "models_used_for_decisions": [],
             "allowed_decision_inputs": "recent measured runtime feedback only",
             "baseline_comparison": "omitted because a second physical sequence was not inexpensive for this functional smoke",

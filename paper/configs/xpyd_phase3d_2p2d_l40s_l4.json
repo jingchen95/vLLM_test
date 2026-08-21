@@ -85,6 +85,7 @@
     "closed_loop_output_root": "results/phase3d_closed_loop_smoke",
     "accepted_actuator_audit": "$XPYD_PHASE3D_ACCEPTED_ACTUATOR_AUDIT",
     "minimum_dwell_s": 1.0,
+    "validated_connector_max_concurrency": 1,
     "feedback": {
       "ttft_slo_ms": 1000.0,
       "tpot_slo_ms": 80.0,
@@ -105,7 +106,7 @@
     ],
     "closed_loop_workloads": [
       {"id": "light_before", "input_len": 128, "output_len": 128, "count": 4, "rate_rps": 0.5, "max_concurrency": 1},
-      {"id": "moderate", "input_len": 2048, "output_len": 256, "count": 8, "rate_rps": 2.0, "max_concurrency": 4},
+      {"id": "moderate", "input_len": 2048, "output_len": 256, "count": 8, "rate_rps": 2.0, "max_concurrency": 1},
       {"id": "light_after", "input_len": 128, "output_len": 128, "count": 4, "rate_rps": 0.5, "max_concurrency": 1}
     ]
   },

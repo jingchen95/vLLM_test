@@ -14,6 +14,7 @@ from xpyd.phase3d_control import (
     NvidiaSmiClockBackend,
     PerEndpointClockActuator,
     Phase3DError,
+    audit_connector_concurrency,
     select_validation_frequencies,
 )
 from xpyd.registry import EndpointRegistry
@@ -63,6 +64,21 @@ def capabilities():
 
 
 class ActuatorPrimitiveTests(unittest.TestCase):
+    def test_closed_loop_concurrency_cannot_exceed_validated_connector_limit(self):
+        valid = audit_connector_concurrency([
+            {"id": "light", "max_concurrency": 1},
+            {"id": "moderate", "max_concurrency": 1},
+        ], 1)
+        self.assertTrue(valid["valid"])
+        self.assertEqual(valid["observed_max_concurrency"], 1)
+
+        invalid = audit_connector_concurrency([
+            {"id": "light", "max_concurrency": 1},
+            {"id": "moderate", "max_concurrency": 4},
+        ], 1)
+        self.assertFalse(invalid["valid"])
+        self.assertEqual(invalid["violating_workload_ids"], ["moderate"])
+
     def test_validation_states_are_supported_and_bounded_by_safe_high(self):
         self.assertEqual(
             select_validation_frequencies((300, 600, 900, 1200, 1500), 1200),

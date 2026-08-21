@@ -56,6 +56,14 @@ connector completion state from an earlier window. Window-qualified IDs remain
 identical end-to-end for correlation while staying unique over that persistent
 server lifetime.
 
+The present physical evidence validates one in-flight request per selected
+P2pNcclConnector pair. Stage B therefore audits every workload against
+`validated_connector_max_concurrency=1`. The moderate window remains heavier
+through its longer 2048-token prompt, 256-token generation, and request count;
+it does not claim concurrent-request connector validation. Raising concurrency
+requires a separate connector-capability experiment before it can be used as a
+control-smoke input.
+
 The smoke contains only light -> moderate -> light windows. Its outputs are
 under `results/phase3d_closed_loop_smoke/<run-id>/` and include the requested
 control iterations, request/routes, endpoint telemetry, DVFS actions, energy,
