@@ -1485,14 +1485,17 @@ run_phase3c_substrate() {
     # P2pNcclConnector does not provide cache-coherence metadata across a
     # dynamically selected P->D pair.  A producer-local prefix-cache hit can
     # therefore suppress the KV send even though the newly selected consumer
-    # does not own that prefix.  Keep prefix caching disabled on the dynamic
-    # 2P2D path until distributed cache affinity/coherence is implemented.
+    # does not own that prefix.  Its v0.15.1 chunked-prefill path also completed
+    # a 2049-token producer request without emitting any KV layer tensors.
+    # Keep both optimizations disabled on this dynamic 2P2D path until their
+    # connector semantics are validated independently.
     local no_local_prefix_cache="--no-enable-prefix-caching"
-    start_vllm_server "${L40S_NODE}" 8100 1 "--kv-transfer-config ${p0_kv} ${no_local_prefix_cache}" "" 0
-    start_vllm_server "${L40S_NODE}" 8101 1 "--kv-transfer-config ${p1_kv} ${no_local_prefix_cache}" "" 1
+    local no_chunked_prefill="--no-enable-chunked-prefill"
+    start_vllm_server "${L40S_NODE}" 8100 1 "--kv-transfer-config ${p0_kv} ${no_local_prefix_cache} ${no_chunked_prefill}" "" 0
+    start_vllm_server "${L40S_NODE}" 8101 1 "--kv-transfer-config ${p1_kv} ${no_local_prefix_cache} ${no_chunked_prefill}" "" 1
     export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
-    start_vllm_server "${L4_NODE}" 8200 1 "--kv-transfer-config ${d0_kv} --gpu-memory-utilization 0.82 ${no_local_prefix_cache}" log 0
-    start_vllm_server "${L4_NODE}" 8201 1 "--kv-transfer-config ${d1_kv} --gpu-memory-utilization 0.82 ${no_local_prefix_cache}" log 1
+    start_vllm_server "${L4_NODE}" 8200 1 "--kv-transfer-config ${d0_kv} --gpu-memory-utilization 0.82 ${no_local_prefix_cache} ${no_chunked_prefill}" log 0
+    start_vllm_server "${L4_NODE}" 8201 1 "--kv-transfer-config ${d1_kv} --gpu-memory-utilization 0.82 ${no_local_prefix_cache} ${no_chunked_prefill}" log 1
     unset PYTORCH_CUDA_ALLOC_CONF
 
     "${PYTHON_BIN}" -m xpyd.disagg_proxy \

@@ -78,6 +78,22 @@ class Phase3CSubstrateTests(unittest.TestCase):
             )
             self.assertIn("${no_local_prefix_cache}", launch_line)
 
+    def test_dynamic_2p2d_launch_disables_unvalidated_chunked_prefill(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "run_disagg_benchmark.sh").read_text(encoding="utf-8")
+        phase3c_launch = source.split("run_phase3c_substrate()", 1)[1].split(
+            "# ===========================================================================\n"
+            "run_experiment_E()",
+            1,
+        )[0]
+        self.assertIn('no_chunked_prefill="--no-enable-chunked-prefill"', phase3c_launch)
+        for port in (8100, 8101, 8200, 8201):
+            launch_line = next(
+                line for line in phase3c_launch.splitlines()
+                if "start_vllm_server" in line and " %d " % port in line
+            )
+            self.assertIn("${no_chunked_prefill}", launch_line)
+
     def test_persistent_windows_use_distinct_request_id_namespaces(self):
         workloads = [{
             "id": "fixture", "input_len": 128, "output_len": 16,

@@ -49,6 +49,14 @@ KV send even though the newly selected D endpoint does not own that prefix.
 Disabling this optimization is the conservative correctness policy for the
 Phase 3C/3D routing substrate; it does not alter the feedback scheduler.
 
+The same substrate disables vLLM 0.15.1 chunked prefill. With local prefix
+caching disabled, the nominal IL2048 synthetic prompt contains 2049 tokenizer
+tokens and crosses the default 2048-token chunk boundary. Physical Stage B
+evidence showed the producer complete that request while the experimental
+P2pNcclConnector emitted no KV layer tensors. Non-chunked prefill is therefore
+the conservative connector-compatible policy; this is a functional substrate
+boundary, not a claim about chunked-prefill performance.
+
 Logical request IDs are also namespaced by workload window. The four vLLM
 servers and their KV connectors persist across the complete Stage B sequence,
 so restarting ordinal IDs at `phase3c-0000` in every window would collide with
