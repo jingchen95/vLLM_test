@@ -405,19 +405,22 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
             context.target_frequencies[endpoint_id] = target
         return count
 
-    def _telemetry_fresh(
+    def _stale_latency_endpoints(
         self, context: ControllerContext, endpoint_ids: Sequence[str], now_s: float,
-    ) -> bool:
-        snapshots = {
-            endpoint_id: context.telemetry.snapshot(endpoint_id, now_s=now_s)
-            for endpoint_id in endpoint_ids
-        }
-        return bool(snapshots) and all(
-            item.last_latency_observation_s is not None
-            and item.last_observation_age_s is not None
-            and item.last_observation_age_s <= context.scheduler.config.telemetry_max_age_s
-            for item in snapshots.values()
-        )
+    ) -> dict[str, Optional[float]]:
+        """Return role-specific missing/stale latency ages for diagnostics."""
+        stale: dict[str, Optional[float]] = {}
+        for endpoint_id in endpoint_ids:
+            snapshot = context.telemetry.snapshot(endpoint_id, now_s=now_s)
+            role = context.registry.get_spec(endpoint_id).role
+            observed_at = (
+                snapshot.last_ttft_observation_s
+                if role == "prefill" else snapshot.last_tpot_observation_s
+            )
+            age = now_s - observed_at if observed_at is not None else None
+            if age is None or age > context.scheduler.config.telemetry_max_age_s:
+                stale[endpoint_id] = age
+        return stale
 
     def _decide(
         self, policy: str, workload: str, iteration_id: str,
@@ -441,10 +444,11 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
         required = (
             sorted(capabilities) if feedback_routing else ["P0", "D0"]
         )
-        telemetry_fresh = (
-            self._telemetry_fresh(context, required, now)
-            if feedback_routing or feedback_dvfs else True
+        stale_endpoints = (
+            self._stale_latency_endpoints(context, required, now)
+            if feedback_routing or feedback_dvfs else {}
         )
+        telemetry_fresh = not stale_endpoints
         fallback_reason = None
         evaluations: Sequence[Any] = ()
         recommendations: Sequence[Any] = ()
@@ -455,8 +459,16 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
                 controller_action=False, policy=policy, workload=workload,
                 iteration_id=iteration_id,
             )
-        elif not telemetry_fresh:
-            pairs = [list(item) for item in all_pairs] if feedback_routing else [["P0", "D0"]]
+        elif feedback_routing and len(stale_endpoints) == len(required):
+            pairs = [list(item) for item in all_pairs]
+            fallback_reason = "missing_or_stale_feedback_use_safe_high"
+            count = self._actuate(
+                actuator, context, high, "phase4b_conservative_fallback_high",
+                controller_action=True, policy=policy, workload=workload,
+                iteration_id=iteration_id,
+            )
+        elif policy == "FEEDBACK_DVFS_ONLY" and not telemetry_fresh:
+            pairs = [["P0", "D0"]]
             fallback_reason = "missing_or_stale_feedback_use_safe_high"
             count = self._actuate(
                 actuator, context, high, "phase4b_conservative_fallback_high",
@@ -476,7 +488,7 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
                     pairs = [[route.prefill_endpoint_id, route.decode_endpoint_id]]
                 else:
                     pairs = [["P0", "D0"]]
-                    fallback_reason = "no_measured_safe_route_use_p0d0_safe_high"
+                    fallback_reason = "no_fresh_measured_safe_route_use_p0d0_safe_high"
                     count = self._actuate(
                         actuator, context, high, "phase4b_no_safe_route_fallback_high",
                         controller_action=True, policy=policy, workload=workload,
@@ -521,6 +533,8 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
             "workload": workload,
             "measured_iteration": measured_iteration,
             "telemetry_fresh": telemetry_fresh,
+            "stale_endpoint_ids_json": json.dumps(sorted(stale_endpoints)),
+            "stale_endpoint_ages_s_json": json.dumps(stale_endpoints, sort_keys=True),
             "fallback_reason": fallback_reason,
             "selected_pairs_json": json.dumps(pairs, sort_keys=True),
             "requested_frequencies_json": json.dumps(
@@ -833,6 +847,7 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
         _csv(self.run_dir / "phase4b_control_actions.csv", self.control_rows, (
             "control_timestamp", "control_iteration_id", "policy", "workload",
             "measured_iteration", "telemetry_fresh", "fallback_reason",
+            "stale_endpoint_ids_json", "stale_endpoint_ages_s_json",
             "selected_pairs_json", "requested_frequencies_json", "routing_changed",
             "dvfs_action_count", "candidate_evaluations_json",
             "dvfs_recommendations_json",

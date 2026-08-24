@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 import tempfile
+import time
 import unittest
 
 from xpyd.phase4b_evaluation import (
@@ -20,6 +21,7 @@ from xpyd.phase3d_control import (
     GPUReadback,
     PerEndpointClockActuator,
 )
+from xpyd.telemetry import EndpointTelemetrySample
 
 
 WORKLOADS = (
@@ -222,6 +224,36 @@ class Phase4BPolicyTests(unittest.TestCase):
             )
             self.assertFalse(harness.control_rows[-1]["telemetry_fresh"])
             self.assertNotIn("oracle", harness.control_rows[-1])
+
+            observed_at = time.time()
+            for endpoint_id in capabilities:
+                state = context.registry.get_state(endpoint_id)
+                state.queue_depth = 0
+                state.queue_depth_observed = True
+                state.kv_cache_usage_frac = 0.1
+                state.kv_cache_usage_observed = True
+                context.registry.update_state(state)
+            context.telemetry.observe(EndpointTelemetrySample(
+                "P0", observed_at, energy_j=10.0, completed_requests=1,
+                interval_s=1.0, queue_depth=0, kv_cache_usage_frac=0.1,
+                ttft_ms=100.0,
+            ))
+            context.telemetry.observe(EndpointTelemetrySample(
+                "D0", observed_at, energy_j=20.0, completed_requests=1,
+                interval_s=1.0, queue_depth=0, kv_cache_usage_frac=0.1,
+                tpot_ms=30.0,
+            ))
+            selected = harness._decide(
+                "FULL_FEEDBACK", "small_light", "partial", context,
+                capabilities, actuator, pairs, measured_iteration=True,
+            )
+            self.assertEqual(selected, [["P0", "D0"]])
+            self.assertIsNone(harness.control_rows[-1]["fallback_reason"])
+            self.assertFalse(harness.control_rows[-1]["telemetry_fresh"])
+            self.assertEqual(
+                json.loads(harness.control_rows[-1]["stale_endpoint_ids_json"]),
+                ["D1", "P1"],
+            )
 
 
 if __name__ == "__main__":
