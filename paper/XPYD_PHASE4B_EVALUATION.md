@@ -1,0 +1,88 @@
+# XpYd Phase 4B controlled policy evaluation
+
+Phase 4B is a scientific comparison of the unchanged Phase 3D feedback-only
+controller against simple baselines and the frozen Phase 4A empirical oracle.
+It does not train predictors, load legacy XGBoost models, or feed oracle values
+to runtime policies.
+
+## Fixed platform
+
+- P0/P1: Neptune L40S, TP1
+- D0/D1: IO L4, TP1
+- persistent vLLM 0.15.1 endpoints and the validated P2P connector path
+- the same four compatible routes and LOW/MID/HIGH states used by Phase 4A
+- TTFT SLO 1000 ms and TPOT SLO 80 ms
+
+Uranus is not used.
+
+## Stationary policies
+
+The physical comparison measures:
+
+1. `STATIC`: round-robin across all compatible pairs, every endpoint HIGH;
+2. `FEEDBACK_ROUTING_ONLY`: measured feedback routing, every endpoint HIGH;
+3. `FEEDBACK_DVFS_ONLY`: fixed P0->D0 routing with measured per-endpoint DVFS;
+4. `FULL_FEEDBACK`: measured feedback routing and measured per-endpoint DVFS.
+
+The `EMPIRICAL_ORACLE` is not rerun. Its per-workload energy and near-optimal
+set are read unchanged from the accepted Phase 4A summary. The file SHA-256 is
+recorded in every Phase 4B run.
+
+Policy/workload blocks use a fixed seeded random order. Feedback state is
+isolated per policy/workload block. Each feedback block receives one unmeasured
+observation warmup, followed by five measured repeats with two requests per
+repeat. Warmup observations are runtime measurements, not oracle information.
+
+Missing or stale telemetry is never interpreted as zero pressure. Routing
+policies fall back to validated routes at safe HIGH frequency, and DVFS-only
+falls back to fixed P0->D0 at safe HIGH. Requested and observed frequencies,
+fallbacks, successful physical actions, routing changes, and freshness are
+recorded separately.
+
+## Claim and stage boundary
+
+The stationary stage must pass before dynamic traces are run. A smoke run uses
+one repeat but still covers all four policies and workloads. A successful
+smoke validates plumbing only; it is not scientific evidence. A successful
+five-repeat stationary run produces the evidence needed to authorize the
+separate dynamic stage.
+
+This deliberate gate prevents a stationary failure from being obscured by a
+later dynamic trace. The final A/B/C decision about feedback sufficiency remains
+pending until dynamic traces are complete.
+
+## Outputs
+
+Outputs appear under `results/phase4b_evaluation/<run-id>/`:
+
+- `phase4b_stationary_results.csv`: one row per measured repeat;
+- `phase4b_dynamic_results.csv`: header-only until the gated dynamic stage;
+- `phase4b_policy_summary.csv`: mean, sample standard deviation, CI, latency
+  tails, SLO violations, route distribution, frequency residency, and actions;
+- `phase4b_oracle_gap.csv`: normalized energy comparison and <=5%/5-10%/>10%
+  classification;
+- `phase4b_control_actions.csv`: routing/DVFS decisions and fallbacks;
+- `phase4b_audit.json`, `phase4b_summary.json`, and `phase4b_summary.md`;
+- `raw/`: physical windows, request rows, telemetry, actuator actions,
+  capabilities, the randomized plan, and frozen-oracle provenance.
+
+The primary oracle gap uses J/request:
+
+```text
+(policy J/request - Phase 4A oracle J/request) / Phase 4A oracle J/request
+```
+
+Gross window energy and J/output-token remain available beside it.
+
+## Launcher
+
+Set:
+
+```bash
+XPYD_PHASE4B_CONFIG=paper/configs/xpyd_phase4b_evaluation_neptune_io.json
+XPYD_PHASE4B_ORACLE_SUMMARY=results/phase4a_empirical_oracle/phase4a_oracle_r1_20260824T080026Z/phase4a_summary.json
+```
+
+Optionally set `XPYD_PHASE4B_RUN_ID`. Set `XPYD_PHASE4B_SMOKE=1` for the
+one-repeat physical smoke. The regular run uses all five repeats.
+

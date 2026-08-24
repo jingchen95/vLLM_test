@@ -1,0 +1,123 @@
+{
+  "model": "mistralai/Mistral-7B-v0.1",
+  "tokenizer_model": "mistralai/Mistral-7B-v0.1",
+  "vllm_version": "0.15.1",
+  "output_root": "results/phase4b_internal_windows",
+  "proxy_uri": "$XPYD_PROXY_URI",
+  "proxy_diagnostics_log": "$XPYD_PROXY_DIAGNOSTICS_LOG",
+  "routing_control_file": "$XPYD_ROUTING_CONTROL_FILE",
+  "routing_control_maximum_age_s": 900.0,
+  "scrape_interval_s": 1.0,
+  "collector": {"timeout_s": 5.0},
+  "pre_window_s": 1.0,
+  "post_window_s": 0.5,
+  "sampling": {
+    "period_s": 0.2,
+    "late_tolerance_s": 0.05,
+    "readiness_timeout_s": 120.0,
+    "maximum_gap_s": 0.5,
+    "maximum_boundary_gap_s": 0.4,
+    "minimum_coverage_ratio": 0.9
+  },
+  "client": {
+    "script": "paper/scripts/replay_synthetic_trace.py",
+    "max_concurrency": 1,
+    "request_timeout_s": 900
+  },
+  "endpoints": [
+    {
+      "endpoint_id": "P0", "role": "prefill", "node": "neptune",
+      "gpu_type": "NVIDIA L40S", "gpu_ids": [0], "cuda_visible_device": "0",
+      "tp_degree": 1, "http_uri": "http://$XPYD_P0_HTTP_HOST:8100",
+      "http_host": "$XPYD_P0_HTTP_HOST", "http_port": 8100,
+      "addr_host": "$XPYD_P_ADDR_HOST", "kv_port": 14579,
+      "kv_connector": "P2pNcclConnector", "configured_frequency_mhz": 2520,
+      "expected_gpu_name": "L40S"
+    },
+    {
+      "endpoint_id": "P1", "role": "prefill", "node": "neptune",
+      "gpu_type": "NVIDIA L40S", "gpu_ids": [1], "cuda_visible_device": "1",
+      "tp_degree": 1, "http_uri": "http://$XPYD_P1_HTTP_HOST:8101",
+      "http_host": "$XPYD_P1_HTTP_HOST", "http_port": 8101,
+      "addr_host": "$XPYD_P_ADDR_HOST", "kv_port": 14580,
+      "kv_connector": "P2pNcclConnector", "configured_frequency_mhz": 2520,
+      "expected_gpu_name": "L40S"
+    },
+    {
+      "endpoint_id": "D0", "role": "decode", "node": "io",
+      "gpu_type": "NVIDIA L4", "gpu_ids": [0], "cuda_visible_device": "0",
+      "monitor_gpu_allocation_count": 2,
+      "tp_degree": 1, "http_uri": "http://$XPYD_D0_HTTP_HOST:8200",
+      "http_host": "$XPYD_D0_HTTP_HOST", "http_port": 8200,
+      "addr_host": "$XPYD_D_ADDR_HOST", "kv_port": 14579,
+      "kv_connector": "P2pNcclConnector", "configured_frequency_mhz": 1500,
+      "expected_gpu_name": "L4"
+    },
+    {
+      "endpoint_id": "D1", "role": "decode", "node": "io",
+      "gpu_type": "NVIDIA L4", "gpu_ids": [1], "cuda_visible_device": "1",
+      "monitor_gpu_allocation_count": 2,
+      "tp_degree": 1, "http_uri": "http://$XPYD_D1_HTTP_HOST:8201",
+      "http_host": "$XPYD_D1_HTTP_HOST", "http_port": 8201,
+      "addr_host": "$XPYD_D_ADDR_HOST", "kv_port": 14580,
+      "kv_connector": "P2pNcclConnector", "configured_frequency_mhz": 1500,
+      "expected_gpu_name": "L4"
+    }
+  ],
+  "fixed_clocks": {
+    "P0": {"graphics_mhz": 2520, "memory_mhz": 9001, "minimum_workload_match_fraction": 0.95},
+    "P1": {"graphics_mhz": 2520, "memory_mhz": 9001, "minimum_workload_match_fraction": 0.95},
+    "D0": {"graphics_mhz": 1500, "memory_mhz": 6251, "minimum_workload_match_fraction": 0.95},
+    "D1": {"graphics_mhz": 1500, "memory_mhz": 6251, "minimum_workload_match_fraction": 0.95}
+  },
+  "compatible_pairs": [
+    {"prefill_endpoint_id": "P0", "decode_endpoint_id": "D0", "connector": "P2pNcclConnector", "prefill_tp": 1, "decode_tp": 1, "supported": true, "reason": "accepted Phase 3C/3D physical compatibility evidence"},
+    {"prefill_endpoint_id": "P0", "decode_endpoint_id": "D1", "connector": "P2pNcclConnector", "prefill_tp": 1, "decode_tp": 1, "supported": true, "reason": "accepted Phase 3C/3D physical compatibility evidence"},
+    {"prefill_endpoint_id": "P1", "decode_endpoint_id": "D0", "connector": "P2pNcclConnector", "prefill_tp": 1, "decode_tp": 1, "supported": true, "reason": "accepted Phase 3C/3D physical compatibility evidence"},
+    {"prefill_endpoint_id": "P1", "decode_endpoint_id": "D1", "connector": "P2pNcclConnector", "prefill_tp": 1, "decode_tp": 1, "supported": true, "reason": "accepted Phase 3C/3D physical compatibility evidence"}
+  ],
+  "workloads": [
+    {"id": "small_light", "input_len": 128, "output_len": 128, "count": 2, "rate_rps": 0.5},
+    {"id": "prefill_heavy", "input_len": 2048, "output_len": 128, "count": 2, "rate_rps": 0.5},
+    {"id": "decode_heavy", "input_len": 128, "output_len": 512, "count": 2, "rate_rps": 0.5},
+    {"id": "both_heavy", "input_len": 2048, "output_len": 512, "count": 2, "rate_rps": 0.5}
+  ],
+  "phase3d": {
+    "minimum_dwell_s": 1.0,
+    "validated_connector_max_concurrency": 1,
+    "feedback": {
+      "ttft_slo_ms": 1000.0,
+      "tpot_slo_ms": 80.0,
+      "safety_fraction": 0.9,
+      "telemetry_max_age_s": 120.0,
+      "max_queue_depth": 1,
+      "max_kv_cache_usage_frac": 0.9,
+      "step_down_fraction": 0.5,
+      "step_up_fraction": 0.8,
+      "severe_queue_depth": 4,
+      "severe_kv_cache_usage_frac": 0.97,
+      "low_kv_cache_usage_frac": 0.5,
+      "ewma_alpha": 0.5
+    }
+  },
+  "phase4b": {
+    "output_root": "results/phase4b_evaluation",
+    "phase4a_summary": "$XPYD_PHASE4B_ORACLE_SUMMARY",
+    "repeats": 5,
+    "requests_per_repeat": 2,
+    "order_seed": 41,
+    "slo": {"ttft_ms": 1000.0, "tpot_ms": 80.0},
+    "policies": [
+      "STATIC",
+      "FEEDBACK_ROUTING_ONLY",
+      "FEEDBACK_DVFS_ONLY",
+      "FULL_FEEDBACK"
+    ],
+    "stationary_methodology": "Seeded randomized policy-workload blocks. Each feedback block receives one unmeasured observation warmup, then five measured repeats with isolated controller state. Oracle values are loaded only after each physical window for comparison and are never controller inputs.",
+    "dynamic_gate": "Run dynamic traces only after the full stationary audit passes."
+  },
+  "server_logs": {
+    "P0": "$XPYD_P0_SERVER_LOG", "P1": "$XPYD_P1_SERVER_LOG",
+    "D0": "$XPYD_D0_SERVER_LOG", "D1": "$XPYD_D1_SERVER_LOG"
+  }
+}
