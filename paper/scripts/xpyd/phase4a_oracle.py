@@ -424,7 +424,7 @@ class Phase4AOracleHarness:
             pairs, sorted(accepted), profiles, self.settings["canonical_route"],
             self.settings.get("canonical_extra_profiles", []),
         )
-        workloads = [dict(item) for item in self.settings["workloads"]]
+        workloads = [dict(item) for item in self.config["workloads"]]
         repeats = int(self.settings["repeats"])
         _write_json(self.run_dir / "raw" / "measurement_plan.json", {
             "actions": [asdict(action) for action in actions],

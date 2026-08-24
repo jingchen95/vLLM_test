@@ -6,6 +6,7 @@ import unittest
 from xpyd.phase4a_oracle import (
     aggregate_measurements,
     build_action_space,
+    load_config,
     select_oracles,
 )
 
@@ -21,6 +22,15 @@ PROFILES = (
 
 
 class Phase4AActionSpaceTests(unittest.TestCase):
+    def test_checked_in_config_loads_with_four_workloads(self):
+        root = Path(__file__).resolve().parents[1]
+        config = load_config(root / "paper/configs/xpyd_phase4a_oracle_neptune_io.json")
+        self.assertEqual(len(config["workloads"]), 4)
+        self.assertEqual(
+            {(item["endpoint_id"], item["node"]) for item in config["endpoints"]},
+            {("P0", "neptune"), ("P1", "neptune"), ("D0", "io"), ("D1", "io")},
+        )
+
     def test_pruned_space_has_all_routes_profiles_and_one_static_baseline(self):
         actions = build_action_space(
             PAIRS, ("P0", "P1", "D0", "D1"), PROFILES, ("P0", "D0"),
