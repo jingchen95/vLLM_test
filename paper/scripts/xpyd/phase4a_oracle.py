@@ -220,6 +220,62 @@ def select_oracles(
     return result
 
 
+def render_summary_markdown(summary: Mapping[str, Any]) -> str:
+    """Render the report from an audited summary without measuring GPUs again."""
+    valid = bool(summary["valid"])
+    action_space = summary["action_space"]
+    slo = summary["slo"]
+    oracles = summary["oracles"]
+    answers = summary["answers"]
+    hard_gates = summary["hard_gates"]
+    unique_best = answers["unique_best_configurations"]
+    near_counts = answers["optimum_shape"]["near_optimal_5pct_counts"]
+    savings = answers["oracle_savings_vs_static"]
+    configuration_count = int(action_space["measured_configurations"])
+    workload_count = int(summary.get("workload_count", len(oracles)))
+    repeats = int(summary.get("repeats", 0))
+    if not repeats and configuration_count and workload_count:
+        repeats = int(summary["planned_measurement_count"]) // (
+            configuration_count * workload_count
+        )
+    lines = [
+        "# XpYd Phase 4A small empirical offline oracle", "",
+        "Verdict: **%s**" % ("PASS" if valid else "FAIL"), "",
+        "This is the best measured SLO-feasible configuration in a pruned action space; it is not a theoretical optimum.", "",
+        "Measured %d configurations x %d workloads x %d repeats (%d windows)."
+        % (configuration_count, workload_count, repeats, int(summary["measurement_count"])), "",
+        "SLO eligibility requires every repeat mean TTFT <= %.1f ms and mean TPOT <= %.1f ms."
+        % (float(slo["ttft_ms"]), float(slo["tpot_ms"])), "",
+        "| Workload | Best measured config | Second | J/request | Savings vs static | TTFT / TPOT (ms) | Near-optimal <=5% |",
+        "|---|---|---|---:|---:|---:|---:|",
+    ]
+    for item in oracles:
+        lines.append(
+            f"| {item['workload']} | {item['best_config_id']} | "
+            f"{item['second_best_config_id']} | {float(item['J_per_request']):.3f} | "
+            f"{float(item['energy_vs_static']):.2%} | "
+            f"{float(item['TTFT']):.2f} / {float(item['TPOT']):.2f} | "
+            f"{int(item['near_optimal_5pct_count'])} |"
+        )
+    lines.extend([
+        "", "Largest measured main effect: `%s`." % answers["largest_measured_main_effect"],
+        "", "Best configuration differs across workloads: **%s** (%s)."
+        % (answers["best_configuration_differs_across_workloads"], ", ".join(unique_best) or "none"),
+        "", "Oracle J/request savings versus static: min `%.2f%%`, mean `%.2f%%`, max `%.2f%%`."
+        % (
+            100.0 * float(savings["minimum_fraction"]),
+            100.0 * float(savings["mean_fraction"]),
+            100.0 * float(savings["maximum_fraction"]),
+        ),
+        "", f"Near-optimal (within 5%) configuration counts: `{near_counts}`.",
+        "", "Ready for Phase 4B: **%s**." % summary["ready_for_phase4b"],
+        "", "Hard gates: `%s`" % json.dumps(hard_gates, sort_keys=True), "",
+    ])
+    if summary.get("error"):
+        lines.extend(["Failure: `%s`" % summary["error"], ""])
+    return "\n".join(lines)
+
+
 def _effect_summary(aggregates: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     eligible = {
         (str(item["workload"]), str(item["prefill_endpoint_id"]),
@@ -588,6 +644,7 @@ class Phase4AOracleHarness:
                 "full_cartesian_configurations": 4 * (3 ** 4),
                 "pruning": self.settings["action_space_pruning"],
             },
+            "workload_count": len(workloads), "repeats": repeats,
             "measurement_count": len(rows), "planned_measurement_count": len(actions) * len(workloads) * repeats,
             "planned_request_count": len(actions) * len(workloads) * repeats * int(self.settings["requests_per_repeat"]),
             "configuration_aggregates": aggregates,
@@ -598,34 +655,9 @@ class Phase4AOracleHarness:
             "ready_for_phase4b": valid and all(row["eligible_configuration_count"] >= 2 for row in oracles),
         }
         _write_json(self.run_dir / "phase4a_summary.json", summary)
-        lines = [
-            "# XpYd Phase 4A small empirical offline oracle", "",
-            "Verdict: **%s**" % ("PASS" if valid else "FAIL"), "",
-            "This is the best measured SLO-feasible configuration in a pruned action space; it is not a theoretical optimum.", "",
-            "Measured %d configurations x %d workloads x %d repeats (%d windows)."
-            % (len(actions), len(workloads), repeats, len(rows)), "",
-            "SLO eligibility requires every repeat mean TTFT <= %.1f ms and mean TPOT <= %.1f ms."
-            % (float(slo["ttft_ms"]), float(slo["tpot_ms"])), "",
-            "| Workload | Best measured config | Second | J/request | Savings vs static | TTFT / TPOT (ms) | Near-optimal <=5%% |",
-            "|---|---|---|---:|---:|---:|---:|",
-        ]
-        for item in oracles:
-            lines.append(
-                "| %(workload)s | %(best_config_id)s | %(second_best_config_id)s | %(J_per_request).3f | %(energy_vs_static).2%% | %(TTFT).2f / %(TPOT).2f | %(near_optimal_5pct_count)d |" % item
-            )
-        lines.extend([
-            "", "Largest measured main effect: `%s`." % effect_summary.get("largest_measured_main_effect"),
-            "", "Best configuration differs across workloads: **%s** (%s)."
-            % (answers["best_configuration_differs_across_workloads"], ", ".join(unique_best) or "none"),
-            "", "Oracle J/request savings versus static: min `%s`, mean `%s`, max `%s`."
-            % tuple(answers["oracle_savings_vs_static"].values()),
-            "", "Near-optimal (within 5%%) configuration counts: `%s`." % near_counts,
-            "", "Ready for Phase 4B: **%s**." % summary["ready_for_phase4b"],
-            "", "Hard gates: `%s`" % json.dumps(hard_gates, sort_keys=True), "",
-        ])
-        if error:
-            lines.extend(["Failure: `%s`" % error, ""])
-        (self.run_dir / "phase4a_summary.md").write_text("\n".join(lines), encoding="utf-8")
+        (self.run_dir / "phase4a_summary.md").write_text(
+            render_summary_markdown(summary), encoding="utf-8"
+        )
         if not valid:
             raise Phase4AError(error or "Phase 4A hard-gate audit failed")
         print(self.run_dir.as_posix())

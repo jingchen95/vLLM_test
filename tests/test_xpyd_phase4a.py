@@ -7,6 +7,7 @@ from xpyd.phase4a_oracle import (
     aggregate_measurements,
     build_action_space,
     load_config,
+    render_summary_markdown,
     select_oracles,
 )
 
@@ -87,6 +88,37 @@ def measurement(workload, config_id, repeat, energy, *, valid=True, slo=True, ba
 
 
 class Phase4AOracleTests(unittest.TestCase):
+    def test_markdown_report_formats_fractional_savings_as_percent(self):
+        summary = {
+            "valid": True,
+            "action_space": {"measured_configurations": 1},
+            "slo": {"ttft_ms": 1000.0, "tpot_ms": 80.0},
+            "measurement_count": 3,
+            "planned_measurement_count": 3,
+            "oracles": [{
+                "workload": "small", "best_config_id": "best",
+                "second_best_config_id": "second", "J_per_request": 100.0,
+                "energy_vs_static": 0.25, "TTFT": 500.0, "TPOT": 60.0,
+                "near_optimal_5pct_count": 2,
+            }],
+            "answers": {
+                "unique_best_configurations": ["best"],
+                "best_configuration_differs_across_workloads": False,
+                "largest_measured_main_effect": "P_side_DVFS",
+                "oracle_savings_vs_static": {
+                    "minimum_fraction": 0.25, "mean_fraction": 0.25,
+                    "maximum_fraction": 0.25,
+                },
+                "optimum_shape": {"near_optimal_5pct_counts": [2]},
+            },
+            "hard_gates": {"complete_measurement_plan": True},
+            "ready_for_phase4b": True,
+            "error": None,
+        }
+        report = render_summary_markdown(summary)
+        self.assertIn("| 25.00% |", report)
+        self.assertIn("min `25.00%`, mean `25.00%`, max `25.00%`", report)
+
     def test_duplicate_repeat_does_not_satisfy_repeat_gate(self):
         rows = [
             measurement("small", "candidate", 1, 100.0),
