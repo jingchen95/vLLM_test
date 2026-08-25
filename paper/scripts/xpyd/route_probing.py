@@ -198,27 +198,35 @@ class SafeRouteProber:
         eligible = self._routes(eligible_routes)
         probe_safe = set(self._routes(probe_safe_routes))
         eligible_set = set(eligible)
-        refresh = []
+        unseen: list[tuple[Route, Optional[RouteCostSnapshot]]] = []
+        stale: list[tuple[Route, Optional[RouteCostSnapshot]]] = []
         for route in compatible:
             if route not in eligible_set or route not in probe_safe:
                 continue
             snapshot = self.costs.snapshot(context_key, route, now_s, sequence)
-            if snapshot is None or not snapshot.fresh:
-                refresh.append((route, snapshot))
+            if snapshot is None:
+                unseen.append((route, snapshot))
+            elif not snapshot.fresh:
+                stale.append((route, snapshot))
         last_probe = self._last_probe_sequence.get(str(context_key))
         probe_due = (
             last_probe is None
             or sequence - last_probe >= self.minimum_probe_interval_windows
         )
-        if refresh and probe_due:
+        # The accepted all-route safety warmup gives unseen routes a short,
+        # bounded opportunity to obtain their first observation.  Once every
+        # route has been seen, stale refreshes obey the probe interval so an
+        # exploitation/DVFS window separates recurring probes.
+        refresh = unseen if unseen else (stale if probe_due else [])
+        if refresh:
             endpoint_counts = self._endpoint_observation_counts(
                 context_key, compatible, now_s, sequence
             )
 
             def refresh_key(item: tuple[Route, Optional[RouteCostSnapshot]]) -> tuple[object, ...]:
                 route, snapshot = item
-                unseen = snapshot is None
-                if unseen:
+                is_unseen = snapshot is None
+                if is_unseen:
                     balance = endpoint_counts.get(route[0], 0) + endpoint_counts.get(route[1], 0)
                     return (0, balance, route)
                 return (1, snapshot.last_observation_sequence, route)

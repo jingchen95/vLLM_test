@@ -60,18 +60,18 @@ hardware frequency state; it is not a frequency-independent counterfactual.
 ## Small physical smoke
 
 The only authorized physical run in this stage uses `small_light`, two logical
-requests per window, and eight windows for each policy:
+requests per window, and seven windows for each policy:
 
 - PASSIVE_FULL: reproduce the incumbent passive behavior;
 - ACTIVE_FULL windows 1--4: safely sample all four compatible routes;
 - later ACTIVE_FULL windows: exploit recent minimum cost, resume unchanged
   DVFS, and refresh a route whose cost crosses the window-freshness bound.
 
-Route-cost staleness is deliberately longer than one four-route observation
-cycle. Current endpoint telemetry is checked independently at every probe, so
-historical cost expiry is not coupled to the endpoint-telemetry freshness
-threshold. This leaves an exploitation opportunity before an older route is
-refreshed.
+The accepted all-route warmup gives unseen routes a bounded initial sampling
+opportunity. After that coverage, recurring stale-route probes are separated by
+at least one exploitation window. Route cost expires before the endpoint
+latency safety telemetry used to authorize its refresh; no probe bypasses the
+freshness gate.
 
 The smoke is deliberately not the formal dynamic Phase 4B evaluation. Context
 isolation and negative pressure behavior are additionally covered by CPU-only

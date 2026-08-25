@@ -27,9 +27,13 @@ class ContextRouteCostTests(unittest.TestCase):
         self.assertEqual(set(settings["contexts"]), {
             "small_light", "prefill_heavy", "decode_heavy", "both_heavy",
         })
-        self.assertEqual(settings["smoke_windows_per_context"], 8)
-        self.assertGreater(settings["route_cost_maximum_age_s"], 0.0)
-        self.assertEqual(settings["route_cost_maximum_age_windows"], 5)
+        self.assertEqual(settings["smoke_windows_per_context"], 7)
+        self.assertLess(
+            settings["route_cost_maximum_age_s"],
+            config["phase3d"]["feedback"]["telemetry_max_age_s"],
+        )
+        self.assertEqual(settings["route_cost_maximum_age_windows"], 4)
+        self.assertEqual(settings["minimum_probe_interval_windows"], 2)
 
     def test_launcher_has_separate_phase4b1_entry(self):
         root = Path(__file__).resolve().parents[1]
@@ -60,7 +64,7 @@ class ContextRouteCostTests(unittest.TestCase):
 
     def test_unseen_probes_balance_endpoints_then_exploit(self):
         costs = ContextRouteCostStore(alpha=1.0, maximum_age_windows=4)
-        prober = SafeRouteProber(costs)
+        prober = SafeRouteProber(costs, minimum_probe_interval_windows=2)
         observed = []
         for sequence in range(1, 5):
             decision = prober.choose(
@@ -82,6 +86,34 @@ class ContextRouteCostTests(unittest.TestCase):
         )
         self.assertFalse(decision.probe)
         self.assertEqual(decision.mode, "EXPLOIT_RECENT")
+
+    def test_stale_probe_waits_for_interval_after_unseen_coverage(self):
+        costs = ContextRouteCostStore(
+            alpha=1.0, maximum_age_s=2.0, maximum_age_windows=4,
+        )
+        prober = SafeRouteProber(costs, minimum_probe_interval_windows=2)
+        for sequence in range(1, 5):
+            decision = prober.choose(
+                "small", compatible_routes=ROUTES, eligible_routes=ROUTES,
+                probe_safe_routes=ROUTES, now_s=float(sequence), sequence=sequence,
+            )
+            self.assertEqual(decision.mode, "PROBE_UNSEEN")
+            costs.observe(
+                "small", decision.route, total_system_gross_energy_j=200.0,
+                logical_requests=2, timestamp_s=float(sequence), sequence=sequence,
+            )
+        decision = prober.choose(
+            "small", compatible_routes=ROUTES, eligible_routes=ROUTES,
+            probe_safe_routes=ROUTES, now_s=5.0, sequence=5,
+        )
+        self.assertEqual(decision.mode, "EXPLOIT_RECENT")
+        self.assertFalse(decision.probe)
+        decision = prober.choose(
+            "small", compatible_routes=ROUTES, eligible_routes=ROUTES,
+            probe_safe_routes=ROUTES, now_s=6.0, sequence=6,
+        )
+        self.assertEqual(decision.mode, "PROBE_STALE")
+        self.assertTrue(decision.probe)
 
     def test_stale_route_is_refreshed_after_exploitation(self):
         costs = ContextRouteCostStore(alpha=1.0, maximum_age_windows=4)
