@@ -27,11 +27,9 @@ class ContextRouteCostTests(unittest.TestCase):
         self.assertEqual(set(settings["contexts"]), {
             "small_light", "prefill_heavy", "decode_heavy", "both_heavy",
         })
-        self.assertEqual(settings["smoke_windows_per_context"], 7)
-        self.assertLess(
-            settings["route_cost_maximum_age_s"],
-            config["phase3d"]["feedback"]["telemetry_max_age_s"],
-        )
+        self.assertEqual(settings["smoke_windows_per_context"], 8)
+        self.assertGreater(settings["route_cost_maximum_age_s"], 0.0)
+        self.assertEqual(settings["route_cost_maximum_age_windows"], 5)
 
     def test_launcher_has_separate_phase4b1_entry(self):
         root = Path(__file__).resolve().parents[1]

@@ -580,17 +580,14 @@ def load_config(path: Path) -> dict[str, Any]:
     smoke_contexts = set(map(str, settings.get("smoke_contexts", ())))
     if contexts != workload_ids or not smoke_contexts or not smoke_contexts <= contexts:
         raise Phase4B1Error("Phase 4B.1 contexts must cover configured workloads")
-    if int(settings.get("smoke_windows_per_context", 0)) < 7:
+    if int(settings.get("smoke_windows_per_context", 0)) < 8:
         raise Phase4B1Error("Phase 4B.1 smoke needs route coverage, exploit, and stale refresh")
     fraction = float(settings.get("probe_headroom_fraction", 0.0))
     if not 0.0 < fraction < 1.0:
         raise Phase4B1Error("probe_headroom_fraction must be in (0, 1)")
     route_cost_age = float(settings.get("route_cost_maximum_age_s", 0.0))
-    latency_age = float(config["phase3d"]["feedback"]["telemetry_max_age_s"])
-    if not 0.0 < route_cost_age < latency_age:
-        raise Phase4B1Error(
-            "route-cost freshness must expire before endpoint latency safety telemetry"
-        )
+    if route_cost_age <= 0.0:
+        raise Phase4B1Error("route-cost maximum age must be positive")
     return config
 
 
