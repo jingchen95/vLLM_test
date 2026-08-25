@@ -327,6 +327,30 @@ class Phase4BPolicyTests(unittest.TestCase):
                 ["D1", "P1"],
             )
 
+            context.telemetry.observe(EndpointTelemetrySample(
+                "P1", observed_at, energy_j=11.0, completed_requests=1,
+                interval_s=1.0, queue_depth=0, kv_cache_usage_frac=0.1,
+                ttft_ms=110.0,
+            ))
+            context.telemetry.observe(EndpointTelemetrySample(
+                "D1", observed_at, energy_j=21.0, completed_requests=1,
+                interval_s=1.0, queue_depth=0, kv_cache_usage_frac=0.1,
+                tpot_ms=31.0,
+            ))
+            before = dict(backend.frequencies)
+            selected = harness._decide(
+                "ACTIVE_FULL", "small_light", "probe", context,
+                capabilities, actuator, pairs, measured_iteration=True,
+                route_override=["P1", "D1"], freeze_dvfs=True,
+                routing_decision_mode="PROBE_UNSEEN",
+                routing_score_basis="context_route_total_four_gpu_window_joules_per_request",
+            )
+            self.assertEqual(selected, [["P1", "D1"]])
+            self.assertEqual(backend.frequencies, before)
+            self.assertTrue(harness.control_rows[-1]["route_probe"])
+            self.assertTrue(harness.control_rows[-1]["dvfs_frozen_for_probe"])
+            self.assertEqual(harness.control_rows[-1]["dvfs_action_count"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

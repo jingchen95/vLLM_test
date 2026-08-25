@@ -135,6 +135,22 @@
       "methodology": "Each policy/trace block is contiguous. FULL_FEEDBACK receives one unmeasured first-state observation warmup. At a transition, the first decision uses only the previously observed workload context; the new state becomes feedback context only after its first completed window. Three windows per state allow one blind transition window, one reaction opportunity, and one settling check."
     }
   },
+  "phase4b1": {
+    "output_root": "results/phase4b1_safe_probing",
+    "accepted_stationary_audit": "$XPYD_PHASE4B_ACCEPTED_STATIONARY_AUDIT",
+    "policies": ["PASSIVE_FULL", "ACTIVE_FULL"],
+    "contexts": ["small_light", "prefill_heavy", "decode_heavy", "both_heavy"],
+    "smoke_contexts": ["small_light"],
+    "smoke_windows_per_context": 7,
+    "requests_per_window": 2,
+    "order_seed": 47,
+    "route_cost_ewma_alpha": 0.5,
+    "route_cost_maximum_age_s": 90.0,
+    "route_cost_maximum_age_windows": 4,
+    "minimum_probe_interval_windows": 1,
+    "probe_headroom_fraction": 0.8,
+    "methodology": "PASSIVE_FULL preserves the Phase 4B endpoint-EWMA routing comparator. ACTIVE_FULL uses only context-route observations of total four-GPU gross window energy divided by logical requests. An unmeasured all-route warmup establishes safety telemetry but no route cost. Unseen/stale compatible routes are probed only under fresh low-pressure SLO-safe conditions. DVFS is frozen in probe windows and the unchanged feedback DVFS path resumes during exploitation."
+  },
   "server_logs": {
     "P0": "$XPYD_P0_SERVER_LOG", "P1": "$XPYD_P1_SERVER_LOG",
     "D0": "$XPYD_D0_SERVER_LOG", "D1": "$XPYD_D1_SERVER_LOG"

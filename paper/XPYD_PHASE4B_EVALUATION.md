@@ -117,3 +117,8 @@ XPYD_PHASE4B_ACCEPTED_STATIONARY_AUDIT=results/phase4b_evaluation/<accepted-run>
 ```
 
 The default stage is `stationary`.
+
+Phase 4B.1 safe probing is a separate gated harness, not a `--stage` value for
+this module. See `paper/XPYD_PHASE4B1_SAFE_PROBING.md`. It preserves
+`FULL_FEEDBACK` as the passive comparator and runs `ACTIVE_FULL` through
+`xpyd.phase4b1_evaluation` using `XPYD_PHASE4B1_CONFIG`.

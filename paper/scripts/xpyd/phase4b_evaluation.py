@@ -585,6 +585,11 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
         context: ControllerContext, capabilities: Mapping[str, EndpointClockCapability],
         actuator: PerEndpointClockActuator, all_pairs: Sequence[Sequence[str]],
         *, measured_iteration: bool, feedback_context_key: Optional[str] = None,
+        route_override: Optional[Sequence[str]] = None,
+        freeze_dvfs: bool = False,
+        routing_decision_mode: Optional[str] = None,
+        routing_score_basis: Optional[str] = None,
+        route_costs_json: str = "{}",
     ) -> list[list[str]]:
         self._actuate(
             actuator, context, context.target_frequencies,
@@ -596,8 +601,12 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
             for endpoint_id, capability in capabilities.items()
         }
         now = time.time()
-        feedback_routing = policy in {"FEEDBACK_ROUTING_ONLY", "FULL_FEEDBACK"}
-        feedback_dvfs = policy in {"FEEDBACK_DVFS_ONLY", "FULL_FEEDBACK"}
+        feedback_routing = policy in {
+            "FEEDBACK_ROUTING_ONLY", "FULL_FEEDBACK", "PASSIVE_FULL", "ACTIVE_FULL",
+        }
+        feedback_dvfs = policy in {
+            "FEEDBACK_DVFS_ONLY", "FULL_FEEDBACK", "PASSIVE_FULL", "ACTIVE_FULL",
+        }
         count = 0
         required = (
             sorted(capabilities) if feedback_routing else ["P0", "D0"]
@@ -641,10 +650,28 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
                 )
                 eligible = [item for item in evaluations if item.eligible]
                 if eligible:
-                    route = context.scheduler.choose_route(
-                        now_s=now, workload_context_key=observed_context
-                    )
-                    pairs = [[route.prefill_endpoint_id, route.decode_endpoint_id]]
+                    eligible_pairs = {
+                        (item.prefill_endpoint_id, item.decode_endpoint_id)
+                        for item in eligible
+                    }
+                    if route_override is not None:
+                        requested_pair = tuple(map(str, route_override))
+                        if len(requested_pair) != 2 or requested_pair not in eligible_pairs:
+                            pairs = [["P0", "D0"]]
+                            fallback_reason = "active_route_override_not_measured_safe"
+                            count = self._actuate(
+                                actuator, context, high,
+                                "phase4b_active_route_override_fallback_high",
+                                controller_action=True, policy=policy,
+                                workload=workload, iteration_id=iteration_id,
+                            )
+                        else:
+                            pairs = [list(requested_pair)]
+                    else:
+                        route = context.scheduler.choose_route(
+                            now_s=now, workload_context_key=observed_context
+                        )
+                        pairs = [[route.prefill_endpoint_id, route.decode_endpoint_id]]
                 else:
                     pairs = [["P0", "D0"]]
                     fallback_reason = "no_fresh_measured_safe_route_use_p0d0_safe_high"
@@ -655,7 +682,7 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
                     )
             else:
                 pairs = [["P0", "D0"]]
-            if feedback_dvfs and fallback_reason is None:
+            if feedback_dvfs and fallback_reason is None and not freeze_dvfs:
                 recommendations = [
                     context.scheduler.choose_frequency_adjustment(endpoint_id, now_s=now)
                     for endpoint_id in sorted(capabilities)
@@ -702,6 +729,17 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
             ),
             "routing_changed": routing_changed,
             "dvfs_action_count": count,
+            "routing_decision_mode": routing_decision_mode or (
+                "PASSIVE_ENDPOINT_EWMA" if feedback_routing else "FIXED_ROUTING"
+            ),
+            "routing_score_basis": routing_score_basis or (
+                "endpoint_window_gross_energy_per_request"
+                if feedback_routing else "none"
+            ),
+            "route_probe": bool(freeze_dvfs and route_override is not None),
+            "dvfs_frozen_for_probe": bool(freeze_dvfs),
+            "route_cost_context": observed_context,
+            "route_costs_json": route_costs_json,
             "candidate_evaluations_json": json.dumps(
                 [asdict(item) for item in evaluations], sort_keys=True
             ),
@@ -1012,7 +1050,9 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
             "feedback_context_key", "measured_iteration", "telemetry_fresh", "fallback_reason",
             "stale_endpoint_ids_json", "stale_endpoint_ages_s_json",
             "selected_pairs_json", "requested_frequencies_json", "routing_changed",
-            "dvfs_action_count", "candidate_evaluations_json",
+            "dvfs_action_count", "routing_decision_mode", "routing_score_basis",
+            "route_probe", "dvfs_frozen_for_probe", "route_cost_context",
+            "route_costs_json", "candidate_evaluations_json",
             "dvfs_recommendations_json",
         ))
         _csv(self.run_dir / "raw" / "actuator_actions.csv", self.actuator_rows, (
@@ -1438,7 +1478,9 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
             "feedback_context_key", "measured_iteration", "telemetry_fresh",
             "stale_endpoint_ids_json", "stale_endpoint_ages_s_json",
             "fallback_reason", "selected_pairs_json", "requested_frequencies_json",
-            "routing_changed", "dvfs_action_count", "candidate_evaluations_json",
+            "routing_changed", "dvfs_action_count", "routing_decision_mode",
+            "routing_score_basis", "route_probe", "dvfs_frozen_for_probe",
+            "route_cost_context", "route_costs_json", "candidate_evaluations_json",
             "dvfs_recommendations_json",
         ))
         _csv(self.run_dir / "raw" / "dynamic_requests.csv", request_rows, (
