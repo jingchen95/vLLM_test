@@ -8,6 +8,7 @@ import time
 
 from xpyd.phase3d_control import EndpointClockCapability, GPUReadback
 from xpyd.phase4b1_evaluation import Phase4B1Harness, load_config
+from xpyd.phase4b_evaluation import Phase4BEvaluationHarness
 from xpyd.route_probing import ContextRouteCostStore, SafeRouteProber
 from xpyd.telemetry import EndpointTelemetrySample
 
@@ -327,6 +328,38 @@ class ContextRouteCostTests(unittest.TestCase):
             self.assertEqual(len(summary["active_observed_routes"]), 4)
             self.assertGreater(summary["active_probe_window_count"], 4)
             self.assertGreater(summary["active_exploit_window_count"], 0)
+
+            active_smoke_audit = temporary / "active-smoke.json"
+            active_smoke_audit.write_text(
+                json.dumps({"valid": True, "smoke": True}), encoding="utf-8"
+            )
+            dynamic_root = temporary / "dynamic"
+            config["phase4b"]["dynamic"]["output_root"] = str(dynamic_root)
+            config["phase4b"]["dynamic"]["accepted_stationary_audit"] = str(
+                accepted_audit
+            )
+            config["phase4b"]["dynamic"]["accepted_active_smoke_audit"] = str(
+                active_smoke_audit
+            )
+            dynamic = Harness(config, run_id="dynamic-fixture", backend=Backend())
+            dynamic.stage = "dynamic"
+            dynamic.smoke = False
+            dynamic.run_dir = dynamic_root / "dynamic-fixture"
+            result = Phase4BEvaluationHarness.run_dynamic(dynamic)
+            dynamic_summary = json.loads(
+                (result / "phase4b_summary.json").read_text()
+            )
+            self.assertTrue(dynamic_summary["valid"])
+            self.assertEqual(dynamic_summary["dynamic_window_count"], 162)
+            self.assertEqual(
+                {item["policy"] for item in dynamic_summary["policy_aggregates"]},
+                {"STATIC", "PASSIVE_FULL", "ACTIVE_FULL"},
+            )
+            self.assertTrue(
+                dynamic_summary["hard_gates"][
+                    "active_context_route_system_cost_formula"
+                ]
+            )
 
 
 if __name__ == "__main__":

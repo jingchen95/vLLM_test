@@ -114,11 +114,13 @@
       "FULL_FEEDBACK"
     ],
     "stationary_methodology": "Seeded randomized policy-workload blocks. Each feedback block receives one unmeasured observation warmup, then five measured repeats with isolated controller state. Oracle values are loaded only after each physical window for comparison and are never controller inputs.",
-    "dynamic_gate": "Run dynamic traces only after the full stationary audit passes.",
+    "dynamic_gate": "Run dynamic traces only after the full stationary audit and Phase 4B.1 active smoke audit pass.",
     "dynamic": {
       "output_root": "results/phase4b_dynamic_evaluation",
       "accepted_stationary_audit": "$XPYD_PHASE4B_ACCEPTED_STATIONARY_AUDIT",
-      "policies": ["STATIC", "FULL_FEEDBACK"],
+      "accepted_active_smoke_audit": "$XPYD_PHASE4B_ACCEPTED_ACTIVE_SMOKE_AUDIT",
+      "policies": ["STATIC", "PASSIVE_FULL", "ACTIVE_FULL"],
+      "repeats": 3,
       "windows_per_state": 3,
       "requests_per_window": 2,
       "order_seed": 43,
@@ -132,7 +134,7 @@
           "states": ["decode_heavy", "both_heavy", "decode_heavy"]
         }
       ],
-      "methodology": "Each policy/trace block is contiguous. FULL_FEEDBACK receives one unmeasured first-state observation warmup. At a transition, the first decision uses only the previously observed workload context; the new state becomes feedback context only after its first completed window. Three windows per state allow one blind transition window, one reaction opportunity, and one settling check."
+      "methodology": "Three independent repeats of each policy/trace block. PASSIVE_FULL and ACTIVE_FULL receive one unmeasured first-state all-route safety warmup with isolated controller state. STATIC uses simple all-compatible routing at HIGH. At a transition, the first decision uses only the previously observed workload context; the new state becomes feedback context only after its first completed window. ACTIVE_FULL records new-window energy under the observed new context but never uses it before measurement. Three windows per state allow one blind transition window, one reaction opportunity, and one settling check. The optional burst trace is omitted to keep the formal matrix controlled and practical."
     }
   },
   "phase4b1": {

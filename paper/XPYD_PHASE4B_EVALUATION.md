@@ -41,18 +41,23 @@ recorded separately.
 
 ## Dynamic stage
 
-After the full stationary audit passes, the separate dynamic stage compares
-`STATIC` and `FULL_FEEDBACK` on two small traces:
+After the full stationary and Phase 4B.1 smoke audits pass, the formal dynamic
+stage compares exactly `STATIC`, `PASSIVE_FULL`, and `ACTIVE_FULL` on two small
+traces:
 
 - `small_light -> prefill_heavy -> small_light`;
 - `decode_heavy -> both_heavy -> decode_heavy`.
 
-Each state lasts three measured windows. This provides one blind transition
+Each policy/trace block has three independent repeats, and each state lasts
+three measured windows. This provides one blind transition
 window, one feedback-reaction opportunity after observing the new state, and
 one settling check. At the transition itself, the scheduler receives only the
 previously observed workload context. The new context is recorded for decisions
 only after its first window completes. The context label is diagnostic—the
 unchanged Phase 3D scheduler still uses measured endpoint telemetry only.
+`ACTIVE_FULL` uses the validated context-route four-GPU window cost and safe
+probe cadence; probe windows freeze DVFS. The optional burst trace is omitted
+to keep the formal matrix controlled and practical.
 
 Dynamic reporting distinguishes a measured reaction from a stable regime that
 needed no action. It records reaction latency, descriptive settling time,
@@ -75,11 +80,18 @@ combined.
 
 ## Outputs
 
-Outputs appear under `results/phase4b_evaluation/<run-id>/`:
+Stationary outputs appear under `results/phase4b_evaluation/<run-id>/`; formal
+dynamic outputs use `results/phase4b_dynamic_evaluation/<run-id>/`:
 
 - `phase4b_stationary_results.csv`: one row per measured repeat;
-- `phase4b_dynamic_results.csv`: header-only until the gated dynamic stage;
-- `phase4b_dynamic_adaptation.csv`: one row per measured workload transition;
+- `phase4b_dynamic_results.csv`: per-window energy, latency, cumulative energy,
+  routes, clocks, and explicit ACTIVE decision modes;
+- `phase4b_dynamic_adaptation.csv`: one row per measured workload transition
+  and repeat;
+- `phase4b_dynamic_adaptation_aggregate.csv`: reaction/settling variance across
+  repeats;
+- `phase4b_route_cost_observations.csv`: context-route four-GPU window costs;
+- `phase4b_policy_aggregate.csv`: mean/std/CI energy and latency comparison;
 - `phase4b_policy_summary.csv`: mean, sample standard deviation, CI, latency
   tails, SLO violations, route distribution, frequency residency, and actions;
 - `phase4b_oracle_gap.csv`: normalized energy comparison and <=5%/5-10%/>10%
@@ -114,11 +126,12 @@ For the gated dynamic stage, additionally set:
 ```bash
 XPYD_PHASE4B_STAGE=dynamic
 XPYD_PHASE4B_ACCEPTED_STATIONARY_AUDIT=results/phase4b_evaluation/<accepted-run>/phase4b_audit.json
+XPYD_PHASE4B_ACCEPTED_ACTIVE_SMOKE_AUDIT=results/phase4b1_safe_probing/<accepted-smoke>/phase4b1_audit.json
 ```
 
 The default stage is `stationary`.
 
-Phase 4B.1 safe probing is a separate gated harness, not a `--stage` value for
-this module. See `paper/XPYD_PHASE4B1_SAFE_PROBING.md`. It preserves
-`FULL_FEEDBACK` as the passive comparator and runs `ACTIVE_FULL` through
-`xpyd.phase4b1_evaluation` using `XPYD_PHASE4B1_CONFIG`.
+Phase 4B.1 safe probing remains a separate smoke harness. Its accepted audit is
+a prerequisite for formal dynamic `ACTIVE_FULL`. Dynamic route costs remain
+context-specific four-GPU gross window energy per logical request and are never
+treated as physical request-level attribution.

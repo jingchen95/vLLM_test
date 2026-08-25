@@ -67,7 +67,11 @@ class Phase4BPolicyTests(unittest.TestCase):
         self.assertEqual(len(config["workloads"]), 4)
         self.assertEqual(
             tuple(config["phase4b"]["dynamic"]["policies"]),
-            ("STATIC", "FULL_FEEDBACK"),
+            ("STATIC", "PASSIVE_FULL", "ACTIVE_FULL"),
+        )
+        self.assertEqual(config["phase4b"]["dynamic"]["repeats"], 3)
+        self.assertIn(
+            "accepted_active_smoke_audit", config["phase4b"]["dynamic"]
         )
         self.assertEqual(len(config["phase4b"]["dynamic"]["traces"]), 2)
         endpoints = {item["endpoint_id"]: item["node"] for item in config["endpoints"]}
@@ -178,6 +182,7 @@ class Phase4BPolicyTests(unittest.TestCase):
         self.assertIn("export XPYD_PHASE4B_ORACLE_SUMMARY", source)
         self.assertIn('args+=(--stage "${XPYD_PHASE4B_STAGE}")', source)
         self.assertIn("export XPYD_PHASE4B_ACCEPTED_STATIONARY_AUDIT", source)
+        self.assertIn("export XPYD_PHASE4B_ACCEPTED_ACTIVE_SMOKE_AUDIT", source)
 
     def test_dynamic_reaction_requires_new_state_observation(self):
         signatures = ("A", "B")

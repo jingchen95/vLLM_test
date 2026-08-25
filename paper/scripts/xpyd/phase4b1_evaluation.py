@@ -27,7 +27,12 @@ from xpyd.phase4b_evaluation import (
     Phase4BEvaluationHarness,
     load_config as load_phase4b_config,
 )
-from xpyd.route_probing import ContextRouteCostStore, RouteProbeDecision, SafeRouteProber
+from xpyd.route_probing import (
+    ContextRouteCostStore,
+    RouteProbeDecision,
+    SafeRouteProber,
+    probe_safe_routes,
+)
 
 
 class Phase4B1Error(Phase4BError):
@@ -36,48 +41,6 @@ class Phase4B1Error(Phase4BError):
 
 def _route_key(route: Sequence[str]) -> str:
     return "%s->%s" % (str(route[0]), str(route[1]))
-
-
-def _probe_safe_routes(
-    context: ControllerContext, evaluations: Sequence[Any], now_s: float,
-    headroom_fraction: float,
-) -> tuple[list[list[str]], dict[str, list[str]]]:
-    """Apply stricter probe gates on top of the existing eligible-route gates."""
-    safe: list[list[str]] = []
-    reasons: dict[str, list[str]] = {}
-    scheduler = context.scheduler
-    for evaluation in evaluations:
-        route = [evaluation.prefill_endpoint_id, evaluation.decode_endpoint_id]
-        key = _route_key(route)
-        failures: list[str] = []
-        if not evaluation.eligible:
-            failures.append(str(evaluation.reason))
-        for endpoint_id in route:
-            spec = context.registry.get_spec(endpoint_id)
-            state = context.registry.get_state(endpoint_id)
-            snapshot = context.telemetry.snapshot(endpoint_id, now_s=now_s)
-            if not state.healthy:
-                failures.append("%s_unhealthy" % endpoint_id)
-            if not state.queue_depth_observed or state.queue_depth > scheduler.config.dvfs_low_queue_depth:
-                failures.append("%s_queue_not_low" % endpoint_id)
-            if not state.kv_cache_usage_observed or state.kv_cache_usage_frac > scheduler.config.dvfs_low_kv_cache_usage_frac:
-                failures.append("%s_kv_not_low" % endpoint_id)
-            if spec.role == "prefill":
-                metric = snapshot.ewma_ttft_ms
-                observed_at = snapshot.last_ttft_observation_s
-                slo = scheduler.config.ttft_slo_ms
-            else:
-                metric = snapshot.ewma_tpot_ms
-                observed_at = snapshot.last_tpot_observation_s
-                slo = scheduler.config.tpot_slo_ms
-            if observed_at is None or now_s - observed_at > scheduler.config.telemetry_max_age_s:
-                failures.append("%s_latency_missing_or_stale" % endpoint_id)
-            if metric is None or slo is None or metric > headroom_fraction * slo:
-                failures.append("%s_probe_headroom_insufficient" % endpoint_id)
-        reasons[key] = sorted(set(failures))
-        if not failures:
-            safe.append(route)
-    return safe, reasons
 
 
 def _pressure_guard_dry_run(all_pairs: Sequence[Sequence[str]]) -> dict[str, Any]:
@@ -254,7 +217,7 @@ class Phase4B1Harness(Phase4BEvaluationHarness):
                             [item.prefill_endpoint_id, item.decode_endpoint_id]
                             for item in evaluations if item.eligible
                         ]
-                        safe_routes, probe_safety = _probe_safe_routes(
+                        safe_routes, probe_safety = probe_safe_routes(
                             context, evaluations, now,
                             float(self.probe_settings["probe_headroom_fraction"]),
                         )
