@@ -114,7 +114,26 @@
       "FULL_FEEDBACK"
     ],
     "stationary_methodology": "Seeded randomized policy-workload blocks. Each feedback block receives one unmeasured observation warmup, then five measured repeats with isolated controller state. Oracle values are loaded only after each physical window for comparison and are never controller inputs.",
-    "dynamic_gate": "Run dynamic traces only after the full stationary audit passes."
+    "dynamic_gate": "Run dynamic traces only after the full stationary audit passes.",
+    "dynamic": {
+      "output_root": "results/phase4b_dynamic_evaluation",
+      "accepted_stationary_audit": "$XPYD_PHASE4B_ACCEPTED_STATIONARY_AUDIT",
+      "policies": ["STATIC", "FULL_FEEDBACK"],
+      "windows_per_state": 3,
+      "requests_per_window": 2,
+      "order_seed": 43,
+      "traces": [
+        {
+          "id": "light_prefill_light",
+          "states": ["small_light", "prefill_heavy", "small_light"]
+        },
+        {
+          "id": "decode_both_decode",
+          "states": ["decode_heavy", "both_heavy", "decode_heavy"]
+        }
+      ],
+      "methodology": "Each policy/trace block is contiguous. FULL_FEEDBACK receives one unmeasured first-state observation warmup. At a transition, the first decision uses only the previously observed workload context; the new state becomes feedback context only after its first completed window. Three windows per state allow one blind transition window, one reaction opportunity, and one settling check."
+    }
   },
   "server_logs": {
     "P0": "$XPYD_P0_SERVER_LOG", "P1": "$XPYD_P1_SERVER_LOG",

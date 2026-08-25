@@ -82,6 +82,8 @@ XPYD_PHASE4B_CONFIG="${XPYD_PHASE4B_CONFIG:-}"
 XPYD_PHASE4B_RUN_ID="${XPYD_PHASE4B_RUN_ID:-}"
 XPYD_PHASE4B_ORACLE_SUMMARY="${XPYD_PHASE4B_ORACLE_SUMMARY:-}"
 XPYD_PHASE4B_SMOKE="${XPYD_PHASE4B_SMOKE:-0}"
+XPYD_PHASE4B_STAGE="${XPYD_PHASE4B_STAGE:-stationary}"
+XPYD_PHASE4B_ACCEPTED_STATIONARY_AUDIT="${XPYD_PHASE4B_ACCEPTED_STATIONARY_AUDIT:-}"
 XPYD_ROUTING_CONTROL_FILE="${XPYD_ROUTING_CONTROL_FILE:-}"
 XPYD_NO_GPU_MUTATION="${XPYD_NO_GPU_MUTATION:-0}"
 _xpyd_mode_count=0
@@ -1474,6 +1476,7 @@ run_phase3c_substrate() {
     export XPYD_PHASE3D_ACCEPTED_ACTUATOR_AUDIT
     export XPYD_PHASE4A_ACCEPTED_ACTUATOR_AUDIT XPYD_PHASE4A_ACCEPTED_CLOSED_LOOP_AUDIT
     export XPYD_PHASE4B_ORACLE_SUMMARY
+    export XPYD_PHASE4B_ACCEPTED_STATIONARY_AUDIT
     if [ -n "${XPYD_PHASE3D_CONFIG}" ]; then
         if [ "${XPYD_PHASE3D_STAGE}" = "B" ]; then
             XPYD_ROUTING_CONTROL_FILE="${XPYD_ROUTING_CONTROL_FILE:-${RESULT_DIR}/xpyd_phase3d_route_control_${SLURM_JOB_ID:-local}.json}"
@@ -1537,6 +1540,7 @@ run_phase3c_substrate() {
         args=(-m xpyd.phase4b_evaluation --config "${XPYD_PHASE4B_CONFIG}")
         [ -n "${XPYD_PHASE4B_RUN_ID}" ] && args+=(--run-id "${XPYD_PHASE4B_RUN_ID}")
         [ "${XPYD_PHASE4B_SMOKE}" = "1" ] && args+=(--smoke)
+        args+=(--stage "${XPYD_PHASE4B_STAGE}")
     elif [ -n "${XPYD_PHASE4A_CONFIG}" ]; then
         args=(-m xpyd.phase4a_oracle --config "${XPYD_PHASE4A_CONFIG}")
         [ -n "${XPYD_PHASE4A_RUN_ID}" ] && args+=(--run-id "${XPYD_PHASE4A_RUN_ID}")
@@ -1752,7 +1756,7 @@ CONNECTOR_PATCH_EOF
         run_phase3c_substrate || phase3c_status=$?
         if [ "${phase3c_status}" -eq 0 ]; then
             if [ -n "${XPYD_PHASE4B_CONFIG}" ]; then
-                echo "phase4b_stationary_complete" > "${exp_dir}/status.txt"
+                echo "phase4b_${XPYD_PHASE4B_STAGE}_complete" > "${exp_dir}/status.txt"
             elif [ -n "${XPYD_PHASE4A_CONFIG}" ]; then
                 echo "phase4a_complete" > "${exp_dir}/status.txt"
             elif [ -n "${XPYD_PHASE3D_CONFIG}" ]; then

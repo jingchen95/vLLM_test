@@ -39,6 +39,27 @@ falls back to fixed P0->D0 at safe HIGH. Requested and observed frequencies,
 fallbacks, successful physical actions, routing changes, and freshness are
 recorded separately.
 
+## Dynamic stage
+
+After the full stationary audit passes, the separate dynamic stage compares
+`STATIC` and `FULL_FEEDBACK` on two small traces:
+
+- `small_light -> prefill_heavy -> small_light`;
+- `decode_heavy -> both_heavy -> decode_heavy`.
+
+Each state lasts three measured windows. This provides one blind transition
+window, one feedback-reaction opportunity after observing the new state, and
+one settling check. At the transition itself, the scheduler receives only the
+previously observed workload context. The new context is recorded for decisions
+only after its first window completes. The context label is diagnostic—the
+unchanged Phase 3D scheduler still uses measured endpoint telemetry only.
+
+Dynamic reporting distinguishes a measured reaction from a stable regime that
+needed no action. It records reaction latency, descriptive settling time,
+transition and cumulative energy, SLO violations, actions, route/frequency
+state, oscillations/reversals, fallbacks, and partial telemetry staleness. A
+piecewise Phase 4A oracle is post-hoc context only and never a controller input.
+
 ## Claim and stage boundary
 
 The stationary stage must pass before dynamic traces are run. A smoke run uses
@@ -49,7 +70,8 @@ separate dynamic stage.
 
 This deliberate gate prevents a stationary failure from being obscured by a
 later dynamic trace. The final A/B/C decision about feedback sufficiency remains
-pending until dynamic traces are complete.
+pending until dynamic traces are complete and stationary/dynamic evidence is
+combined.
 
 ## Outputs
 
@@ -57,6 +79,7 @@ Outputs appear under `results/phase4b_evaluation/<run-id>/`:
 
 - `phase4b_stationary_results.csv`: one row per measured repeat;
 - `phase4b_dynamic_results.csv`: header-only until the gated dynamic stage;
+- `phase4b_dynamic_adaptation.csv`: one row per measured workload transition;
 - `phase4b_policy_summary.csv`: mean, sample standard deviation, CI, latency
   tails, SLO violations, route distribution, frequency residency, and actions;
 - `phase4b_oracle_gap.csv`: normalized energy comparison and <=5%/5-10%/>10%
@@ -86,3 +109,11 @@ XPYD_PHASE4B_ORACLE_SUMMARY=results/phase4a_empirical_oracle/phase4a_oracle_r1_2
 Optionally set `XPYD_PHASE4B_RUN_ID`. Set `XPYD_PHASE4B_SMOKE=1` for the
 one-repeat physical smoke. The regular run uses all five repeats.
 
+For the gated dynamic stage, additionally set:
+
+```bash
+XPYD_PHASE4B_STAGE=dynamic
+XPYD_PHASE4B_ACCEPTED_STATIONARY_AUDIT=results/phase4b_evaluation/<accepted-run>/phase4b_audit.json
+```
+
+The default stage is `stationary`.

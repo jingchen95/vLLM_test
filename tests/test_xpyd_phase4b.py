@@ -14,6 +14,7 @@ from xpyd.phase4b_evaluation import (
     exact_near_optimal_match,
     load_config,
     load_phase4a_reference,
+    summarize_dynamic_adaptation,
     summarize_stationary,
 )
 from xpyd.phase3d_control import (
@@ -57,6 +58,11 @@ class Phase4BPolicyTests(unittest.TestCase):
         )
         self.assertEqual(tuple(config["phase4b"]["policies"]), POLICIES)
         self.assertEqual(len(config["workloads"]), 4)
+        self.assertEqual(
+            tuple(config["phase4b"]["dynamic"]["policies"]),
+            ("STATIC", "FULL_FEEDBACK"),
+        )
+        self.assertEqual(len(config["phase4b"]["dynamic"]["traces"]), 2)
         endpoints = {item["endpoint_id"]: item["node"] for item in config["endpoints"]}
         self.assertEqual(endpoints, {
             "P0": "neptune", "P1": "neptune", "D0": "io", "D1": "io",
@@ -163,6 +169,65 @@ class Phase4BPolicyTests(unittest.TestCase):
         self.assertIn('XPYD_PHASE4B_CONFIG="${XPYD_PHASE4B_CONFIG:-}"', source)
         self.assertIn('args=(-m xpyd.phase4b_evaluation --config "${XPYD_PHASE4B_CONFIG}")', source)
         self.assertIn("export XPYD_PHASE4B_ORACLE_SUMMARY", source)
+        self.assertIn('args+=(--stage "${XPYD_PHASE4B_STAGE}")', source)
+        self.assertIn("export XPYD_PHASE4B_ACCEPTED_STATIONARY_AUDIT", source)
+
+    def test_dynamic_reaction_requires_new_state_observation(self):
+        signatures = ("A", "B")
+        rows = []
+        controls = []
+        requests = []
+        sequence = 0
+        for state_index, state_signatures in enumerate((
+            ("A", "A", "A"),
+            ("A", "B", "B"),
+            ("B", "B", "B"),
+        )):
+            for window_in_state, signature in enumerate(state_signatures, 1):
+                sequence += 1
+                control_id = "c%d" % sequence
+                rows.append({
+                    "trace_id": "trace", "policy": "FULL_FEEDBACK",
+                    "sequence_index": sequence, "state_index": state_index,
+                    "window_in_state": window_in_state,
+                    "transition_timestamp_unix_s": state_index * 10.0,
+                    "control_timestamp_unix_s": state_index * 10.0 + window_in_state * 2.5,
+                    "control_state_signature": signature,
+                    "control_iteration_id": control_id,
+                    "total_gpu_gross_energy_j": 100.0,
+                })
+                controls.append({
+                    "control_iteration_id": control_id,
+                    "dvfs_action_count": int(signature == signatures[1]),
+                    "routing_changed": False, "fallback_reason": None,
+                    "telemetry_fresh": True,
+                })
+                requests.append({
+                    "trace_id": "trace", "policy": "FULL_FEEDBACK",
+                    "state_index": state_index,
+                    "ttft_ms": 500.0, "tpot_ms": 60.0,
+                })
+        summary = summarize_dynamic_adaptation(
+            rows, controls, requests,
+            [{"id": "trace", "states": ["light", "heavy", "light"]}],
+            ["FULL_FEEDBACK"], 1000.0, 80.0,
+        )
+        self.assertEqual(len(summary), 2)
+        first = summary[0]
+        self.assertTrue(first["reaction_observed"])
+        self.assertAlmostEqual(first["time_to_first_reaction_s"], 5.0)
+        self.assertAlmostEqual(first["settling_time_s"], 5.0)
+        second = summary[1]
+        self.assertFalse(second["reaction_observed"])
+        self.assertEqual(second["settling_time_s"], 0.0)
+
+    def test_dynamic_stationary_audit_path_uses_environment_expansion(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "paper/scripts/xpyd/phase4b_evaluation.py").read_text()
+        self.assertIn(
+            'Path(os.path.expandvars(str(dynamic["accepted_stationary_audit"])))',
+            source,
+        )
 
     def test_missing_feedback_fails_closed_without_oracle_input(self):
         root = Path(__file__).resolve().parents[1]

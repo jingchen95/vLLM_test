@@ -316,17 +316,163 @@ def summarize_stationary(
     return result
 
 
+def summarize_dynamic_adaptation(
+    rows: Sequence[Mapping[str, Any]],
+    controls: Sequence[Mapping[str, Any]],
+    requests: Sequence[Mapping[str, Any]],
+    trace_specs: Sequence[Mapping[str, Any]],
+    policies: Sequence[str],
+    ttft_slo_ms: float,
+    tpot_slo_ms: float,
+) -> list[dict[str, Any]]:
+    """Summarize each real workload transition without inventing a reaction."""
+    control_by_id = {
+        str(item["control_iteration_id"]): item for item in controls
+    }
+    result = []
+    for trace_spec in trace_specs:
+        trace_id = str(trace_spec["id"])
+        for policy in policies:
+            trace_rows = sorted(
+                (
+                    item for item in rows
+                    if item["trace_id"] == trace_id and item["policy"] == policy
+                ),
+                key=lambda item: int(item["sequence_index"]),
+            )
+            trace_requests = [
+                item for item in requests
+                if item["trace_id"] == trace_id and item["policy"] == policy
+            ]
+            cumulative_energy = sum(
+                float(item["total_gpu_gross_energy_j"]) for item in trace_rows
+            )
+            for state_index in range(1, len(trace_spec["states"])):
+                state_rows = [
+                    item for item in trace_rows
+                    if int(item["state_index"]) == state_index
+                ]
+                previous_rows = [
+                    item for item in trace_rows
+                    if int(item["state_index"]) == state_index - 1
+                ]
+                if not state_rows or not previous_rows:
+                    continue
+                transition_s = float(state_rows[0]["transition_timestamp_unix_s"])
+                prior_signature = str(previous_rows[-1]["control_state_signature"])
+                state_signatures = [
+                    str(item["control_state_signature"]) for item in state_rows
+                ]
+                reaction_row = None
+                prior = prior_signature
+                for item in state_rows:
+                    changed = str(item["control_state_signature"]) != prior
+                    # Window 1 is deliberately blind to the new state. Only a
+                    # change after at least one completed new-state window is
+                    # attributable to feedback from that transition.
+                    if int(item["window_in_state"]) >= 2 and changed:
+                        reaction_row = item
+                        break
+                    prior = str(item["control_state_signature"])
+                stable_index = 0
+                for index, signature in enumerate(state_signatures):
+                    if all(value == signature for value in state_signatures[index:]):
+                        stable_index = index
+                        break
+                settling_s = (
+                    0.0 if stable_index == 0 else
+                    max(
+                        0.0,
+                        float(state_rows[stable_index]["control_timestamp_unix_s"])
+                        - transition_s,
+                    )
+                )
+                signature_changes = sum(
+                    state_signatures[index] != (
+                        prior_signature if index == 0 else state_signatures[index - 1]
+                    )
+                    for index in range(len(state_signatures))
+                )
+                transition_requests = [
+                    item for item in trace_requests
+                    if int(item["state_index"]) == state_index
+                ]
+                violations = sum(
+                    float(item["ttft_ms"]) > ttft_slo_ms
+                    or float(item["tpot_ms"]) > tpot_slo_ms
+                    for item in transition_requests
+                )
+                state_controls = [
+                    control_by_id[str(item["control_iteration_id"])]
+                    for item in state_rows
+                ]
+                result.append({
+                    "trace_id": trace_id,
+                    "policy": policy,
+                    "transition_index": state_index,
+                    "from_workload": str(trace_spec["states"][state_index - 1]),
+                    "to_workload": str(trace_spec["states"][state_index]),
+                    "transition_timestamp_unix_s": transition_s,
+                    "reaction_observed": reaction_row is not None,
+                    "time_to_first_reaction_s": (
+                        max(
+                            0.0,
+                            float(reaction_row["control_timestamp_unix_s"]) - transition_s,
+                        ) if reaction_row else None
+                    ),
+                    "settling_time_s": settling_s,
+                    "stable_for_remaining_observed_windows": True,
+                    "no_action_needed_or_no_observed_reaction": reaction_row is None,
+                    "transition_window_energy_j": float(
+                        state_rows[0]["total_gpu_gross_energy_j"]
+                    ),
+                    "state_energy_j": sum(
+                        float(item["total_gpu_gross_energy_j"]) for item in state_rows
+                    ),
+                    "cumulative_trace_energy_j": cumulative_energy,
+                    "slo_violation_count": violations,
+                    "slo_violation_rate": (
+                        violations / len(transition_requests)
+                        if transition_requests else None
+                    ),
+                    "control_action_count": sum(
+                        int(item.get("dvfs_action_count", 0)) for item in state_controls
+                    ),
+                    "routing_change_count": sum(
+                        bool(item.get("routing_changed")) for item in state_controls
+                    ),
+                    "oscillation_or_reversal_count": max(0, signature_changes - 1),
+                    "fallback_event_count": sum(
+                        bool(item.get("fallback_reason")) for item in state_controls
+                    ),
+                    "stale_telemetry_event_count": sum(
+                        not bool(item.get("telemetry_fresh")) for item in state_controls
+                    ),
+                })
+    return result
+
+
 class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
     """Physical stationary comparison with isolated feedback state per block."""
 
     def __init__(
         self, config: Mapping[str, Any], run_id: Optional[str] = None,
         backend: Optional[NvidiaSmiClockBackend] = None, smoke: bool = False,
+        stage: str = "stationary",
     ) -> None:
         super().__init__(config, run_id=run_id, backend=backend)
         self.settings = dict(self.config["phase4b"])
         self.smoke = bool(smoke)
-        root = self.settings.get("output_root", "results/phase4b_evaluation")
+        self.stage = str(stage)
+        if self.stage not in {"stationary", "dynamic"}:
+            raise Phase4BError("Phase 4B stage must be stationary or dynamic")
+        root = (
+            self.settings["dynamic"].get(
+                "output_root", "results/phase4b_dynamic_evaluation"
+            )
+            if self.stage == "dynamic"
+            else self.settings.get("output_root", "results/phase4b_evaluation")
+        )
         self.run_dir = Path(os.path.expandvars(str(root))) / self.run_id
         self.control_rows: list[dict[str, Any]] = []
         self.actuator_rows: list[dict[str, Any]] = []
@@ -426,7 +572,7 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
         self, policy: str, workload: str, iteration_id: str,
         context: ControllerContext, capabilities: Mapping[str, EndpointClockCapability],
         actuator: PerEndpointClockActuator, all_pairs: Sequence[Sequence[str]],
-        *, measured_iteration: bool,
+        *, measured_iteration: bool, feedback_context_key: Optional[str] = None,
     ) -> list[list[str]]:
         self._actuate(
             actuator, context, context.target_frequencies,
@@ -452,6 +598,7 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
         fallback_reason = None
         evaluations: Sequence[Any] = ()
         recommendations: Sequence[Any] = ()
+        observed_context = feedback_context_key or workload
         if policy == "STATIC":
             pairs = [list(item) for item in all_pairs]
             self._actuate(
@@ -478,12 +625,12 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
         else:
             if feedback_routing:
                 evaluations = context.scheduler.evaluate_routes(
-                    now_s=now, workload_context_key=workload
+                    now_s=now, workload_context_key=observed_context
                 )
                 eligible = [item for item in evaluations if item.eligible]
                 if eligible:
                     route = context.scheduler.choose_route(
-                        now_s=now, workload_context_key=workload
+                        now_s=now, workload_context_key=observed_context
                     )
                     pairs = [[route.prefill_endpoint_id, route.decode_endpoint_id]]
                 else:
@@ -531,6 +678,7 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
             "control_iteration_id": iteration_id,
             "policy": policy,
             "workload": workload,
+            "feedback_context_key": observed_context,
             "measured_iteration": measured_iteration,
             "telemetry_fresh": telemetry_fresh,
             "stale_endpoint_ids_json": json.dumps(sorted(stale_endpoints)),
@@ -606,6 +754,8 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
             "output_len": int(workload["output_len"]),
             "rate_rps": float(workload["rate_rps"]),
             "repeat": repeat,
+            "timing_start_unix_s": float(client["timing_start_unix_s"]),
+            "timing_end_unix_s": float(client["timing_end_unix_s"]),
             "duration_s": duration,
             "completed_requests": int(client["successful_requests"]),
             "output_tokens": int(client["output_tokens_total"]),
@@ -812,6 +962,7 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
         stationary_fields = (
             "run_id", "window_id", "policy", "workload", "input_len",
             "output_len", "rate_rps", "repeat", "duration_s",
+            "timing_start_unix_s", "timing_end_unix_s",
             "completed_requests", "output_tokens", "measurement_valid", "slo_pass",
             "total_gpu_gross_energy_j", "joules_per_request",
             "joules_per_output_token", "mean_ttft_ms", "p99_ttft_ms",
@@ -846,7 +997,7 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
         _csv(self.run_dir / "phase4b_oracle_gap.csv", oracle_gap_rows, tuple(oracle_gap_rows[0]) if oracle_gap_rows else ())
         _csv(self.run_dir / "phase4b_control_actions.csv", self.control_rows, (
             "control_timestamp", "control_iteration_id", "policy", "workload",
-            "measured_iteration", "telemetry_fresh", "fallback_reason",
+            "feedback_context_key", "measured_iteration", "telemetry_fresh", "fallback_reason",
             "stale_endpoint_ids_json", "stale_endpoint_ages_s_json",
             "selected_pairs_json", "requested_frequencies_json", "routing_changed",
             "dvfs_action_count", "candidate_evaluations_json",
@@ -958,6 +1109,441 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
         print(self.run_dir.as_posix())
         return self.run_dir
 
+    def run_dynamic(self) -> Path:
+        """Run gated STATIC vs FULL-FEEDBACK workload transitions."""
+        if self.run_dir.exists():
+            raise Phase4BError("run directory already exists: %s" % self.run_dir)
+        dynamic = dict(self.settings["dynamic"])
+        stationary_path = Path(os.path.expandvars(str(dynamic["accepted_stationary_audit"])))
+        if not stationary_path.is_file():
+            raise Phase4BError("missing accepted Phase 4B stationary audit")
+        stationary_raw = stationary_path.read_bytes()
+        stationary_audit = json.loads(stationary_raw)
+        if not stationary_audit.get("valid") or stationary_audit.get("smoke"):
+            raise Phase4BError("dynamic stage requires a valid non-smoke stationary audit")
+        windows_root = self.run_dir / "raw" / "windows"
+        windows_root.mkdir(parents=True)
+        reference = self._reference()
+        accepted = self._accepted_frequencies(reference)
+        capabilities = self._discover_exact(accepted)
+        _write_json(self.run_dir / "raw" / "capabilities.json", {
+            key: asdict(value) for key, value in capabilities.items()
+        })
+        _write_json(self.run_dir / "raw" / "accepted_stationary_reference.json", {
+            "path": stationary_path.as_posix(),
+            "sha256": hashlib.sha256(stationary_raw).hexdigest(),
+            "valid": True,
+        })
+        _write_json(self.run_dir / "raw" / "frozen_phase4a_reference.json", {
+            "path": reference["path"], "sha256": reference["sha256"],
+            "oracles": reference["oracles"],
+        })
+        actuator = PerEndpointClockActuator(
+            self.backend, capabilities,
+            float(self.config["phase3d"].get("minimum_dwell_s", 1.0)),
+        )
+        high = {
+            endpoint_id: values["HIGH"] for endpoint_id, values in accepted.items()
+        }
+        actuator.requested.update(high)
+        _, _, all_pairs = build_registry_and_compatibility(self.config)
+        policies = list(dynamic["policies"])
+        trace_specs = [dict(item) for item in dynamic["traces"]]
+        if self.smoke:
+            trace_specs = trace_specs[:1]
+        windows_per_state = 1 if self.smoke else int(dynamic["windows_per_state"])
+        request_count = int(dynamic["requests_per_window"])
+        workload_by_id = {
+            str(item["id"]): dict(item) for item in self.config["workloads"]
+        }
+        blocks = [(policy, trace) for policy in policies for trace in trace_specs]
+        random.Random(int(dynamic.get("order_seed", 43))).shuffle(blocks)
+        _write_json(self.run_dir / "raw" / "dynamic_plan.json", {
+            "smoke": self.smoke,
+            "policies": policies,
+            "traces": trace_specs,
+            "windows_per_state": windows_per_state,
+            "requests_per_window": request_count,
+            "block_order": [
+                {"policy": policy, "trace_id": trace["id"]}
+                for policy, trace in blocks
+            ],
+            "transition_information_policy": (
+                "the first decision after a state change receives only the prior "
+                "observed workload context; the new context is available only "
+                "after its first completed measurement window"
+            ),
+            "models": [],
+        })
+        rows: list[dict[str, Any]] = []
+        request_rows: list[dict[str, Any]] = []
+        warmup_audits: list[dict[str, Any]] = []
+        restoration_valid = False
+        error: Optional[str] = None
+        sequence_index = 0
+        try:
+            global_context = self._new_context(capabilities)
+            self._actuate(
+                actuator, global_context, high, "phase4b_dynamic_global_warmup_high",
+                controller_action=False, policy="WARMUP", workload="all",
+                iteration_id="dynamic-global-warmup",
+            )
+            self._write_routes(all_pairs, "phase4b_dynamic_global_all_route_warmup")
+            global_dir = self._run_window(
+                "dynamic-global-warmup",
+                {"id": "dynamic_global_warmup", "input_len": 128,
+                 "output_len": 16, "rate_rps": 0.5},
+                4, high, all_pairs, windows_root, require_all_pairs=True,
+            )
+            global_audit = _read_json(global_dir / "audit.json")
+            warmup_audits.append({"window_id": "dynamic-global-warmup", **global_audit})
+            if not global_audit.get("valid"):
+                raise Phase4BError("dynamic global all-route warmup failed")
+
+            for block_index, (policy, trace) in enumerate(blocks, 1):
+                trace_id = str(trace["id"])
+                states = [str(item) for item in trace["states"]]
+                context = self._new_context(capabilities)
+                if policy == "FULL_FEEDBACK":
+                    first_workload = workload_by_id[states[0]]
+                    warmup_id = "dyn-warm-%02d-%s" % (block_index, trace_id)
+                    self._actuate(
+                        actuator, context, high, "phase4b_dynamic_feedback_warmup_high",
+                        controller_action=False, policy=policy,
+                        workload=states[0], iteration_id=warmup_id,
+                    )
+                    initial_pairs = [list(item) for item in all_pairs]
+                    context.selected_pairs = copy.deepcopy(initial_pairs)
+                    self._write_routes(
+                        initial_pairs, "phase4b_dynamic_feedback_observation_warmup"
+                    )
+                    warmup_dir = self._run_window(
+                        warmup_id, first_workload, 4, high, initial_pairs,
+                        windows_root, require_all_pairs=True,
+                    )
+                    warmup_audit = _read_json(warmup_dir / "audit.json")
+                    warmup_audits.append({"window_id": warmup_id, **warmup_audit})
+                    if not warmup_audit.get("valid"):
+                        raise Phase4BError("dynamic feedback warmup failed: %s" % warmup_id)
+                    self._observe_window(
+                        warmup_id, warmup_dir, context.registry, context.telemetry
+                    )
+
+                previous_observed_context = states[0]
+                for state_index, workload_id in enumerate(states):
+                    workload = workload_by_id[workload_id]
+                    transition_s = time.time()
+                    for window_in_state in range(1, windows_per_state + 1):
+                        sequence_index += 1
+                        iteration_id = "t%02d-s%02d-w%02d-%s-%s" % (
+                            block_index, state_index, window_in_state,
+                            policy.lower(), trace_id,
+                        )
+                        # The first decision at a transition cannot know the
+                        # new state. Subsequent decisions may use observations
+                        # from the first completed new-state window.
+                        feedback_context = (
+                            previous_observed_context
+                            if state_index > 0 and window_in_state == 1
+                            else workload_id
+                        )
+                        pairs = self._decide(
+                            policy, workload_id, iteration_id, context,
+                            capabilities, actuator, all_pairs,
+                            measured_iteration=True,
+                            feedback_context_key=feedback_context,
+                        )
+                        control = self.control_rows[-1]
+                        window_dir = self._run_window(
+                            iteration_id, workload, request_count,
+                            context.target_frequencies, pairs, windows_root,
+                        )
+                        base_row, observed_requests = self._measurement_row(
+                            iteration_id, policy, workload, window_in_state,
+                            context, accepted, reference, window_dir,
+                        )
+                        signature = json.dumps({
+                            "pairs": context.selected_pairs,
+                            "frequencies": context.target_frequencies,
+                        }, sort_keys=True)
+                        dynamic_row = {
+                            **base_row,
+                            "trace_id": trace_id,
+                            "sequence_index": sequence_index,
+                            "state_index": state_index,
+                            "window_in_state": window_in_state,
+                            "workload_changed": state_index > 0 and window_in_state == 1,
+                            "transition_timestamp_unix_s": transition_s,
+                            "control_iteration_id": iteration_id,
+                            "control_timestamp_unix_s": control["control_timestamp"],
+                            "feedback_context_key": feedback_context,
+                            "control_state_signature": signature,
+                            "dvfs_action_count": control["dvfs_action_count"],
+                            "routing_changed": control["routing_changed"],
+                            "fallback_reason": control["fallback_reason"],
+                            "stale_endpoint_ids_json": control["stale_endpoint_ids_json"],
+                        }
+                        rows.append(dynamic_row)
+                        for item in observed_requests:
+                            request_rows.append({
+                                **item,
+                                "trace_id": trace_id,
+                                "state_index": state_index,
+                                "window_in_state": window_in_state,
+                            })
+                        if not base_row["measurement_valid"]:
+                            raise Phase4BError(
+                                "dynamic window audit failed: %s" % iteration_id
+                            )
+                        if policy == "FULL_FEEDBACK":
+                            self._observe_window(
+                                iteration_id, window_dir,
+                                context.registry, context.telemetry,
+                            )
+                        previous_observed_context = workload_id
+        except Exception as exc:
+            error = "%s: %s" % (type(exc).__name__, exc)
+        finally:
+            restoration_valid = True
+            restore_context = self._new_context(capabilities)
+            try:
+                self._actuate(
+                    actuator, restore_context, high,
+                    "phase4b_dynamic_final_safe_high_restoration",
+                    controller_action=False, policy="RESTORE", workload="all",
+                    iteration_id="dynamic-final-restore",
+                )
+                restoration_valid = all(
+                    actuator.read(endpoint_id).graphics_clock_mhz == target
+                    for endpoint_id, target in high.items()
+                )
+            except Exception:
+                restoration_valid = False
+
+        adaptation = summarize_dynamic_adaptation(
+            rows, self.control_rows, request_rows, trace_specs, policies,
+            float(self.settings["slo"]["ttft_ms"]),
+            float(self.settings["slo"]["tpot_ms"]),
+        )
+        policy_summaries = []
+        for policy in policies:
+            for trace in trace_specs:
+                trace_id = str(trace["id"])
+                group = [
+                    item for item in rows
+                    if item["policy"] == policy and item["trace_id"] == trace_id
+                ]
+                group_requests = [
+                    item for item in request_rows
+                    if item["policy"] == policy and item["trace_id"] == trace_id
+                ]
+                total_energy = sum(
+                    float(item["total_gpu_gross_energy_j"]) for item in group
+                )
+                offline_piecewise_oracle = sum(
+                    float(reference["oracles"][str(item["workload"])]["J_per_request"])
+                    * int(item["completed_requests"])
+                    for item in group
+                )
+                violations = sum(
+                    float(item["ttft_ms"]) > float(self.settings["slo"]["ttft_ms"])
+                    or float(item["tpot_ms"]) > float(self.settings["slo"]["tpot_ms"])
+                    for item in group_requests
+                )
+                policy_summaries.append({
+                    "policy": policy,
+                    "trace_id": trace_id,
+                    "window_count": len(group),
+                    "request_count": len(group_requests),
+                    "total_gpu_gross_energy_j": total_energy,
+                    "joules_per_request": (
+                        total_energy / len(group_requests) if group_requests else None
+                    ),
+                    "offline_piecewise_phase4a_oracle_energy_j": offline_piecewise_oracle,
+                    "offline_piecewise_oracle_gap": (
+                        (total_energy - offline_piecewise_oracle) / offline_piecewise_oracle
+                        if offline_piecewise_oracle else None
+                    ),
+                    "slo_violation_count": violations,
+                    "slo_violation_rate": (
+                        violations / len(group_requests) if group_requests else None
+                    ),
+                    "measurement_valid": bool(group) and all(
+                        item["measurement_valid"] for item in group
+                    ),
+                    "dvfs_action_count": sum(
+                        int(item["dvfs_action_count"]) for item in group
+                    ),
+                    "routing_change_count": sum(
+                        bool(item["routing_changed"]) for item in group
+                    ),
+                    "fallback_event_count": sum(
+                        bool(item["fallback_reason"]) for item in group
+                    ),
+                    "stale_telemetry_event_count": sum(
+                        bool(json.loads(item["stale_endpoint_ids_json"]))
+                        for item in group
+                    ),
+                })
+
+        dynamic_fields = (
+            "run_id", "trace_id", "sequence_index", "policy", "state_index",
+            "window_in_state", "workload", "workload_changed",
+            "transition_timestamp_unix_s", "control_iteration_id",
+            "control_timestamp_unix_s", "feedback_context_key",
+            "control_state_signature", "timing_start_unix_s", "timing_end_unix_s",
+            "duration_s", "completed_requests", "output_tokens",
+            "measurement_valid", "slo_pass", "total_gpu_gross_energy_j",
+            "joules_per_request", "joules_per_output_token", "mean_ttft_ms",
+            "p99_ttft_ms", "mean_tpot_ms", "p99_tpot_ms", "mean_itl_ms",
+            "mean_e2e_latency_ms", "throughput_requests_s",
+            "route_distribution_json", "selected_pairs_json",
+            "P0_requested_freq_mhz", "P0_requested_level", "P0_observed_freq_mhz",
+            "P1_requested_freq_mhz", "P1_requested_level", "P1_observed_freq_mhz",
+            "D0_requested_freq_mhz", "D0_requested_level", "D0_observed_freq_mhz",
+            "D1_requested_freq_mhz", "D1_requested_level", "D1_observed_freq_mhz",
+            "dvfs_action_count", "routing_changed", "fallback_reason",
+            "stale_endpoint_ids_json", "oracle_gap", "oracle_gap_class",
+            "hard_gates_json",
+        )
+        _csv(self.run_dir / "phase4b_dynamic_results.csv", rows, dynamic_fields)
+        _csv(self.run_dir / "phase4b_dynamic_adaptation.csv", adaptation,
+             tuple(adaptation[0]) if adaptation else ())
+        _csv(self.run_dir / "phase4b_policy_summary.csv", policy_summaries,
+             tuple(policy_summaries[0]) if policy_summaries else ())
+        oracle_rows = [{
+            key: item[key] for key in (
+                "policy", "trace_id", "total_gpu_gross_energy_j",
+                "offline_piecewise_phase4a_oracle_energy_j",
+                "offline_piecewise_oracle_gap", "slo_violation_count",
+                "slo_violation_rate",
+            )
+        } for item in policy_summaries]
+        _csv(self.run_dir / "phase4b_oracle_gap.csv", oracle_rows,
+             tuple(oracle_rows[0]) if oracle_rows else ())
+        _csv(self.run_dir / "phase4b_control_actions.csv", self.control_rows, (
+            "control_timestamp", "control_iteration_id", "policy", "workload",
+            "feedback_context_key", "measured_iteration", "telemetry_fresh",
+            "stale_endpoint_ids_json", "stale_endpoint_ages_s_json",
+            "fallback_reason", "selected_pairs_json", "requested_frequencies_json",
+            "routing_changed", "dvfs_action_count", "candidate_evaluations_json",
+            "dvfs_recommendations_json",
+        ))
+        _csv(self.run_dir / "raw" / "dynamic_requests.csv", request_rows, (
+            "trace_id", "state_index", "window_in_state", "window_id", "policy",
+            "workload", "repeat", "request_id", "prefill_endpoint_id",
+            "decode_endpoint_id", "ttft_ms", "tpot_ms", "mean_itl_ms",
+            "e2e_latency_ms",
+        ))
+        _csv(self.run_dir / "raw" / "actuator_actions.csv", self.actuator_rows, (
+            "timestamp_unix_s", "policy", "workload", "control_iteration_id",
+            "controller_action", "endpoint_id", "node", "gpu_id",
+            "previous_requested_freq_mhz", "requested_freq_mhz",
+            "observed_freq_before_mhz", "observed_freq_after_mhz",
+            "command_status", "readback_valid", "transition_readback_latency_s",
+            "reason", "error",
+        ))
+        _csv(self.run_dir / "raw" / "endpoint_telemetry.csv", self.telemetry_rows, (
+            "window_id", "endpoint_id", "timestamp_s", "health", "queue",
+            "kv_cache_usage_frac", "ttft_ms", "tpot_ms", "power_w", "energy_j",
+            "observed_frequency_mhz", "telemetry_age_s_at_observation",
+            "measurement_valid",
+        ))
+        expected = (
+            len(policies)
+            * sum(len(trace["states"]) for trace in trace_specs)
+            * windows_per_state
+        )
+        hard_gates = {
+            "accepted_full_stationary_audit": bool(stationary_audit.get("valid")),
+            "frozen_phase4a_reference_valid": bool(reference["summary"].get("valid")),
+            "complete_dynamic_plan": len(rows) == expected,
+            "all_dynamic_measurements_valid": len(rows) == expected and all(
+                item.get("measurement_valid") for item in rows
+            ),
+            "all_dynamic_warmups_valid": bool(warmup_audits) and all(
+                item.get("valid") for item in warmup_audits
+            ),
+            "transition_context_has_no_future_leak": all(
+                item["feedback_context_key"] != item["workload"]
+                for item in rows if item["workload_changed"]
+            ),
+            "safe_high_restoration": restoration_valid,
+            "no_models_or_online_oracle_inputs": True,
+            "no_unresolved_error": error is None,
+        }
+        valid = all(hard_gates.values())
+        full_rows = [
+            item for item in policy_summaries if item["policy"] == "FULL_FEEDBACK"
+        ]
+        static_rows = {
+            item["trace_id"]: item for item in policy_summaries
+            if item["policy"] == "STATIC"
+        }
+        full_vs_static = {
+            item["trace_id"]: (
+                float(static_rows[item["trace_id"]]["total_gpu_gross_energy_j"])
+                - float(item["total_gpu_gross_energy_j"])
+            ) / float(static_rows[item["trace_id"]]["total_gpu_gross_energy_j"])
+            for item in full_rows if item["trace_id"] in static_rows
+        }
+        audit = {
+            "phase": "4B_dynamic_feedback_adaptation",
+            "valid": valid, "smoke": self.smoke,
+            "hard_gates": hard_gates, "error": error,
+            "accepted_stationary_audit": stationary_path.as_posix(),
+            "accepted_stationary_sha256": hashlib.sha256(stationary_raw).hexdigest(),
+            "warmup_audits": warmup_audits,
+            "models_trained_or_used": [],
+            "oracle_usage": "post-hoc offline piecewise reference only; never a controller input",
+        }
+        _write_json(self.run_dir / "phase4b_audit.json", audit)
+        summary = {
+            "phase": "4B_dynamic_feedback_adaptation",
+            "valid": valid, "smoke": self.smoke,
+            "hard_gates": hard_gates, "error": error,
+            "dynamic_window_count": len(rows),
+            "policy_summaries": policy_summaries,
+            "adaptation_summaries": adaptation,
+            "full_feedback_energy_savings_vs_static": full_vs_static,
+            "full_feedback_slo_safe": bool(full_rows) and all(
+                int(item["slo_violation_count"]) == 0 for item in full_rows
+            ),
+            "models_trained_or_used": [],
+            "decision_gate": "READY_FOR_COMBINED_PHASE4B_ANALYSIS" if valid else "BLOCKED",
+            "claim_boundary": "small measured dynamic traces; no theoretical oracle or model claim",
+        }
+        _write_json(self.run_dir / "phase4b_summary.json", summary)
+        lines = [
+            "# XpYd Phase 4B dynamic feedback evaluation", "",
+            "Verdict: **%s**" % ("PASS" if valid else "FAIL"), "",
+            "The first decision after every transition used only pre-transition observed context.", "",
+            "| Policy | Trace | Energy (J) | Offline oracle gap | SLO violations | Actions | Stale events |",
+            "|---|---|---:|---:|---:|---:|---:|",
+        ]
+        for item in policy_summaries:
+            lines.append(
+                "| %s | %s | %.2f | %.2f%% | %d | %d | %d |" % (
+                    item["policy"], item["trace_id"],
+                    float(item["total_gpu_gross_energy_j"]),
+                    100.0 * float(item["offline_piecewise_oracle_gap"]),
+                    int(item["slo_violation_count"]),
+                    int(item["dvfs_action_count"]),
+                    int(item["stale_telemetry_event_count"]),
+                )
+            )
+        lines.extend([
+            "", "FULL-FEEDBACK energy savings versus STATIC: `%s`." % full_vs_static,
+            "", "Hard gates: `%s`" % json.dumps(hard_gates, sort_keys=True), "",
+        ])
+        if error:
+            lines.extend(["Failure: `%s`" % error, ""])
+        (self.run_dir / "phase4b_summary.md").write_text("\n".join(lines), encoding="utf-8")
+        if not valid:
+            raise Phase4BError(error or "Phase 4B dynamic hard-gate audit failed")
+        print(self.run_dir.as_posix())
+        return self.run_dir
+
 
 def load_config(path: Path) -> dict[str, Any]:
     config = load_phase3d_config(path)
@@ -980,6 +1566,17 @@ def load_config(path: Path) -> dict[str, Any]:
         raise Phase4BError("Phase 4B decode endpoints must remain on IO")
     if any(int(item["tp_degree"]) != 1 for item in endpoints.values()):
         raise Phase4BError("Phase 4B fixes every endpoint at TP1")
+    dynamic = settings.get("dynamic")
+    if not isinstance(dynamic, dict):
+        raise Phase4BError("Phase 4B config requires a dynamic object")
+    if tuple(dynamic.get("policies", ())) != ("STATIC", "FULL_FEEDBACK"):
+        raise Phase4BError("dynamic evaluation must compare STATIC and FULL_FEEDBACK")
+    workload_ids = {str(item["id"]) for item in config["workloads"]}
+    for trace in dynamic.get("traces", []):
+        if len(trace.get("states", [])) != 3:
+            raise Phase4BError("each dynamic trace must contain exactly three states")
+        if not set(map(str, trace["states"])).issubset(workload_ids):
+            raise Phase4BError("dynamic trace references an unknown workload")
     return config
 
 
@@ -988,10 +1585,16 @@ def main() -> int:
     parser.add_argument("--config", required=True)
     parser.add_argument("--run-id")
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--stage", choices=("stationary", "dynamic"), default="stationary")
     args = parser.parse_args()
-    Phase4BEvaluationHarness(
-        load_config(Path(args.config)), args.run_id, smoke=args.smoke
-    ).run_stationary()
+    harness = Phase4BEvaluationHarness(
+        load_config(Path(args.config)), args.run_id,
+        smoke=args.smoke, stage=args.stage,
+    )
+    if args.stage == "dynamic":
+        harness.run_dynamic()
+    else:
+        harness.run_stationary()
     return 0
 
 
