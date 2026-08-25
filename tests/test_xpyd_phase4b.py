@@ -14,6 +14,7 @@ from xpyd.phase4b_evaluation import (
     exact_near_optimal_match,
     load_config,
     load_phase4a_reference,
+    relative_energy_savings,
     summarize_dynamic_adaptation,
     summarize_stationary,
 )
@@ -51,6 +52,12 @@ def reference():
 
 
 class Phase4BPolicyTests(unittest.TestCase):
+    def test_relative_energy_savings_rejects_missing_or_zero_baseline(self):
+        self.assertIsNone(relative_energy_savings(None, 90.0))
+        self.assertIsNone(relative_energy_savings(0.0, 0.0))
+        self.assertIsNone(relative_energy_savings(-1.0, 0.0))
+        self.assertAlmostEqual(relative_energy_savings(100.0, 90.0), 0.1)
+
     def test_checked_in_config_fixes_neptune_io_and_four_policies(self):
         root = Path(__file__).resolve().parents[1]
         config = load_config(

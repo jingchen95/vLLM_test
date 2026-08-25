@@ -113,6 +113,18 @@ def classify_oracle_gap(gap: float) -> str:
     return ">10%"
 
 
+def relative_energy_savings(
+    baseline_energy_j: Optional[float], candidate_energy_j: Optional[float],
+) -> Optional[float]:
+    """Return a relative saving only for a positive measured baseline."""
+    if baseline_energy_j is None or candidate_energy_j is None:
+        return None
+    baseline = float(baseline_energy_j)
+    if baseline <= 0.0:
+        return None
+    return (baseline - float(candidate_energy_j)) / baseline
+
+
 def counterbalanced_blocks(
     policies: Sequence[str], workloads: Sequence[Mapping[str, Any]], seed: int,
 ) -> list[tuple[str, dict[str, Any]]]:
@@ -1481,10 +1493,10 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
             if item["policy"] == "STATIC"
         }
         full_vs_static = {
-            item["trace_id"]: (
-                float(static_rows[item["trace_id"]]["total_gpu_gross_energy_j"])
-                - float(item["total_gpu_gross_energy_j"])
-            ) / float(static_rows[item["trace_id"]]["total_gpu_gross_energy_j"])
+            item["trace_id"]: relative_energy_savings(
+                static_rows[item["trace_id"]]["total_gpu_gross_energy_j"],
+                item["total_gpu_gross_energy_j"],
+            )
             for item in full_rows if item["trace_id"] in static_rows
         }
         audit = {
@@ -1507,7 +1519,10 @@ class Phase4BEvaluationHarness(Phase3DClosedLoopHarness):
             "adaptation_summaries": adaptation,
             "full_feedback_energy_savings_vs_static": full_vs_static,
             "full_feedback_slo_safe": bool(full_rows) and all(
-                int(item["slo_violation_count"]) == 0 for item in full_rows
+                bool(item["measurement_valid"])
+                and int(item["request_count"]) > 0
+                and int(item["slo_violation_count"]) == 0
+                for item in full_rows
             ),
             "models_trained_or_used": [],
             "decision_gate": "READY_FOR_COMBINED_PHASE4B_ANALYSIS" if valid else "BLOCKED",
