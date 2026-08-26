@@ -153,6 +153,31 @@
     "probe_headroom_fraction": 0.8,
     "methodology": "PASSIVE_FULL preserves the Phase 4B endpoint-EWMA routing comparator. ACTIVE_FULL uses only context-route observations of total four-GPU gross window energy divided by logical requests. An unmeasured all-route warmup establishes safety telemetry but no route cost. Unseen/stale compatible routes are probed only under fresh low-pressure SLO-safe conditions. DVFS is frozen in probe windows and the unchanged feedback DVFS path resumes during exploitation."
   },
+  "phase4c": {
+    "output_root": "results/phase4c_stress",
+    "accepted_phase4b_dynamic_audit": "$XPYD_PHASE4C_ACCEPTED_DYNAMIC_AUDIT",
+    "policies": ["STATIC", "PASSIVE_FULL"],
+    "repeats": 3,
+    "windows_per_state": 3,
+    "requests_per_window": 3,
+    "order_seed": 53,
+    "slo": {"ttft_ms": 550.0, "tpot_ms": 65.0},
+    "oracle_reference_rate_rps": 0.5,
+    "stress_workloads": [
+      {"id": "moderate_small", "base_workload": "small_light", "rate_rps": 1.0, "stress_level": "moderate"},
+      {"id": "moderate_both", "base_workload": "both_heavy", "rate_rps": 1.0, "stress_level": "moderate"},
+      {"id": "high_prefill", "base_workload": "prefill_heavy", "rate_rps": 2.0, "stress_level": "high"},
+      {"id": "high_decode", "base_workload": "decode_heavy", "rate_rps": 2.0, "stress_level": "high"},
+      {"id": "recovery_light", "base_workload": "small_light", "rate_rps": 0.5, "stress_level": "recovery"},
+      {"id": "high_burst", "base_workload": "both_heavy", "rate_rps": 2.0, "stress_level": "high"}
+    ],
+    "traces": [
+      {"id": "moderate_light_both_light", "states": ["moderate_small", "moderate_both", "moderate_small"]},
+      {"id": "high_prefill_decode_prefill", "states": ["high_prefill", "high_decode", "high_prefill"]},
+      {"id": "light_burst_recovery", "states": ["recovery_light", "high_burst", "recovery_light"]}
+    ],
+    "methodology": "Three counterbalanced repeats of STATIC and unchanged PASSIVE FULL over three three-state stress traces. Each state has three measured windows: blind transition, reaction opportunity, and settling check. PASSIVE receives an unmeasured first-state all-route telemetry warmup. Concurrency remains at the validated connector limit of one; higher offered rate creates sustained demand and reduced idle gaps without claiming concurrent-request connector support. Phase 4A is post-hoc only and is marked unavailable unless workload shape and 0.5 request/s rate match its coverage and its measured winner satisfies the tighter Phase 4C SLO."
+  },
   "server_logs": {
     "P0": "$XPYD_P0_SERVER_LOG", "P1": "$XPYD_P1_SERVER_LOG",
     "D0": "$XPYD_D0_SERVER_LOG", "D1": "$XPYD_D1_SERVER_LOG"
