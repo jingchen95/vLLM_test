@@ -21,6 +21,7 @@ class DVFSAction(str, Enum):
     HOLD = "HOLD"
     STEP_UP = "STEP_UP"
     STEP_DOWN = "STEP_DOWN"
+    RECOVER_HIGH = "RECOVER_HIGH"
     FALLBACK_MAX = "FALLBACK_MAX"
 
 
@@ -85,6 +86,7 @@ class FeedbackSchedulerConfig:
     severe_queue_depth: int = 16
     severe_kv_cache_usage_frac: float = 0.97
     severe_pressure_to_max: bool = True
+    dvfs_latency_risk_to_max: bool = False
     dvfs_min_dwell_s: float = 0.0
 
     def __post_init__(self) -> None:
@@ -363,8 +365,9 @@ class FeedbackScheduler:
                 now_s=now_s,
             )
 
+        latency_risk = metric > self.config.dvfs_step_up_fraction * slo_ms
         pressure = (
-            metric > self.config.dvfs_step_up_fraction * slo_ms
+            latency_risk
             or state.queue_depth > self.config.max_queue_depth
             or state.kv_cache_usage_frac > self.config.max_kv_cache_usage_frac
         )
@@ -375,6 +378,18 @@ class FeedbackScheduler:
                     endpoint_id,
                     current,
                     "%s/queue/KV pressure, already at maximum frequency" % metric_name,
+                )
+            if latency_risk and self.config.dvfs_latency_risk_to_max:
+                return self._recommend(
+                    endpoint_id=endpoint_id,
+                    current_freq_mhz=current,
+                    target_freq_mhz=allowed[-1],
+                    action=DVFSAction.RECOVER_HIGH,
+                    reason=(
+                        "%s crossed the aligned risk threshold; "
+                        "recover directly to maximum frequency"
+                    ) % metric_name,
+                    now_s=now_s,
                 )
             emergency = (
                 metric > slo_ms

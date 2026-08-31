@@ -1,0 +1,8 @@
+{
+  "base_config": "xpyd_phase4b_evaluation_neptune_io.json",
+  "phase4c_overrides": {
+    "output_root": "results/phase4c1_recovery",
+    "controller_mode": "aligned_slo_fast_recovery",
+    "methodology": "Exact Phase 4C STATIC/PASSIVE traces, topology, rates, repeats, measurement path, and 550/65 ms SLO. The only controller changes are using that same evaluation SLO and recovering directly to HIGH when the measured latency EWMA crosses the existing relative risk threshold. Downshifts remain one level, endpoint routing remains passive and unchanged, and no predictor, probing, bandit, RL, or queue-dependent recovery mechanism is added."
+  }
+}

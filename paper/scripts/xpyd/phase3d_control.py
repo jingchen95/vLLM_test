@@ -761,6 +761,9 @@ class Phase3DClosedLoopHarness:
             dvfs_low_kv_cache_usage_frac=float(feedback.get("low_kv_cache_usage_frac", 0.50)),
             severe_queue_depth=int(feedback.get("severe_queue_depth", 4)),
             severe_kv_cache_usage_frac=float(feedback.get("severe_kv_cache_usage_frac", 0.97)),
+            dvfs_latency_risk_to_max=bool(
+                feedback.get("latency_risk_to_max", False)
+            ),
             dvfs_min_dwell_s=float(self.config["phase3d"].get("minimum_dwell_s", 1.0)),
         )
         telemetry = TelemetryAggregator(alpha=float(feedback.get("ewma_alpha", 0.5)))

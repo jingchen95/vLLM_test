@@ -124,3 +124,7 @@ The data support fast LOW/MID-to-HIGH recovery once a correctly aligned TTFT
 risk signal fires. They do not support relying on the current endpoint queue
 signal for client-side offered-load backlog. A new GPU experiment is not needed
 to establish these two diagnosis points.
+
+The isolated correction and exact-rerun protocol are documented in
+`XPYD_PHASE4C1_RECOVERY.md`; the original Phase 4C configuration remains
+available for legacy reproduction.

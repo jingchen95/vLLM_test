@@ -12,6 +12,7 @@ from xpyd.phase4c_stress import (
     POLICIES,
     Phase4CStressHarness,
     _format_optional_float,
+    classify_recovery_fix,
     classify_robustness,
     load_config,
     oracle_reference_status,
@@ -57,6 +58,35 @@ class Phase4CStressTests(unittest.TestCase):
                 root / "paper/configs/xpyd_phase4b_evaluation_neptune_io.json"
             )
         self.assertEqual(config["phase4c"]["policies"], ["STATIC", "PASSIVE_FULL"])
+
+    def test_phase4c1_overlay_aligns_controller_slo_and_enables_only_recovery(self):
+        root = Path(__file__).resolve().parents[1]
+        config = load_config(
+            root / "paper/configs/xpyd_phase4c1_recovery_neptune_io.json"
+        )
+        harness = Phase4CStressHarness(config, "fixture")
+        feedback = harness.config["phase3d"]["feedback"]
+        self.assertTrue(harness.recovery_fix)
+        self.assertEqual(harness.controller_mode, "aligned_slo_fast_recovery")
+        self.assertEqual(feedback["ttft_slo_ms"], 550.0)
+        self.assertEqual(feedback["tpot_slo_ms"], 65.0)
+        self.assertTrue(feedback["latency_risk_to_max"])
+        self.assertEqual(harness.phase4c["traces"], config["phase4c"]["traces"])
+        self.assertEqual(harness.phase4c["repeats"], 3)
+        self.assertEqual(harness.phase4c["windows_per_state"], 3)
+        self.assertEqual(harness.phase4c["requests_per_window"], 3)
+
+    def test_original_phase4c_config_remains_legacy_reproducible(self):
+        root = Path(__file__).resolve().parents[1]
+        config = load_config(
+            root / "paper/configs/xpyd_phase4b_evaluation_neptune_io.json"
+        )
+        harness = Phase4CStressHarness(config, "fixture")
+        feedback = harness.config["phase3d"]["feedback"]
+        self.assertFalse(harness.recovery_fix)
+        self.assertEqual(feedback["ttft_slo_ms"], 1000.0)
+        self.assertEqual(feedback["tpot_slo_ms"], 80.0)
+        self.assertFalse(feedback.get("latency_risk_to_max", False))
 
     def test_oracle_is_withheld_outside_rate_or_tighter_slo_coverage(self):
         oracle = {"TTFT": 480.0, "TPOT": 59.0}
@@ -104,6 +134,37 @@ class Phase4CStressTests(unittest.TestCase):
         classification, reasons = classify_robustness(comparisons, passive)
         self.assertEqual(classification, "A. PASSIVE ROBUSTLY SUFFICIENT")
         self.assertTrue(reasons)
+
+    def test_recovery_gate_uses_paired_static_slo_baseline(self):
+        comparisons = [
+            {"paired_repeat_count": 3, "passive_energy_saving_vs_static_mean": 0.08}
+            for _ in range(3)
+        ]
+        summaries = []
+        for policy, violations in (("STATIC", 6), ("PASSIVE_FULL", 5)):
+            summaries.append({
+                "policy": policy, "measurement_valid": True,
+                "request_count": 27, "slo_violation_count": violations,
+            })
+        classification, reasons = classify_recovery_fix(comparisons, summaries)
+        self.assertEqual(classification, "A. RECOVERY FIX SUPPORTED")
+        self.assertTrue(any("PASSIVE-minus-STATIC" in reason for reason in reasons))
+
+    def test_recovery_gate_rejects_remaining_relative_slo_regression(self):
+        comparisons = [
+            {"paired_repeat_count": 3, "passive_energy_saving_vs_static_mean": 0.08}
+            for _ in range(3)
+        ]
+        summaries = []
+        for policy, violations in (("STATIC", 5), ("PASSIVE_FULL", 8)):
+            summaries.append({
+                "policy": policy, "measurement_valid": True,
+                "request_count": 27, "slo_violation_count": violations,
+            })
+        classification, _ = classify_recovery_fix(comparisons, summaries)
+        self.assertEqual(
+            classification, "B. ENERGY SAVED BUT SLO REGRESSION REMAINS"
+        )
 
     def test_launcher_exposes_phase4c_without_active_policy(self):
         root = Path(__file__).resolve().parents[1]

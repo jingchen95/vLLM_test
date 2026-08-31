@@ -154,18 +154,86 @@ def classify_robustness(
     return "D. INCONCLUSIVE", reasons
 
 
+def classify_recovery_fix(
+    comparisons: Sequence[Mapping[str, Any]],
+    summaries: Sequence[Mapping[str, Any]],
+) -> tuple[str, list[str]]:
+    """Classify Phase 4C.1 relative to its simultaneous STATIC comparator."""
+    reasons: list[str] = []
+    if not comparisons or not summaries or any(
+        int(item["paired_repeat_count"]) < 3 for item in comparisons
+    ):
+        return "D. INCONCLUSIVE", ["required paired repeats are incomplete"]
+    if not all(bool(item["measurement_valid"]) for item in summaries):
+        return "D. INCONCLUSIVE", ["one or more physical measurements are invalid"]
+    by_policy: dict[str, dict[str, int]] = {}
+    for policy in POLICIES:
+        group = [item for item in summaries if item["policy"] == policy]
+        by_policy[policy] = {
+            "requests": sum(int(item["request_count"]) for item in group),
+            "violations": sum(int(item["slo_violation_count"]) for item in group),
+        }
+    static = by_policy["STATIC"]
+    passive = by_policy["PASSIVE_FULL"]
+    if not static["requests"] or passive["requests"] != static["requests"]:
+        return "D. INCONCLUSIVE", ["STATIC/PASSIVE request counts are not paired"]
+    static_rate = static["violations"] / static["requests"]
+    passive_rate = passive["violations"] / passive["requests"]
+    savings = [float(item["passive_energy_saving_vs_static_mean"]) for item in comparisons]
+    reasons.extend([
+        "minimum trace-level energy saving %.2f%%" % (100.0 * min(savings)),
+        "STATIC request-level SLO violation rate %.2f%%" % (100.0 * static_rate),
+        "recovery-fixed PASSIVE request-level SLO violation rate %.2f%%"
+        % (100.0 * passive_rate),
+        "PASSIVE-minus-STATIC violation-rate difference %.2f percentage points"
+        % (100.0 * (passive_rate - static_rate)),
+    ])
+    if min(savings) > 0.0 and passive_rate <= static_rate:
+        return "A. RECOVERY FIX SUPPORTED", reasons
+    if min(savings) > 0.0:
+        return "B. ENERGY SAVED BUT SLO REGRESSION REMAINS", reasons
+    return "C. RECOVERY FIX NOT SUPPORTED", reasons
+
+
 def load_config(path: Path) -> dict[str, Any]:
     # Phase 4C reuses the Phase 4B runtime implementation, not its ACTIVE_FULL
     # experiment gate.  Loading through the Phase 3D substrate validator avoids
     # incorrectly requiring a Phase 4B.1 active-probing audit for this exact
     # STATIC/PASSIVE-only experiment.
-    config = load_phase3d_config(path)
+    raw = _read_json(path)
+    if "base_config" in raw:
+        unexpected = set(raw) - {"base_config", "phase4c_overrides"}
+        if unexpected:
+            raise Phase4CError(
+                "Phase 4C overlay contains unsupported keys: %s"
+                % sorted(unexpected)
+            )
+        base_path = Path(os.path.expandvars(str(raw["base_config"])))
+        if not base_path.is_absolute():
+            base_path = path.parent / base_path
+        config = load_phase3d_config(base_path)
+        overrides = raw.get("phase4c_overrides")
+        if not isinstance(overrides, dict):
+            raise Phase4CError("Phase 4C overlay requires phase4c_overrides")
+        allowed_overrides = {"output_root", "controller_mode", "methodology"}
+        unexpected_overrides = set(overrides) - allowed_overrides
+        if unexpected_overrides:
+            raise Phase4CError(
+                "unsupported Phase 4C overrides: %s" % sorted(unexpected_overrides)
+            )
+        config["phase4c"].update(copy.deepcopy(overrides))
+    else:
+        config = load_phase3d_config(path)
     phase4b = config.get("phase4b")
     if not isinstance(phase4b, dict) or not str(phase4b.get("phase4a_summary", "")):
         raise Phase4CError("Phase 4C requires the frozen Phase 4A reference path")
     settings = config.get("phase4c")
     if not isinstance(settings, dict):
         raise Phase4CError("Phase 4C config requires a phase4c object")
+    if settings.get("controller_mode", "legacy_phase3d") not in {
+        "legacy_phase3d", "aligned_slo_fast_recovery",
+    }:
+        raise Phase4CError("unsupported Phase 4C controller_mode")
     if tuple(settings.get("policies", ())) != POLICIES:
         raise Phase4CError("Phase 4C compares exactly STATIC and PASSIVE_FULL")
     if int(settings.get("repeats", 0)) < 3 or int(settings.get("windows_per_state", 0)) < 3:
@@ -211,6 +279,15 @@ class Phase4CStressHarness(Phase4BEvaluationHarness):
     def __init__(self, config: Mapping[str, Any], run_id: Optional[str] = None, backend: Any = None) -> None:
         super().__init__(config, run_id=run_id, backend=backend, smoke=False, stage="dynamic")
         self.phase4c = dict(self.config["phase4c"])
+        self.controller_mode = str(
+            self.phase4c.get("controller_mode", "legacy_phase3d")
+        )
+        self.recovery_fix = self.controller_mode == "aligned_slo_fast_recovery"
+        if self.recovery_fix:
+            feedback = self.config["phase3d"].setdefault("feedback", {})
+            feedback["ttft_slo_ms"] = float(self.phase4c["slo"]["ttft_ms"])
+            feedback["tpot_slo_ms"] = float(self.phase4c["slo"]["tpot_ms"])
+            feedback["latency_risk_to_max"] = True
         self.settings["slo"] = dict(self.phase4c["slo"])
         self.run_dir = Path(os.path.expandvars(str(self.phase4c["output_root"]))) / self.run_id
 
@@ -495,7 +572,14 @@ class Phase4CStressHarness(Phase4BEvaluationHarness):
 
         comparisons = paired_energy_comparisons(summaries, [str(item["id"]) for item in traces])
         passive = [item for item in summaries if item["policy"] == "PASSIVE_FULL"]
-        classification, classification_reasons = classify_robustness(comparisons, passive)
+        if self.recovery_fix:
+            classification, classification_reasons = classify_recovery_fix(
+                comparisons, summaries
+            )
+        else:
+            classification, classification_reasons = classify_robustness(
+                comparisons, passive
+            )
         adaptation_traces = [{
             "id": trace["id"],
             "states": [str(next(item for item in self.phase4c["stress_workloads"] if item["id"] == state)["base_workload"]) for state in trace["states"]],
@@ -508,7 +592,7 @@ class Phase4CStressHarness(Phase4BEvaluationHarness):
         inherited = [json.loads(item["hard_gates_json"]) for item in rows]
         hard_gates = {
             "accepted_formal_phase4b_dynamic_audit": bool(accepted_audit.get("valid")),
-            "exact_static_vs_unchanged_passive_comparison": tuple(POLICIES) == ("STATIC", "PASSIVE_FULL"),
+            "exact_static_vs_declared_passive_comparison": tuple(POLICIES) == ("STATIC", "PASSIVE_FULL"),
             "complete_stress_plan": len(rows) == expected,
             "all_measurements_valid": len(rows) == expected and all(item["measurement_valid"] for item in rows),
             "all_warmups_valid": bool(warmups) and all(item.get("valid") for item in warmups),
@@ -525,9 +609,24 @@ class Phase4CStressHarness(Phase4BEvaluationHarness):
                 for item in rows
             ),
             "safe_high_restoration": restoration_valid,
-            "no_models_or_new_controller_mechanisms": True,
+            "no_models_or_unrequested_controller_mechanisms": True,
             "no_unresolved_error": error is None,
         }
+        if self.recovery_fix:
+            feedback = self.config["phase3d"]["feedback"]
+            hard_gates.update({
+                "controller_ttft_slo_aligned_with_evaluation": (
+                    float(feedback["ttft_slo_ms"])
+                    == float(self.phase4c["slo"]["ttft_ms"])
+                ),
+                "controller_tpot_slo_aligned_with_evaluation": (
+                    float(feedback["tpot_slo_ms"])
+                    == float(self.phase4c["slo"]["tpot_ms"])
+                ),
+                "latency_risk_fast_recovery_to_high_enabled": bool(
+                    feedback.get("latency_risk_to_max")
+                ),
+            })
         valid = all(hard_gates.values())
         if not valid:
             classification = "D. INCONCLUSIVE"
@@ -542,22 +641,36 @@ class Phase4CStressHarness(Phase4BEvaluationHarness):
         _csv(self.run_dir / "raw" / "phase4c_actuator_actions.csv", self.actuator_rows, tuple(self.actuator_rows[0]) if self.actuator_rows else ())
         _csv(self.run_dir / "raw" / "phase4c_endpoint_telemetry.csv", self.telemetry_rows, tuple(self.telemetry_rows[0]) if self.telemetry_rows else ())
 
+        phase_name = (
+            "4C1_aligned_slo_asymmetric_recovery"
+            if self.recovery_fix else "4C_passive_robustness_stress"
+        )
+        controller_change = (
+            "evaluation SLO alignment plus latency-risk direct recovery to HIGH"
+            if self.recovery_fix else "none"
+        )
         audit = {
-            "phase": "4C_passive_robustness_stress", "valid": valid,
+            "phase": phase_name, "valid": valid,
             "hard_gates": hard_gates, "error": error,
             "accepted_phase4b_dynamic_audit": accepted_path.as_posix(),
             "accepted_phase4b_dynamic_sha256": hashlib.sha256(accepted_raw).hexdigest(),
             "warmup_audits": warmups, "models_trained_or_used": [],
-            "controller_change": "none",
+            "controller_mode": self.controller_mode,
+            "controller_change": controller_change,
             "oracle_usage": "frozen Phase 4A post-hoc reference only for exact shape/rate/SLO-covered windows",
         }
         _write_json(self.run_dir / "phase4c_audit.json", audit)
         summary = {
-            "phase": "4C_passive_robustness_stress", "valid": valid,
+            "phase": phase_name, "valid": valid,
             "classification": classification, "classification_reasons": classification_reasons,
             "hard_gates": hard_gates, "error": error, "slo": self.phase4c["slo"],
             "policy_repeat_summaries": summaries, "energy_comparisons": comparisons,
             "adaptation_summaries": adaptation, "models_trained_or_used": [],
+            "controller_mode": self.controller_mode,
+            "controller_slo": {
+                "ttft_ms": self.config["phase3d"]["feedback"]["ttft_slo_ms"],
+                "tpot_ms": self.config["phase3d"]["feedback"]["tpot_slo_ms"],
+            },
             "claim_boundary": (
                 "max_concurrency remains one; offered-rate pressure reduces idle gaps, "
                 "and client semaphore waiting before send is not part of reported TTFT. "
@@ -566,11 +679,16 @@ class Phase4CStressHarness(Phase4BEvaluationHarness):
         }
         _write_json(self.run_dir / "phase4c_summary.json", summary)
         lines = [
-            "# XpYd Phase 4C passive robustness / stress evaluation", "",
+            "# XpYd %s passive robustness / stress evaluation" % (
+                "Phase 4C.1" if self.recovery_fix else "Phase 4C"
+            ), "",
             "Measurement verdict: **%s**" % ("PASS" if valid else "FAIL"),
             "", "Decision classification: **%s**" % classification, "",
             "Tighter SLO: TTFT %.0f ms / TPOT %.0f ms. Connector concurrency remains 1." % (
                 float(self.phase4c["slo"]["ttft_ms"]), float(self.phase4c["slo"]["tpot_ms"]),
+            ),
+            "Controller mode: `%s`. Change: %s." % (
+                self.controller_mode, controller_change,
             ), "",
             "| Policy | Trace | Repeat | Energy (J) | J/request | SLO violations | Stale | Fallback |",
             "|---|---|---:|---:|---:|---:|---:|---:|",

@@ -133,6 +133,9 @@ def build_scheduler(
     equal_tp_compatible=True,
     fallback=True,
     min_samples=1,
+    ttft_slo_ms=500,
+    ewma_alpha=1.0,
+    **config_overrides,
 ):
     runtime = build_example_runtime()
     if equal_tp_compatible:
@@ -142,7 +145,7 @@ def build_scheduler(
         runtime.compatibility.add(
             ConnectorCompatibility("mock-kv", 2, 2, True, "test evidence")
         )
-    telemetry = TelemetryAggregator(alpha=1.0)
+    telemetry = TelemetryAggregator(alpha=ewma_alpha)
     if with_samples:
         for sample in (
             EndpointTelemetrySample(
@@ -176,11 +179,12 @@ def build_scheduler(
         telemetry,
         runtime.hardware,
         FeedbackSchedulerConfig(
-            ttft_slo_ms=500,
+            ttft_slo_ms=ttft_slo_ms,
             tbt_slo_ms=100,
             safety_fraction=0.8,
             min_samples=min_samples,
             **fallback_args,
+            **config_overrides,
         ),
         clock=lambda: 2.0,
     )
@@ -330,6 +334,43 @@ class DVFSFeedbackTests(unittest.TestCase):
         telemetry.observe(EndpointTelemetrySample("P0", 2, ttft_ms=450))
         recommendation = scheduler.choose_frequency_adjustment("P0")
         self.assertEqual(recommendation.action, DVFSAction.STEP_UP)
+        self.assertEqual(recommendation.target_freq_mhz, 1600)
+
+    def test_latency_risk_fast_recovery_jumps_directly_to_high(self):
+        runtime, telemetry, scheduler = build_scheduler(
+            dvfs_latency_risk_to_max=True,
+        )
+        current = runtime.registry.get_state("P0")
+        current.freq_mhz = 800
+        current.queue_depth = 0
+        runtime.registry.update_state(current)
+        telemetry.observe(EndpointTelemetrySample("P0", 2, ttft_ms=450))
+        recommendation = scheduler.choose_frequency_adjustment("P0")
+        self.assertEqual(recommendation.action, DVFSAction.RECOVER_HIGH)
+        self.assertEqual(recommendation.current_freq_mhz, 800)
+        self.assertEqual(recommendation.target_freq_mhz, 1600)
+        self.assertIn("aligned risk threshold", recommendation.reason)
+
+    def test_fast_recovery_keeps_slow_one_level_downshift(self):
+        _, _, scheduler = build_scheduler(dvfs_latency_risk_to_max=True)
+        recommendation = scheduler.choose_frequency_adjustment("P0")
+        self.assertEqual(recommendation.action, DVFSAction.STEP_DOWN)
+        self.assertEqual(recommendation.target_freq_mhz, 1200)
+
+    def test_phase4c_transition_ewma_recovers_after_first_risky_window(self):
+        runtime, telemetry, scheduler = build_scheduler(
+            with_samples=False, ttft_slo_ms=550, ewma_alpha=0.5,
+            dvfs_latency_risk_to_max=True,
+        )
+        current = runtime.registry.get_state("P0")
+        current.freq_mhz = 800
+        current.queue_depth = 0
+        runtime.registry.update_state(current)
+        telemetry.observe(EndpointTelemetrySample("P0", 1, ttft_ms=285))
+        telemetry.observe(EndpointTelemetrySample("P0", 2, ttft_ms=633))
+        self.assertEqual(telemetry.snapshot("P0").ewma_ttft_ms, 459)
+        recommendation = scheduler.choose_frequency_adjustment("P0")
+        self.assertEqual(recommendation.action, DVFSAction.RECOVER_HIGH)
         self.assertEqual(recommendation.target_freq_mhz, 1600)
 
     def test_severe_pressure_falls_back_to_maximum(self):
