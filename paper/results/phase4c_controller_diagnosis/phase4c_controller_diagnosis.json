@@ -1,0 +1,27 @@
+{
+  "decision_state_reconstruction": "warmup plus completed prior windows only; current-window metrics are outcomes",
+  "ewma_alpha": 0.5,
+  "paired_request_counts": {
+    "both_fail": 33,
+    "both_pass": 148,
+    "paired_requests": 243,
+    "static_fail_passive_pass": 16,
+    "static_pass_passive_fail": 46
+  },
+  "paired_window_counts": {
+    "mean_window_both_fail": 6,
+    "mean_window_both_pass": 53,
+    "mean_window_static_fail_passive_pass": 1,
+    "mean_window_static_pass_passive_fail": 21,
+    "paired_windows": 81,
+    "strict_window_both_fail": 31,
+    "strict_window_both_pass": 45,
+    "strict_window_static_fail_passive_pass": 1,
+    "strict_window_static_pass_passive_fail": 4
+  },
+  "source_run": "results/phase4c_stress/phase4c_stress_r3_20260831",
+  "tpot_slo_ms": 65.0,
+  "transition_control_count": 18,
+  "ttft_slo_ms": 550.0,
+  "window_count": 162
+}
