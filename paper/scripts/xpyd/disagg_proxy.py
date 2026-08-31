@@ -717,6 +717,28 @@ def _expand_environment(value: Any) -> Any:
     return value
 
 
+def load_multi_endpoint_config(path: Path) -> dict[str, Any]:
+    """Load a full endpoint config or the restricted Phase 4C.1 overlay."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if "base_config" in raw:
+        unexpected = set(raw) - {"base_config", "phase4c_overrides"}
+        if unexpected:
+            raise ValueError(
+                "multi-endpoint overlay contains unsupported keys: %s"
+                % sorted(unexpected)
+            )
+        if not isinstance(raw.get("phase4c_overrides"), dict):
+            raise ValueError("multi-endpoint overlay requires phase4c_overrides")
+        base_path = Path(os.path.expandvars(str(raw["base_config"])))
+        if not base_path.is_absolute():
+            base_path = path.parent / base_path
+        raw = json.loads(base_path.read_text(encoding="utf-8"))
+    config = _expand_environment(raw)
+    if not isinstance(config, dict):
+        raise ValueError("multi-endpoint config must be a JSON object")
+    return config
+
+
 def create_app(
     config: ProxyConfig,
     timeout_s: float = 900.0,
@@ -861,9 +883,9 @@ def main() -> int:
                 stream.write(line + "\n")
 
     if args.multi_endpoint_config:
-        multi_config = _expand_environment(json.loads(
-            open(args.multi_endpoint_config, encoding="utf-8").read()
-        ))
+        multi_config = load_multi_endpoint_config(
+            Path(args.multi_endpoint_config)
+        )
         print(
             "Multi-endpoint proxy 0.0.0.0:%d config=%s"
             % (args.proxy_port, args.multi_endpoint_config),

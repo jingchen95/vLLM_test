@@ -15,6 +15,7 @@ from xpyd.disagg_proxy import (
     ProxyConfig,
     ProxyUpstreamError,
     ingress_logical_request_id,
+    load_multi_endpoint_config,
 )
 from xpyd.compatibility import CompatibilityTable, EndpointPairCompatibility
 from xpyd.registry import EndpointRegistry
@@ -96,6 +97,17 @@ def config():
 
 
 class DisaggProxyStreamingTests(unittest.TestCase):
+    def test_phase4c1_overlay_resolves_full_multi_endpoint_config(self):
+        root = Path(__file__).resolve().parents[1]
+        loaded = load_multi_endpoint_config(
+            root / "paper/configs/xpyd_phase4c1_recovery_neptune_io.json"
+        )
+        self.assertEqual(
+            {item["endpoint_id"] for item in loaded["endpoints"]},
+            {"P0", "P1", "D0", "D1"},
+        )
+        self.assertEqual(len(loaded["compatible_pairs"]), 4)
+
     def test_multi_endpoint_round_robin_uses_only_exact_compatible_pairs(self):
         registry = EndpointRegistry()
         transports = {}
