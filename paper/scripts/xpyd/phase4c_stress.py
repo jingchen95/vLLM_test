@@ -53,6 +53,19 @@ def _ci95(values: Sequence[Any]) -> Optional[float]:
     return 1.96 * statistics.stdev(clean) / math.sqrt(len(clean)) if len(clean) >= 2 else None
 
 
+def _format_optional_float(value: Any, digits: int = 2) -> str:
+    """Format an incomplete failure summary without masking its root error."""
+    if value is None:
+        return "NA"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "NA"
+    if not math.isfinite(number):
+        return "NA"
+    return ("%%.%df" % int(digits)) % number
+
+
 def oracle_reference_status(
     stress: Mapping[str, Any], oracle: Mapping[str, Any], *, reference_rate_rps: float,
     ttft_slo_ms: float, tpot_slo_ms: float,
@@ -563,9 +576,10 @@ class Phase4CStressHarness(Phase4BEvaluationHarness):
             "|---|---|---:|---:|---:|---:|---:|---:|",
         ]
         for item in summaries:
-            lines.append("| %s | %s | %d | %.2f | %.2f | %d | %d | %d |" % (
+            lines.append("| %s | %s | %d | %s | %s | %d | %d | %d |" % (
                 item["policy"], item["trace_id"], int(item["repeat"]),
-                float(item["total_gpu_gross_energy_j"]), float(item["joules_per_request"]),
+                _format_optional_float(item["total_gpu_gross_energy_j"]),
+                _format_optional_float(item["joules_per_request"]),
                 int(item["slo_violation_count"]), int(item["stale_telemetry_event_count"]),
                 int(item["fallback_event_count"]),
             ))

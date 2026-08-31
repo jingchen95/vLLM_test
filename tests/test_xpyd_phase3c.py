@@ -1,13 +1,17 @@
 """CPU-only Phase 3C configuration and audit primitives."""
 
 import csv
+import json
 from pathlib import Path
 import tempfile
+import threading
+import time
 import unittest
 
 from xpyd.phase3c_substrate import (
     Phase3CError,
     _throttle_audit,
+    _wait_for_completed_proxy_diagnostics,
     _write_trace,
     build_registry_and_compatibility,
 )
@@ -125,6 +129,36 @@ class Phase3CSubstrateTests(unittest.TestCase):
             for index, value in enumerate(("", "has spaces", "unsafe/slash")):
                 with self.assertRaises(Phase3CError):
                     _write_trace(Path(directory) / ("%d.csv" % index), workloads, value)
+
+    def test_diagnostic_barrier_waits_for_delayed_last_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "diagnostics.jsonl"
+            path.write_text(
+                json.dumps({"logical_request_id": "r0", "outcome": "completed"}) + "\n"
+            )
+
+            def delayed_last():
+                time.sleep(0.03)
+                with path.open("a", encoding="utf-8") as stream:
+                    stream.write(json.dumps({
+                        "logical_request_id": "r1", "outcome": "completed",
+                    }) + "\n")
+
+            writer = threading.Thread(target=delayed_last)
+            writer.start()
+            _wait_for_completed_proxy_diagnostics(
+                path, ["r0", "r1"], timeout_s=0.5, poll_interval_s=0.005,
+            )
+            writer.join()
+
+    def test_diagnostic_barrier_fails_with_exact_missing_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "diagnostics.jsonl"
+            path.write_text("", encoding="utf-8")
+            with self.assertRaisesRegex(Phase3CError, "missing.*r-last"):
+                _wait_for_completed_proxy_diagnostics(
+                    path, ["r-last"], timeout_s=0.01, poll_interval_s=0.001,
+                )
 
 
 if __name__ == "__main__":

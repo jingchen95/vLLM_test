@@ -11,6 +11,7 @@ from xpyd.phase3d_control import EndpointClockCapability, GPUReadback
 from xpyd.phase4c_stress import (
     POLICIES,
     Phase4CStressHarness,
+    _format_optional_float,
     classify_robustness,
     load_config,
     oracle_reference_status,
@@ -20,6 +21,11 @@ from xpyd.telemetry import EndpointTelemetrySample
 
 
 class Phase4CStressTests(unittest.TestCase):
+    def test_failure_report_formats_missing_metrics_without_secondary_error(self):
+        self.assertEqual(_format_optional_float(None), "NA")
+        self.assertEqual(_format_optional_float(float("nan")), "NA")
+        self.assertEqual(_format_optional_float(12.345), "12.35")
+
     def test_checked_in_design_is_small_harder_and_connector_safe(self):
         root = Path(__file__).resolve().parents[1]
         config = load_config(root / "paper/configs/xpyd_phase4b_evaluation_neptune_io.json")

@@ -27,9 +27,11 @@ from replay_synthetic_trace import consume_sse_completion
 class FakeContent:
     def __init__(self, events):
         self.events = events
+        self.consumed = []
 
     async def __aiter__(self):
         for event in self.events:
+            self.consumed.append(event)
             yield event.encode("utf-8")
 
 
@@ -153,6 +155,21 @@ class StreamingTokenAccountingTests(unittest.TestCase):
         self.assertEqual(result["completion_tokens"], 7)
         self.assertEqual(result["completion_token_source"], "retokenized_text_fallback")
         self.assertEqual(tokenizer.encode_calls, 1)
+
+    def test_done_sentinel_is_followed_through_http_eof(self):
+        tokenizer = FakeTokenizer(retokenized_count=1)
+        events = [
+            sse({"choices": [{"text": "a"}]}),
+            sse({"choices": [], "usage": {"completion_tokens": 1}}),
+            "data: [DONE]\n\n",
+            "data: not-json-after-done\n\n",
+        ]
+        session = FakeSession(events)
+        result = asyncio.run(consume_sse_completion(
+            session, "http://proxy/v1/completions", {}, tokenizer,
+        ))
+        self.assertTrue(result["ok"])
+        self.assertEqual(session.response.content.consumed, events)
 
 
 if __name__ == "__main__":

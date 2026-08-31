@@ -51,6 +51,32 @@ class Phase3CError(RuntimeError):
     """A fail-closed Phase 3C configuration, runtime, or audit failure."""
 
 
+def _wait_for_completed_proxy_diagnostics(
+    path: Path, request_ids: Sequence[str], timeout_s: float = 5.0,
+    poll_interval_s: float = 0.02,
+) -> None:
+    """Wait until every completed client request has durable proxy evidence."""
+    expected = {str(value) for value in request_ids}
+    if not expected:
+        return
+    deadline = time.monotonic() + float(timeout_s)
+    while True:
+        completed = {
+            str(item.get("logical_request_id"))
+            for item in _read_jsonl(path)
+            if item.get("outcome") == "completed"
+        } if path.is_file() else set()
+        missing = expected - completed
+        if not missing:
+            return
+        if time.monotonic() >= deadline:
+            raise Phase3CError(
+                "proxy diagnostics flush timeout; missing logical request IDs: %s"
+                % sorted(missing)
+            )
+        time.sleep(float(poll_interval_s))
+
+
 def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -369,6 +395,19 @@ class Phase3CSubstrateHarness:
                 returncode = client.wait()
             if returncode != 0:
                 raise Phase3CError("client exited with status %d" % returncode)
+            client_requests = _read_jsonl(
+                self.run_dir / "client" / "requests.jsonl"
+            )
+            successful_ids = [
+                str(item.get("logical_request_id") or item.get("trace_request_id"))
+                for item in client_requests if item.get("ok")
+            ]
+            _wait_for_completed_proxy_diagnostics(
+                proxy_log, successful_ids,
+                timeout_s=float(
+                    self.config.get("diagnostics_flush_timeout_s", 5.0)
+                ),
+            )
             time.sleep(float(self.config.get("post_window_s", 0.5)))
             after = self._scrape_round("after")
         except BaseException as exc:

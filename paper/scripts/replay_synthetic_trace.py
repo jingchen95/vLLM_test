@@ -229,7 +229,11 @@ async def consume_sse_completion(
                 continue
             data = line[6:].strip()
             if data == "[DONE]":
-                break
+                # Consume through HTTP EOF so the proxy streaming generator's
+                # finally block durably emits diagnostics before this client
+                # process reports the request complete. Returning at the SSE
+                # sentinel created a last-request/window-boundary race.
+                continue
             try:
                 obj = json.loads(data)
             except Exception:
