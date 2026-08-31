@@ -22,11 +22,10 @@ import time
 from typing import Any, Mapping, Optional, Sequence
 
 from xpyd.phase3c_substrate import _read_json, _write_json, build_registry_and_compatibility
-from xpyd.phase3d_control import PerEndpointClockActuator, _csv
+from xpyd.phase3d_control import PerEndpointClockActuator, _csv, load_config as load_phase3d_config
 from xpyd.phase4b_evaluation import (
     Phase4BError,
     Phase4BEvaluationHarness,
-    load_config as load_phase4b_config,
     relative_energy_savings,
     summarize_dynamic_adaptation,
 )
@@ -143,7 +142,14 @@ def classify_robustness(
 
 
 def load_config(path: Path) -> dict[str, Any]:
-    config = load_phase4b_config(path)
+    # Phase 4C reuses the Phase 4B runtime implementation, not its ACTIVE_FULL
+    # experiment gate.  Loading through the Phase 3D substrate validator avoids
+    # incorrectly requiring a Phase 4B.1 active-probing audit for this exact
+    # STATIC/PASSIVE-only experiment.
+    config = load_phase3d_config(path)
+    phase4b = config.get("phase4b")
+    if not isinstance(phase4b, dict) or not str(phase4b.get("phase4a_summary", "")):
+        raise Phase4CError("Phase 4C requires the frozen Phase 4A reference path")
     settings = config.get("phase4c")
     if not isinstance(settings, dict):
         raise Phase4CError("Phase 4C config requires a phase4c object")
@@ -155,6 +161,15 @@ def load_config(path: Path) -> dict[str, Any]:
         raise Phase4CError("Phase 4C must remain at validated connector concurrency one")
     if int(config["phase3d"].get("validated_connector_max_concurrency", 0)) != 1:
         raise Phase4CError("connector concurrency evidence must remain exactly one")
+    endpoints = {str(item["endpoint_id"]): item for item in config["endpoints"]}
+    if set(endpoints) != {"P0", "P1", "D0", "D1"}:
+        raise Phase4CError("Phase 4C requires exactly P0/P1/D0/D1")
+    if any(str(endpoints[key]["node"]) != "neptune" for key in ("P0", "P1")):
+        raise Phase4CError("Phase 4C prefill endpoints must remain on Neptune")
+    if any(str(endpoints[key]["node"]) != "io" for key in ("D0", "D1")):
+        raise Phase4CError("Phase 4C decode endpoints must remain on io")
+    if any(int(item["tp_degree"]) != 1 for item in endpoints.values()):
+        raise Phase4CError("Phase 4C fixes every endpoint at TP1")
     if len(settings.get("traces", ())) != 3:
         raise Phase4CError("Phase 4C requires exactly three compact stress traces")
     base_ids = {str(item["id"]) for item in config["workloads"]}

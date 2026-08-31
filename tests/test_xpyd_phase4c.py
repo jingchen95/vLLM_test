@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 from xpyd.phase3d_control import EndpointClockCapability, GPUReadback
 from xpyd.phase4c_stress import (
@@ -40,6 +41,16 @@ class Phase4CStressTests(unittest.TestCase):
             {item["node"] for item in config["endpoints"] if item["endpoint_id"].startswith("D")},
             {"io"},
         )
+
+    def test_loader_does_not_require_irrelevant_active_smoke_audit(self):
+        root = Path(__file__).resolve().parents[1]
+        with mock.patch.dict("os.environ", {
+            "XPYD_PHASE4B_ACCEPTED_ACTIVE_SMOKE_AUDIT": "",
+        }):
+            config = load_config(
+                root / "paper/configs/xpyd_phase4b_evaluation_neptune_io.json"
+            )
+        self.assertEqual(config["phase4c"]["policies"], ["STATIC", "PASSIVE_FULL"])
 
     def test_oracle_is_withheld_outside_rate_or_tighter_slo_coverage(self):
         oracle = {"TTFT": 480.0, "TPOT": 59.0}
