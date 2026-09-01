@@ -1,0 +1,408 @@
+{
+  "decision": "E. MIXED",
+  "decision_basis": {
+    "noise_order": "meaningful: cross-job and repeat variation is comparable to near-boundary gaps, but identical interleaved block order provides no directional order explanation",
+    "remaining_dvfs_control": "weak as dominant cause: most fixed-PASSIVE excess failures occur at P HIGH",
+    "routing_load_distribution": "moderate: PASSIVE sends every prefill request to P0 while STATIC is balanced; existing blocks cannot isolate concentration from time/order history",
+    "slo_feasibility": "strong: STATIC@HIGH violates 550 ms on heavy workloads"
+  },
+  "matched_conditions": [
+    {
+      "match_definition": "exact_route_and_P_HIGH",
+      "mean_passive_minus_static_ttft_ms": 19.68648079734218,
+      "median_passive_minus_static_ttft_ms": 11.477232095785439,
+      "pair_count": 48,
+      "passive_mean_ttft_ms": 409.9344367205049,
+      "passive_violation_count": 13,
+      "static_mean_ttft_ms": 390.2479559231627,
+      "static_violation_count": 11,
+      "workload": "ALL"
+    },
+    {
+      "match_definition": "exact_route_and_P_HIGH",
+      "mean_passive_minus_static_ttft_ms": 37.03233113305436,
+      "median_passive_minus_static_ttft_ms": 16.44280704203993,
+      "pair_count": 9,
+      "passive_mean_ttft_ms": 556.6630376916793,
+      "passive_violation_count": 6,
+      "static_mean_ttft_ms": 519.6307065586249,
+      "static_violation_count": 4,
+      "workload": "both_heavy"
+    },
+    {
+      "match_definition": "exact_route_and_P_HIGH",
+      "mean_passive_minus_static_ttft_ms": 26.760798895598523,
+      "median_passive_minus_static_ttft_ms": 57.45480197947472,
+      "pair_count": 7,
+      "passive_mean_ttft_ms": 265.07680101453195,
+      "passive_violation_count": 0,
+      "static_mean_ttft_ms": 238.31600211893343,
+      "static_violation_count": 0,
+      "workload": "decode_heavy"
+    },
+    {
+      "match_definition": "exact_route_and_P_HIGH",
+      "mean_passive_minus_static_ttft_ms": 27.574151812586933,
+      "median_passive_minus_static_ttft_ms": 21.62286703241989,
+      "pair_count": 14,
+      "passive_mean_ttft_ms": 549.7761538717896,
+      "passive_violation_count": 7,
+      "static_mean_ttft_ms": 522.2020020592026,
+      "static_violation_count": 7,
+      "workload": "prefill_heavy"
+    },
+    {
+      "match_definition": "exact_route_and_P_HIGH",
+      "mean_passive_minus_static_ttft_ms": 2.1275766905293696,
+      "median_passive_minus_static_ttft_ms": -3.010499058291316,
+      "pair_count": 18,
+      "passive_mean_ttft_ms": 284.13788122513023,
+      "passive_violation_count": 0,
+      "static_mean_ttft_ms": 282.01030453460083,
+      "static_violation_count": 0,
+      "workload": "small_light"
+    },
+    {
+      "match_definition": "same_P_and_P_HIGH",
+      "mean_passive_minus_static_ttft_ms": 11.50005410076119,
+      "median_passive_minus_static_ttft_ms": 12.78083655051887,
+      "pair_count": 100,
+      "passive_mean_ttft_ms": 397.9281593253836,
+      "passive_violation_count": 26,
+      "static_mean_ttft_ms": 386.4281052246224,
+      "static_violation_count": 21,
+      "workload": "ALL"
+    },
+    {
+      "match_definition": "same_P_and_P_HIGH",
+      "mean_passive_minus_static_ttft_ms": 25.426607449642486,
+      "median_passive_minus_static_ttft_ms": 15.647731488570571,
+      "pair_count": 18,
+      "passive_mean_ttft_ms": 551.6747616735908,
+      "passive_violation_count": 11,
+      "static_mean_ttft_ms": 526.2481542239483,
+      "static_violation_count": 9,
+      "workload": "both_heavy"
+    },
+    {
+      "match_definition": "same_P_and_P_HIGH",
+      "mean_passive_minus_static_ttft_ms": 20.09005645023925,
+      "median_passive_minus_static_ttft_ms": 34.39222264569253,
+      "pair_count": 14,
+      "passive_mean_ttft_ms": 266.3857900770381,
+      "passive_violation_count": 0,
+      "static_mean_ttft_ms": 246.29573362679886,
+      "static_violation_count": 0,
+      "workload": "decode_heavy"
+    },
+    {
+      "match_definition": "same_P_and_P_HIGH",
+      "mean_passive_minus_static_ttft_ms": 20.18330478609574,
+      "median_passive_minus_static_ttft_ms": 28.877253062091768,
+      "pair_count": 27,
+      "passive_mean_ttft_ms": 542.2768622671289,
+      "passive_violation_count": 15,
+      "static_mean_ttft_ms": 522.0935574810331,
+      "static_violation_count": 12,
+      "workload": "prefill_heavy"
+    },
+    {
+      "match_definition": "same_P_and_P_HIGH",
+      "mean_passive_minus_static_ttft_ms": -3.26545228159464,
+      "median_passive_minus_static_ttft_ms": 1.6983059467747808,
+      "pair_count": 41,
+      "passive_mean_ttft_ms": 280.2876556127491,
+      "passive_violation_count": 0,
+      "static_mean_ttft_ms": 283.5531078943438,
+      "static_violation_count": 0,
+      "workload": "small_light"
+    }
+  ],
+  "official_slo": {
+    "tpot_ms": 65.0,
+    "ttft_ms": 550.0
+  },
+  "order_and_noise": {
+    "background_load_samples_available": false,
+    "block_order_identical_between_jobs": true,
+    "clock_stability": {
+      "255354": {
+        "minimum_frequency_match_fraction": 0.9977011494252873,
+        "windows_below_95_percent_match": 0
+      },
+      "255370": {
+        "minimum_frequency_match_fraction": 0.9956043956043956,
+        "windows_below_95_percent_match": 0
+      }
+    },
+    "mean_block_position": {
+      "255354": {
+        "PASSIVE_FULL": 9,
+        "STATIC": 10
+      },
+      "255370": {
+        "PASSIVE_FULL": 9,
+        "STATIC": 10
+      }
+    },
+    "static_cross_job_cell_mean_difference_ms": {
+      "cell_count": 27,
+      "maximum": 72.29606199285223,
+      "mean": 6.274192941560963,
+      "mean_absolute": 19.710310941529478,
+      "median": 4.580779796621528,
+      "minimum": -58.301488991775045,
+      "standard_deviation": 27.511561418646817
+    },
+    "static_repeat_variation": {
+      "255354": {
+        "maximum_repeat_mean_range_ms": 72.20227300422266,
+        "maximum_repeat_mean_sd_ms": 38.21015909248512,
+        "median_repeat_mean_range_ms": 39.476242563169876,
+        "median_repeat_mean_sd_ms": 19.99508747226396
+      },
+      "255370": {
+        "maximum_repeat_mean_range_ms": 60.57459598458888,
+        "maximum_repeat_mean_sd_ms": 31.03810293398312,
+        "median_repeat_mean_range_ms": 19.69132466345195,
+        "median_repeat_mean_sd_ms": 9.853027442576755
+      }
+    },
+    "temperature_samples_available": false,
+    "timing": {
+      "255354": {
+        "end_utc": "2026-08-31T16:02:46.327688+00:00",
+        "span_hours": 4.0674235174391,
+        "start_utc": "2026-08-31T11:58:43.603025+00:00"
+      },
+      "255370": {
+        "end_utc": "2026-09-01T00:50:48.534680+00:00",
+        "span_hours": 3.9951900878217486,
+        "start_utc": "2026-08-31T20:51:05.850364+00:00"
+      }
+    }
+  },
+  "paired_fixed": {
+    "categories": {
+      "both_fail": 38,
+      "both_pass": 155,
+      "static_fail_passive_pass": 11,
+      "static_pass_passive_fail": 39
+    },
+    "static_pass_passive_fail_by_P_level": {
+      "HIGH": 32,
+      "LOW": 5,
+      "MID": 2
+    },
+    "static_pass_passive_fail_by_route": {
+      "P0->D0": 29,
+      "P0->D1": 10
+    },
+    "static_pass_passive_fail_by_workload": {
+      "both_heavy": 18,
+      "prefill_heavy": 21
+    }
+  },
+  "phase": "Phase 4C/4C.1 analysis-only routing/SLO diagnosis",
+  "recovery_effect": {
+    "255354": {
+      "actions": {
+        "HOLD": 292,
+        "STEP_DOWN": 32
+      },
+      "joules_per_request": 3351.194781893004,
+      "slo_violation_count": 79,
+      "slo_violation_rate": 0.32510288065843623,
+      "total_gpu_gross_energy_j": 814340.3319999999
+    },
+    "255370": {
+      "actions": {
+        "HOLD": 224,
+        "RECOVER_HIGH": 3,
+        "STEP_DOWN": 13
+      },
+      "joules_per_request": 3649.6182880658434,
+      "slo_violation_count": 77,
+      "slo_violation_rate": 0.3168724279835391,
+      "total_gpu_gross_energy_j": 886857.244
+    },
+    "decode_to_prefill_target": {
+      "255354": {
+        "job": "255354",
+        "mean_ttft_ms": 612.8679371861465,
+        "p50_ttft_ms": 624.6107160113752,
+        "p95_ttft_ms": 675.3747585753445,
+        "request_count": 27,
+        "segment": "high_prefill",
+        "selected_P_HIGH_requests": 0,
+        "selected_P_LOW_requests": 27,
+        "selected_P_MID_requests": 0,
+        "state_index": 2,
+        "total_gpu_gross_energy_j": 49625.958999999995,
+        "trace": "high_prefill_decode_prefill",
+        "ttft_violation_count": 23,
+        "ttft_violation_rate": 0.8518518518518519,
+        "workload": "prefill_heavy"
+      },
+      "255370": {
+        "job": "255370",
+        "mean_ttft_ms": 548.5682184161204,
+        "p50_ttft_ms": 562.1396920178086,
+        "p95_ttft_ms": 626.4423344749957,
+        "request_count": 27,
+        "segment": "high_prefill",
+        "selected_P_HIGH_requests": 27,
+        "selected_P_LOW_requests": 0,
+        "selected_P_MID_requests": 0,
+        "state_index": 2,
+        "total_gpu_gross_energy_j": 53586.12300000001,
+        "trace": "high_prefill_decode_prefill",
+        "ttft_violation_count": 17,
+        "ttft_violation_rate": 0.6296296296296297,
+        "workload": "prefill_heavy"
+      }
+    }
+  },
+  "routing": {
+    "255354_PASSIVE_FULL": {
+      "prefill_counts": {
+        "P0": 243
+      },
+      "request_count": 243,
+      "route_counts": {
+        "P0->D0": 81,
+        "P0->D1": 162
+      }
+    },
+    "255354_STATIC": {
+      "prefill_counts": {
+        "P0": 124,
+        "P1": 119
+      },
+      "request_count": 243,
+      "route_counts": {
+        "P0->D0": 62,
+        "P0->D1": 62,
+        "P1->D0": 59,
+        "P1->D1": 60
+      }
+    },
+    "255370_PASSIVE_FULL": {
+      "prefill_counts": {
+        "P0": 243
+      },
+      "request_count": 243,
+      "route_counts": {
+        "P0->D0": 177,
+        "P0->D1": 66
+      }
+    },
+    "255370_STATIC": {
+      "prefill_counts": {
+        "P0": 124,
+        "P1": 119
+      },
+      "request_count": 243,
+      "route_counts": {
+        "P0->D0": 62,
+        "P0->D1": 62,
+        "P1->D0": 59,
+        "P1->D1": 60
+      }
+    }
+  },
+  "smallest_next_action": "one minimal matched-routing experiment",
+  "source_jobs": {
+    "255354": {
+      "classification": "C. PASSIVE INSUFFICIENT",
+      "input_sha256": {
+        "phase4c_controls.csv": "318314a18c910ebb81f2366a21b7987b55fc5d3d82614423b5aea1f8de4e1c48",
+        "phase4c_endpoint_telemetry.csv": "33b9a47a8a922f8b757c482276d321d9bdeb13e5bed82a58bb6f9ac47952f3ba",
+        "phase4c_plan.json": "9eef3e5e79f7678d5f3c36300434bfcd9631caf05ce52aa75f170488e2984eb9",
+        "phase4c_requests.csv": "7ac14333044bbb6ec124458295684df41d98b13374ae7ac8a9188ff7c52edd02",
+        "phase4c_results.csv": "07557076e0429add6f784c48078bdd72caaa2e40665e74c8d61bf1c8a172375a",
+        "phase4c_summary.json": "a265181550459f43344e094c9feaf0a8f92c78debf1aff3a6e02be2532044a5f"
+      },
+      "valid": true
+    },
+    "255370": {
+      "classification": "C. RECOVERY FIX NOT SUPPORTED",
+      "input_sha256": {
+        "phase4c_controls.csv": "c545194b2b90b5bf6d3f51373af4c38c62fef1748eaa8f7713cef9bd6ed96462",
+        "phase4c_endpoint_telemetry.csv": "b7c5324b6b3bf81cac1463a32a8108088c297f2cdd1d8fac0dadfd1e84b277b6",
+        "phase4c_plan.json": "9eef3e5e79f7678d5f3c36300434bfcd9631caf05ce52aa75f170488e2984eb9",
+        "phase4c_requests.csv": "26e919ffa653e46f556003d608b61d9163345647963ccd913e35218761240ee8",
+        "phase4c_results.csv": "2a38f0fe1024ccb695be89256f0c0f88d21ccc49c38eacf36d17391ff9c0d247",
+        "phase4c_summary.json": "26cfad0293ec88be9d8adca5d86fa087cc5f2df66989273786d050b8665c5248"
+      },
+      "valid": true
+    }
+  },
+  "static_high_feasibility": {
+    "ALL": {
+      "max_ttft_ms": 662.9780259681866,
+      "mean_ttft_ms": 382.0989289506168,
+      "min_ttft_ms": 145.84533497691154,
+      "p50_ttft_ms": 327.27068301755935,
+      "p95_ttft_ms": 590.1656959904358,
+      "p99_ttft_ms": 624.5676841877864,
+      "request_count": 486,
+      "violation_rate_at_500ms": 0.2880658436213992,
+      "violation_rate_at_550ms": 0.20164609053497942,
+      "violation_rate_at_600ms": 0.03909465020576132,
+      "violation_rate_at_650ms": 0.00411522633744856
+    },
+    "both_heavy": {
+      "max_ttft_ms": 662.9780259681866,
+      "mean_ttft_ms": 538.4773363874518,
+      "min_ttft_ms": 433.17349103745073,
+      "p50_ttft_ms": 559.595007012831,
+      "p95_ttft_ms": 622.5037557334872,
+      "p99_ttft_ms": 650.8072065294253,
+      "request_count": 108,
+      "violation_rate_at_500ms": 0.7037037037037037,
+      "violation_rate_at_550ms": 0.5462962962962963,
+      "violation_rate_at_600ms": 0.14814814814814814,
+      "violation_rate_at_650ms": 0.018518518518518517
+    },
+    "decode_heavy": {
+      "max_ttft_ms": 337.2164810425602,
+      "mean_ttft_ms": 247.52662956167046,
+      "min_ttft_ms": 145.84533497691154,
+      "p50_ttft_ms": 258.55878298170865,
+      "p95_ttft_ms": 312.7790946455206,
+      "p99_ttft_ms": 327.74964382115286,
+      "request_count": 54,
+      "violation_rate_at_500ms": 0.0,
+      "violation_rate_at_550ms": 0.0,
+      "violation_rate_at_600ms": 0.0,
+      "violation_rate_at_650ms": 0.0
+    },
+    "prefill_heavy": {
+      "max_ttft_ms": 607.2011369979009,
+      "mean_ttft_ms": 513.1698397135888,
+      "min_ttft_ms": 421.29182699136436,
+      "p50_ttft_ms": 519.6127995150164,
+      "p95_ttft_ms": 590.4846305493265,
+      "p99_ttft_ms": 602.8331737779081,
+      "request_count": 108,
+      "violation_rate_at_500ms": 0.5925925925925926,
+      "violation_rate_at_550ms": 0.3611111111111111,
+      "violation_rate_at_600ms": 0.027777777777777776,
+      "violation_rate_at_650ms": 0.0
+    },
+    "small_light": {
+      "max_ttft_ms": 358.01534599158913,
+      "mean_ttft_ms": 272.01734469794985,
+      "min_ttft_ms": 152.29653002461419,
+      "p50_ttft_ms": 282.3692274687346,
+      "p95_ttft_ms": 338.65177546977066,
+      "p99_ttft_ms": 354.7382378135808,
+      "request_count": 216,
+      "violation_rate_at_500ms": 0.0,
+      "violation_rate_at_550ms": 0.0,
+      "violation_rate_at_600ms": 0.0,
+      "violation_rate_at_650ms": 0.0
+    }
+  }
+}
