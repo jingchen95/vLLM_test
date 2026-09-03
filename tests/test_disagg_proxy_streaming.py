@@ -13,6 +13,7 @@ from xpyd.disagg_proxy import (
     EndpointTransport,
     MultiEndpointDisaggProxyCore,
     ProxyConfig,
+    ProxyLoadTracker,
     ProxyUpstreamError,
     ingress_logical_request_id,
     load_multi_endpoint_config,
@@ -97,6 +98,35 @@ def config():
 
 
 class DisaggProxyStreamingTests(unittest.TestCase):
+    def test_proxy_load_tracker_distinguishes_ingress_pair_and_completion(self):
+        clock = StepClock()
+        tracker = ProxyLoadTracker(wall_clock=clock)
+        tracker.ingress()
+        tracker.ingress()
+        tracker.assign(("P0", "D1"))
+        tracker.assign(("P1", "D0"))
+
+        active = tracker.snapshot()
+        self.assertEqual(active["accepted_requests_total"], 2)
+        self.assertEqual(active["in_flight_requests"], 2)
+        self.assertEqual(active["maximum_in_flight_requests"], 2)
+        self.assertEqual(active["unassigned_requests"], 0)
+        self.assertEqual(
+            active["active_requests_by_pair"],
+            {"P0->D1": 1, "P1->D0": 1},
+        )
+        self.assertEqual(
+            active["active_requests_by_endpoint"],
+            {"D0": 1, "D1": 1, "P0": 1, "P1": 1},
+        )
+
+        tracker.finish(("P0", "D1"), True)
+        tracker.finish(("P1", "D0"), False)
+        complete = tracker.snapshot()
+        self.assertEqual(complete["completed_requests_total"], 1)
+        self.assertEqual(complete["failed_requests_total"], 1)
+        self.assertEqual(complete["in_flight_requests"], 0)
+
     def test_phase4c1_overlay_resolves_full_multi_endpoint_config(self):
         root = Path(__file__).resolve().parents[1]
         loaded = load_multi_endpoint_config(
@@ -157,6 +187,62 @@ class DisaggProxyStreamingTests(unittest.TestCase):
         self.assertIn("___decode_addr_10.0.0.1:14580", prepared[1].diagnostics.vllm_request_id)
         self.assertEqual(prepared[3].headers["X-Xpyd-Prefill-Endpoint"], "P1")
         self.assertEqual(prepared[3].headers["X-Xpyd-Decode-Endpoint"], "D1")
+        state = core.load_tracker.snapshot()
+        self.assertEqual(state["accepted_requests_total"], 4)
+        self.assertEqual(state["completed_requests_total"], 4)
+        self.assertEqual(state["in_flight_requests"], 0)
+
+    def test_multi_endpoint_stream_remains_in_flight_until_consumed(self):
+        registry = EndpointRegistry()
+        transports = {}
+        for endpoint_id, role, gpu_id, http_port in (
+            ("P0", "prefill", 0, 8100),
+            ("D0", "decode", 1, 8200),
+        ):
+            spec = EndpointSpec(
+                endpoint_id, role, "fixture", "node", (gpu_id,), 1,
+                kv_connector="test-kv",
+            )
+            registry.register(spec, EndpointState(
+                endpoint_id, 1500, LifecycleState.ACTIVE, True,
+            ))
+            transports[endpoint_id] = EndpointTransport(
+                endpoint_id, "host", http_port, "10.0.0.1", 14579,
+            )
+        table = CompatibilityTable(endpoint_pairs=(
+            EndpointPairCompatibility(
+                "P0", "D0", "test-kv", 1, 1, True, "fixture"
+            ),
+        ))
+        core = MultiEndpointDisaggProxyCore(
+            registry, table, transports, (("P0", "D0"),),
+            SessionFactory([
+                FakeResponse(),
+                FakeResponse(
+                    content_type="text/event-stream",
+                    chunks=(b'data: {"choices":[{"text":"x"}]}\n\n',),
+                ),
+            ]),
+            clock=StepClock(), diagnostic_sink=lambda _: None,
+        )
+
+        async def scenario():
+            prepared = await core.prepare(
+                {"prompt": "x", "stream": True}, "concurrent-1"
+            )
+            self.assertEqual(
+                core.load_tracker.snapshot()["in_flight_requests"], 1
+            )
+            self.assertEqual(
+                core.load_tracker.snapshot()["active_requests_by_pair"],
+                {"P0->D0": 1},
+            )
+            return [chunk async for chunk in prepared.stream]
+
+        self.assertTrue(asyncio.run(scenario()))
+        state = core.load_tracker.snapshot()
+        self.assertEqual(state["in_flight_requests"], 0)
+        self.assertEqual(state["completed_requests_total"], 1)
 
     def test_ingress_reuses_one_id_and_rejects_conflicting_domains(self):
         self.assertEqual(

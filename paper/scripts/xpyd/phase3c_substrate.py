@@ -195,7 +195,10 @@ def _write_trace(
     with path.open("x", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(
             stream,
-            fieldnames=("request_id", "arrival_time_s", "input_len", "output_len"),
+            fieldnames=(
+                "request_id", "arrival_time_s", "input_len", "output_len",
+                "workload_class", "segment",
+            ),
         )
         writer.writeheader()
         # Interleave shapes so pair selection is not confounded with one shape.
@@ -209,6 +212,8 @@ def _write_trace(
                     "arrival_time_s": arrival,
                     "input_len": int(workload["input_len"]),
                     "output_len": int(workload["output_len"]),
+                    "workload_class": workload.get("workload_class", ""),
+                    "segment": workload.get("segment", workload.get("id", "")),
                 })
                 remaining[index] -= 1
                 count += 1
@@ -330,6 +335,7 @@ class Phase3CSubstrateHarness:
             "--output-file", (self.run_dir / "client" / "summary.txt").as_posix(),
             "--summary-json", (self.run_dir / "client" / "summary.json").as_posix(),
             "--requests-jsonl", (self.run_dir / "client" / "requests.jsonl").as_posix(),
+            "--load-events-jsonl", (self.run_dir / "client" / "load_events.jsonl").as_posix(),
             "--max-concurrency", str(int(client.get("max_concurrency", 1))),
             "--num-warmups", "0",
             "--request-timeout-s", str(float(client.get("request_timeout_s", 900))),

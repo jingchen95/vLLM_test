@@ -30,6 +30,95 @@ class ProxyUpstreamError(RuntimeError):
     """An upstream request or real stream failed."""
 
 
+class ProxyLoadTracker:
+    """Thread-safe ingress/in-flight counters for the multi-endpoint proxy.
+
+    These counters expose demand admitted to the proxy. They are deliberately
+    separate from vLLM's endpoint waiting/running metrics: neither source alone
+    is presented as the complete system backlog.
+    """
+
+    def __init__(self, wall_clock: Clock = time.time) -> None:
+        self.wall_clock = wall_clock
+        self._lock = threading.Lock()
+        self._accepted = 0
+        self._completed = 0
+        self._failed = 0
+        self._in_flight = 0
+        self._unassigned = 0
+        self._maximum_in_flight = 0
+        self._active_pairs: dict[tuple[str, str], int] = {}
+        self._last_update_unix_s: Optional[float] = None
+
+    def ingress(self) -> None:
+        with self._lock:
+            self._accepted += 1
+            self._in_flight += 1
+            self._unassigned += 1
+            self._maximum_in_flight = max(
+                self._maximum_in_flight, self._in_flight
+            )
+            self._last_update_unix_s = self.wall_clock()
+
+    def assign(self, pair: tuple[str, str]) -> None:
+        with self._lock:
+            if self._unassigned <= 0:
+                raise RuntimeError("proxy load tracker has no unassigned request")
+            self._unassigned -= 1
+            self._active_pairs[pair] = self._active_pairs.get(pair, 0) + 1
+            self._last_update_unix_s = self.wall_clock()
+
+    def finish(self, pair: Optional[tuple[str, str]], succeeded: bool) -> None:
+        with self._lock:
+            if self._in_flight <= 0:
+                raise RuntimeError("proxy load tracker has no in-flight request")
+            self._in_flight -= 1
+            if pair is None:
+                if self._unassigned <= 0:
+                    raise RuntimeError("proxy load tracker has no unassigned request")
+                self._unassigned -= 1
+            else:
+                active = self._active_pairs.get(pair, 0)
+                if active <= 0:
+                    raise RuntimeError("proxy load tracker pair is not active")
+                if active == 1:
+                    self._active_pairs.pop(pair)
+                else:
+                    self._active_pairs[pair] = active - 1
+            if succeeded:
+                self._completed += 1
+            else:
+                self._failed += 1
+            self._last_update_unix_s = self.wall_clock()
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            by_pair = {
+                "%s->%s" % pair: count
+                for pair, count in sorted(self._active_pairs.items())
+            }
+            by_endpoint: dict[str, int] = {}
+            for (prefill_id, decode_id), count in self._active_pairs.items():
+                by_endpoint[prefill_id] = by_endpoint.get(prefill_id, 0) + count
+                by_endpoint[decode_id] = by_endpoint.get(decode_id, 0) + count
+            return {
+                "schema_version": 1,
+                "accepted_requests_total": self._accepted,
+                "completed_requests_total": self._completed,
+                "failed_requests_total": self._failed,
+                "in_flight_requests": self._in_flight,
+                "unassigned_requests": self._unassigned,
+                "maximum_in_flight_requests": self._maximum_in_flight,
+                "active_requests_by_pair": by_pair,
+                "active_requests_by_endpoint": dict(sorted(by_endpoint.items())),
+                "last_update_unix_s": self._last_update_unix_s,
+                "semantics": (
+                    "proxy-admitted demand; combine with client admission delay "
+                    "and vLLM endpoint waiting/running metrics"
+                ),
+            }
+
+
 @dataclass(frozen=True)
 class ProxyConfig:
     prefill_http_host: str
@@ -591,10 +680,12 @@ class MultiEndpointDisaggProxyCore:
         clock: Clock = time.monotonic,
         wall_clock: Clock = time.time,
         diagnostic_sink: Optional[DiagnosticSink] = None,
+        load_tracker: Optional[ProxyLoadTracker] = None,
     ) -> None:
         self.registry = registry
         self.compatibility = compatibility
         self.transports = dict(transports)
+        self.load_tracker = load_tracker or ProxyLoadTracker(wall_clock)
         control_file = os.path.expandvars(str(routing_control_file or ""))
         if control_file:
             self.selector = FileControlledCompatiblePairs(
@@ -638,8 +729,35 @@ class MultiEndpointDisaggProxyCore:
         client_body: Mapping[str, Any],
         logical_request_id: Optional[str] = None,
     ) -> PreparedProxyResponse:
-        pair = self.selector.choose()
-        return await self.cores[pair].prepare(client_body, logical_request_id)
+        pair: Optional[tuple[str, str]] = None
+        self.load_tracker.ingress()
+        try:
+            pair = self.selector.choose()
+            self.load_tracker.assign(pair)
+            prepared = await self.cores[pair].prepare(
+                client_body, logical_request_id
+            )
+        except Exception:
+            self.load_tracker.finish(pair, False)
+            raise
+
+        if prepared.stream is None:
+            self.load_tracker.finish(pair, prepared.status_code < 400)
+            return prepared
+
+        upstream_stream = prepared.stream
+
+        async def tracked_stream() -> AsyncIterator[bytes]:
+            succeeded = False
+            try:
+                async for chunk in upstream_stream:
+                    yield chunk
+                succeeded = True
+            finally:
+                self.load_tracker.finish(pair, succeeded)
+
+        prepared.stream = tracked_stream()
+        return prepared
 
 
 def _build_multi_core(
@@ -812,6 +930,10 @@ def create_multi_app(
             "routing_policy": "round_robin_explicit_compatible_pairs",
             "compatible_pairs": [list(item) for item in core.selector.pairs],
         }
+
+    @app.get("/xpyd/state")
+    async def xpyd_state() -> dict[str, Any]:
+        return core.load_tracker.snapshot()
 
     @app.post("/v1/completions")
     async def completions(raw_request: Request) -> Any:

@@ -654,7 +654,10 @@ class Phase3AHarness:
         with path.open("w", newline="", encoding="utf-8") as stream:
             writer = csv.DictWriter(
                 stream,
-                fieldnames=("request_id", "arrival_time_s", "input_len", "output_len"),
+                fieldnames=(
+                    "request_id", "arrival_time_s", "input_len", "output_len",
+                    "workload_class", "segment",
+                ),
             )
             writer.writeheader()
             for index in range(count):
@@ -663,6 +666,8 @@ class Phase3AHarness:
                     "arrival_time_s": 0.0 if index == 0 else index / rate,
                     "input_len": int(probe["input_len"]),
                     "output_len": int(probe["output_len"]),
+                    "workload_class": probe.get("workload_class", ""),
+                    "segment": probe.get("segment", probe_id),
                 })
         return path
 
@@ -680,6 +685,7 @@ class Phase3AHarness:
             "--output-file", (client_dir / "summary.txt").as_posix(),
             "--summary-json", (client_dir / "summary.json").as_posix(),
             "--requests-jsonl", (client_dir / "requests.jsonl").as_posix(),
+            "--load-events-jsonl", (client_dir / "load_events.jsonl").as_posix(),
             "--max-concurrency", str(int(probe.get("max_concurrency", 1))),
             "--num-warmups", str(int(probe.get("num_warmups", 0))),
             "--request-timeout-s", str(float(self.config.get("request_timeout_s", 900))),

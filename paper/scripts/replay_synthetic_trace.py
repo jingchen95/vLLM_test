@@ -39,6 +39,55 @@ class TraceRequest:
     arrival_time_s: float
     input_len: int
     output_len: int
+    workload_class: str | None = None
+    segment: str | None = None
+
+
+class ClientLoadTracker:
+    """Record offered-load waiting and admitted in-flight demand.
+
+    Waiting here means a request whose trace arrival has occurred but which is
+    still held by the client concurrency limit. It is reported explicitly and
+    is never folded into server TTFT.
+    """
+
+    def __init__(self) -> None:
+        self.waiting = 0
+        self.in_flight = 0
+        self.maximum_waiting = 0
+        self.maximum_in_flight = 0
+        self.events: list[dict[str, Any]] = []
+
+    def _record(
+        self, event: str, request_id: str, monotonic_s: float, unix_s: float
+    ) -> None:
+        self.events.append({
+            "event": event,
+            "request_id": request_id,
+            "timestamp_monotonic_s": monotonic_s,
+            "timestamp_unix_s": unix_s,
+            "client_waiting_requests": self.waiting,
+            "client_in_flight_requests": self.in_flight,
+        })
+
+    def arrive(self, request_id: str, monotonic_s: float, unix_s: float) -> None:
+        self.waiting += 1
+        self.maximum_waiting = max(self.maximum_waiting, self.waiting)
+        self._record("TRACE_ARRIVAL", request_id, monotonic_s, unix_s)
+
+    def admit(self, request_id: str, monotonic_s: float, unix_s: float) -> None:
+        if self.waiting <= 0:
+            raise RuntimeError("client load tracker has no waiting request")
+        self.waiting -= 1
+        self.in_flight += 1
+        self.maximum_in_flight = max(self.maximum_in_flight, self.in_flight)
+        self._record("CLIENT_ADMIT", request_id, monotonic_s, unix_s)
+
+    def complete(self, request_id: str, monotonic_s: float, unix_s: float) -> None:
+        if self.in_flight <= 0:
+            raise RuntimeError("client load tracker has no in-flight request")
+        self.in_flight -= 1
+        self._record("REQUEST_COMPLETE", request_id, monotonic_s, unix_s)
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,6 +98,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output-file", required=True)
     p.add_argument("--summary-json", required=True)
     p.add_argument("--requests-jsonl")
+    p.add_argument("--load-events-jsonl")
     p.add_argument("--tokenizer-model")
     p.add_argument("--max-concurrency", type=int, default=64)
     p.add_argument("--num-warmups", type=int, default=0)
@@ -72,6 +122,10 @@ def load_trace(path: Path) -> list[TraceRequest]:
                     arrival_time_s=float(row["arrival_time_s"]),
                     input_len=int(row["input_len"]),
                     output_len=int(row["output_len"]),
+                    workload_class=(
+                        str(row.get("workload_class") or "").strip() or None
+                    ),
+                    segment=str(row.get("segment") or "").strip() or None,
                 )
             )
     rows.sort(key=lambda r: r.arrival_time_s)
@@ -371,6 +425,8 @@ async def replay_trace(
     request_timeout_s: float,
     num_warmups: int,
 ) -> dict[str, Any]:
+    if max_concurrency <= 0:
+        raise ValueError("max_concurrency must be positive")
     url = f"{base_url.rstrip('/')}/v1/completions"
     semaphore = asyncio.Semaphore(max_concurrency)
     results: list[dict[str, Any]] = []
@@ -379,6 +435,7 @@ async def replay_trace(
 
     timeout = aiohttp.ClientTimeout(total=request_timeout_s, connect=10, sock_connect=10)
     connector = aiohttp.TCPConnector(limit=max_concurrency)
+    load = ClientLoadTracker()
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         first_req = requests[0]
         await run_warmups(
@@ -391,9 +448,19 @@ async def replay_trace(
         )
 
         replay_start_mono = time.perf_counter()
+        replay_start_unix = time.time()
 
         async def one_request(req: TraceRequest) -> dict[str, Any]:
+            arrived_mono = time.perf_counter()
+            arrived_unix = time.time()
+            scheduled_mono = replay_start_mono + req.arrival_time_s
+            scheduled_unix = replay_start_unix + req.arrival_time_s
+            load.arrive(req.request_id, arrived_mono, arrived_unix)
+            waiting_at_arrival = load.waiting
             async with semaphore:
+                admitted_mono = time.perf_counter()
+                admitted_unix = time.time()
+                load.admit(req.request_id, admitted_mono, admitted_unix)
                 payload = {
                     "model": model,
                     "prompt": prompt_cache[req.input_len],
@@ -403,17 +470,37 @@ async def replay_trace(
                     "ignore_eos": True,
                     "stream": True,
                 }
-                result = await consume_sse_completion(
-                    session,
-                    url,
-                    payload,
-                    tokenizer,
-                    logical_request_id=req.request_id,
-                )
+                try:
+                    result = await consume_sse_completion(
+                        session,
+                        url,
+                        payload,
+                        tokenizer,
+                        logical_request_id=req.request_id,
+                    )
+                finally:
+                    load.complete(
+                        req.request_id, time.perf_counter(), time.time()
+                    )
                 result["trace_request_id"] = req.request_id
                 result["arrival_time_s"] = req.arrival_time_s
                 result["input_len"] = req.input_len
                 result["output_len"] = req.output_len
+                result["workload_class"] = req.workload_class
+                result["segment"] = req.segment
+                result["scheduled_arrival_unix_s"] = scheduled_unix
+                result["trace_dispatch_unix_s"] = arrived_unix
+                result["client_admitted_unix_s"] = admitted_unix
+                result["trace_dispatch_lag_ms"] = max(
+                    0.0, (arrived_mono - scheduled_mono) * 1000.0
+                )
+                result["client_admission_delay_ms"] = max(
+                    0.0, (admitted_mono - arrived_mono) * 1000.0
+                )
+                result["offered_to_admission_delay_ms"] = max(
+                    0.0, (admitted_mono - scheduled_mono) * 1000.0
+                )
+                result["client_waiting_after_arrival"] = waiting_at_arrival
                 return result
 
         for req in requests:
@@ -462,6 +549,19 @@ async def replay_trace(
         source = str(result.get("completion_token_source") or "unavailable")
         completion_token_sources[source] = completion_token_sources.get(source, 0) + 1
 
+    admission_delays = [
+        float(r["client_admission_delay_ms"])
+        for r in results if r.get("client_admission_delay_ms") is not None
+    ]
+    dispatch_lags = [
+        float(r["trace_dispatch_lag_ms"])
+        for r in results if r.get("trace_dispatch_lag_ms") is not None
+    ]
+    class_counts: dict[str, int] = {}
+    for request in requests:
+        key = request.workload_class or "UNCLASSIFIED"
+        class_counts[key] = class_counts.get(key, 0) + 1
+
     return {
         "requests_total": len(results),
         "logical_request_count": len(results),
@@ -479,6 +579,17 @@ async def replay_trace(
         "p99_e2e_latency_ms": percentile(e2e_latencies, 99.0),
         "trace_duration_s": requests[-1].arrival_time_s if requests else 0.0,
         "max_concurrency": max_concurrency,
+        "maximum_client_waiting_requests": load.maximum_waiting,
+        "maximum_client_in_flight_requests": load.maximum_in_flight,
+        "mean_client_admission_delay_ms": mean(admission_delays),
+        "p99_client_admission_delay_ms": percentile(admission_delays, 99.0),
+        "mean_trace_dispatch_lag_ms": mean(dispatch_lags),
+        "p99_trace_dispatch_lag_ms": percentile(dispatch_lags, 99.0),
+        "workload_class_counts": dict(sorted(class_counts.items())),
+        "load_semantics": (
+            "client waiting is pre-send admission delay and is excluded from "
+            "server TTFT; combine it with proxy and endpoint load telemetry"
+        ),
         "num_warmups": num_warmups,
         "input_tokens_total": input_tokens_total,
         "requested_output_tokens_total": requested_output_tokens_total,
@@ -502,6 +613,7 @@ async def replay_trace(
             if r.get("ok") and r.get("logical_request_id_propagated")
         ),
         "request_results": results,
+        "client_load_events": load.events,
     }
 
 
@@ -527,6 +639,10 @@ def write_text_summary(path: Path, trace_csv: Path, summary: dict[str, Any]) -> 
         f"Mean E2E latency (ms):                   {format_metric(summary['mean_e2e_latency_ms'])}",
         f"P99 E2E latency (ms):                    {format_metric(summary['p99_e2e_latency_ms'])}",
         f"Replay trace duration (s):               {summary['trace_duration_s']:.3f}",
+        f"Maximum client waiting requests:         {summary['maximum_client_waiting_requests']}",
+        f"Maximum client in-flight requests:       {summary['maximum_client_in_flight_requests']}",
+        f"Mean client admission delay (ms):        {format_metric(summary['mean_client_admission_delay_ms'])}",
+        f"P99 client admission delay (ms):         {format_metric(summary['p99_client_admission_delay_ms'])}",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -537,6 +653,9 @@ def main() -> int:
     output_file = Path(args.output_file)
     summary_json = Path(args.summary_json)
     requests_jsonl = Path(args.requests_jsonl) if args.requests_jsonl else None
+    load_events_jsonl = (
+        Path(args.load_events_jsonl) if args.load_events_jsonl else None
+    )
 
     requests = load_trace(trace_csv)
     tokenizer_name = args.tokenizer_model or args.model
@@ -560,6 +679,7 @@ def main() -> int:
         return 130
 
     request_results = summary.pop("request_results")
+    load_events = summary.pop("client_load_events")
     summary["trace_csv"] = trace_csv.as_posix()
     summary["model"] = args.model
     summary["tokenizer_model"] = tokenizer_name
@@ -568,6 +688,10 @@ def main() -> int:
         with requests_jsonl.open("w", encoding="utf-8") as stream:
             for result in request_results:
                 stream.write(json.dumps(result, sort_keys=True) + "\n")
+    if load_events_jsonl is not None:
+        with load_events_jsonl.open("w", encoding="utf-8") as stream:
+            for event in load_events:
+                stream.write(json.dumps(event, sort_keys=True) + "\n")
     write_text_summary(output_file, trace_csv, summary)
 
     print(json.dumps({

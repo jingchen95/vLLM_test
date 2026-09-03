@@ -32,6 +32,8 @@ breaking reproducibility commands; new implementation code belongs under
 - [Related-work comparison](docs/RelatedWorkComparison_updated_2026-08-17.md)
 - [Paper and experiment documentation](paper/README.md)
 - [XpYd runtime design](paper/XPYD_RUNTIME_DESIGN.md)
+- [XpYd system and control design contract](paper/XPYD_SYSTEM_CONTROL_DESIGN.md)
+- [XpYd Sections 1–14 architecture audit](paper/XPYD_ARCHITECTURE_AUDIT.md)
 - [Phase 3C substrate validation](paper/XPYD_PHASE3C_SUBSTRATE.md)
 
 Large raw or regenerable local artifacts are intentionally excluded from Git.

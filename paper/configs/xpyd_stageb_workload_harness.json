@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "purpose": "Post-Phase-4 Stage B workload-harness semantics validation; no routing or DVFS policy evaluation",
+  "bucket_definition": {
+    "short_input_max_tokens": 512,
+    "short_output_max_tokens": 256
+  },
+  "shapes": {
+    "SS": {"input_len": 128, "output_len": 128},
+    "SL": {"input_len": 128, "output_len": 512},
+    "LS": {"input_len": 2048, "output_len": 128},
+    "LL": {"input_len": 2048, "output_len": 512}
+  },
+  "control_window_s": 8.0,
+  "scenarios": [
+    {
+      "id": "stationary_mixed",
+      "segments": [
+        {
+          "id": "steady_mix",
+          "request_count": 32,
+          "rate_rps": 2.0,
+          "class_weights": {"SS": 0.35, "SL": 0.15, "LS": 0.35, "LL": 0.15}
+        }
+      ]
+    },
+    {
+      "id": "dynamic_mixed_burst",
+      "segments": [
+        {
+          "id": "light_mix",
+          "request_count": 16,
+          "rate_rps": 1.0,
+          "class_weights": {"SS": 0.625, "SL": 0.125, "LS": 0.125, "LL": 0.125}
+        },
+        {
+          "id": "prefill_burst",
+          "request_count": 24,
+          "rate_rps": 4.0,
+          "class_weights": {"SS": 0.125, "SL": 0.125, "LS": 0.5, "LL": 0.25}
+        },
+        {
+          "id": "decode_period",
+          "request_count": 24,
+          "rate_rps": 3.0,
+          "class_weights": {"SS": 0.125, "SL": 0.5, "LS": 0.125, "LL": 0.25}
+        },
+        {
+          "id": "recovery_mix",
+          "request_count": 16,
+          "rate_rps": 1.0,
+          "class_weights": {"SS": 0.625, "SL": 0.125, "LS": 0.125, "LL": 0.125}
+        }
+      ]
+    }
+  ],
+  "proposed_validation_matrix": [
+    {
+      "id": "B0_cpu_contract",
+      "hardware": false,
+      "goal": "Validate labels, offered arrivals, admission-delay accounting, and window summaries"
+    },
+    {
+      "id": "B1_concurrency_2_smoke",
+      "hardware": true,
+      "scenario": "stationary_mixed",
+      "max_concurrency": 2,
+      "frequencies": "all validated HIGH",
+      "routing": "round-robin over four validated pairs",
+      "control": "disabled"
+    },
+    {
+      "id": "B2_concurrency_4_smoke",
+      "hardware": true,
+      "scenario": "stationary_mixed",
+      "max_concurrency": 4,
+      "frequencies": "all validated HIGH",
+      "routing": "round-robin over four validated pairs",
+      "control": "disabled",
+      "prerequisite": "B1 passes connector, request-ID, token, SSE, and backlog audits"
+    },
+    {
+      "id": "B3_dynamic_harness_smoke",
+      "hardware": true,
+      "scenario": "dynamic_mixed_burst",
+      "max_concurrency": 4,
+      "frequencies": "all validated HIGH",
+      "routing": "round-robin over four validated pairs",
+      "control": "disabled",
+      "prerequisite": "B2 passes"
+    }
+  ]
+}
