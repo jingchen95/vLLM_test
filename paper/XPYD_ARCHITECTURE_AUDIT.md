@@ -156,7 +156,8 @@ establish correct concurrent transport and measurement behavior.
 
 ## Decision
 
-Architecture audit complete. The code is **READY FOR CPU VALIDATION** and the
-small Stage-B physical validation sequence is defined. It is **not yet ready for
+Architecture audit and B0 CPU contract validation are complete. The small
+Stage-B physical validation sequence is defined and implemented as a
+fail-closed B1→B2→B3 runner. It is **not yet ready for
 a new controller comparison**: concurrent connector behavior and joined
 mixed-window load telemetry must first pass B1–B3.

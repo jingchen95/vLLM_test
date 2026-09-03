@@ -45,6 +45,7 @@ from xpyd.phase3b_energy import (
 from xpyd.registry import EndpointRegistry
 from xpyd.types import EndpointSpec, EndpointState, LifecycleState
 from xpyd.vllm_metrics import VLLMMetricsCollector
+from xpyd.workload_harness import write_trace as write_mixed_trace
 
 
 class Phase3CError(RuntimeError):
@@ -262,7 +263,10 @@ def _throttle_audit(
 
 
 class Phase3CSubstrateHarness:
-    def __init__(self, config: Mapping[str, Any], run_id: Optional[str] = None) -> None:
+    def __init__(
+        self, config: Mapping[str, Any], run_id: Optional[str] = None,
+        trace_rows: Optional[Sequence[Mapping[str, Any]]] = None,
+    ) -> None:
         self.config = dict(config)
         self.registry, self.compatibility, self.pairs = build_registry_and_compatibility(config)
         self.endpoints = tuple(sorted(self.registry.list_endpoints(), key=lambda item: item.endpoint_id))
@@ -271,6 +275,7 @@ class Phase3CSubstrateHarness:
         self.collector = VLLMMetricsCollector(**dict(config.get("collector", {})))
         self.scrape_sequence = {item.endpoint_id: 0 for item in self.endpoints}
         self.scrape_lock = threading.Lock()
+        self.trace_rows = tuple(dict(row) for row in trace_rows or ())
 
     def _layout(self) -> None:
         if self.run_dir.exists():
@@ -364,9 +369,13 @@ class Phase3CSubstrateHarness:
         proxy_log.write_text("", encoding="utf-8")
         trace = self.run_dir / "client" / "trace.csv"
         request_id_namespace = "phase3c-%s" % self.run_id
-        expected_requests = _write_trace(
-            trace, self.config["workloads"], request_id_namespace
-        )
+        if self.trace_rows:
+            write_mixed_trace(trace, self.trace_rows)
+            expected_requests = len(self.trace_rows)
+        else:
+            expected_requests = _write_trace(
+                trace, self.config["workloads"], request_id_namespace
+            )
         _write_json(self.run_dir / "client" / "command.json", {"argv": self._client_command(trace)})
 
         processes: dict[str, Any] = {}
@@ -499,6 +508,13 @@ class Phase3CSubstrateHarness:
             })
             request_rows.append({
                 "request_id": request_id,
+                "workload_class": request.get("workload_class"),
+                "segment": request.get("segment"),
+                "arrival_time_s": request.get("arrival_time_s"),
+                "scheduled_arrival_unix_s": request.get("scheduled_arrival_unix_s"),
+                "client_admitted_unix_s": request.get("client_admitted_unix_s"),
+                "client_admission_delay_ms": request.get("client_admission_delay_ms"),
+                "client_waiting_after_arrival": request.get("client_waiting_after_arrival"),
                 "input_len": request.get("input_len"),
                 "requested_output_len": request.get("output_len"),
                 "observed_output_tokens": request.get("completion_tokens"),
@@ -714,6 +730,23 @@ class Phase3CSubstrateHarness:
                 "missed": sum(item.missed for item in monitoring_events),
                 "errors": sum(bool(item.attempt and item.attempt.error) for item in monitoring_events),
             },
+            "client_load": {
+                "maximum_waiting_requests": client_summary.get(
+                    "maximum_client_waiting_requests"
+                ),
+                "maximum_in_flight_requests": client_summary.get(
+                    "maximum_client_in_flight_requests"
+                ),
+                "mean_admission_delay_ms": client_summary.get(
+                    "mean_client_admission_delay_ms"
+                ),
+                "p99_admission_delay_ms": client_summary.get(
+                    "p99_client_admission_delay_ms"
+                ),
+                "workload_class_counts": client_summary.get(
+                    "workload_class_counts", {}
+                ),
+            },
         }
         audit = {
             "valid": valid,
@@ -727,7 +760,10 @@ class Phase3CSubstrateHarness:
         _write_json(self.run_dir / "summary.json", summary)
         _write_json(self.run_dir / "audit.json", audit)
         _csv(self.run_dir / "requests.csv", request_rows, (
-            "request_id", "input_len", "requested_output_len", "observed_output_tokens",
+            "request_id", "workload_class", "segment", "arrival_time_s",
+            "scheduled_arrival_unix_s", "client_admitted_unix_s",
+            "client_admission_delay_ms", "client_waiting_after_arrival",
+            "input_len", "requested_output_len", "observed_output_tokens",
             "prefill_endpoint_id", "decode_endpoint_id", "ttft_ms", "tpot_ms",
             "mean_itl_ms", "e2e_latency_ms", "prefill_latency_ms", "decode_stream_latency_ms",
             "real_sse", "logical_request_id_propagated",
