@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "purpose": "Stage C0 fixed-HIGH capacity/load calibration; no controller or adaptive policy",
+  "output_root": "results/stagec0_capacity",
+  "physical_topology": {
+    "prefill_node": "neptune",
+    "decode_node": "europa"
+  },
+  "bucket_definition": {
+    "short_input_max_tokens": 512,
+    "short_output_max_tokens": 256
+  },
+  "shapes": {
+    "SS": {"input_len": 128, "output_len": 128},
+    "SL": {"input_len": 128, "output_len": 512},
+    "LS": {"input_len": 2048, "output_len": 128},
+    "LL": {"input_len": 2048, "output_len": 512}
+  },
+  "control_window_s": 20.0,
+  "scenarios": [
+    {"id": "stationary_005", "segments": [{"id": "steady_mix", "request_count": 48, "rate_rps": 0.05, "class_weights": {"SS": 0.35, "SL": 0.15, "LS": 0.35, "LL": 0.15}}]},
+    {"id": "stationary_010", "segments": [{"id": "steady_mix", "request_count": 48, "rate_rps": 0.10, "class_weights": {"SS": 0.35, "SL": 0.15, "LS": 0.35, "LL": 0.15}}]},
+    {"id": "stationary_015", "segments": [{"id": "steady_mix", "request_count": 48, "rate_rps": 0.15, "class_weights": {"SS": 0.35, "SL": 0.15, "LS": 0.35, "LL": 0.15}}]},
+    {"id": "stationary_020", "segments": [{"id": "steady_mix", "request_count": 48, "rate_rps": 0.20, "class_weights": {"SS": 0.35, "SL": 0.15, "LS": 0.35, "LL": 0.15}}]},
+    {"id": "stationary_030", "segments": [{"id": "steady_mix", "request_count": 48, "rate_rps": 0.30, "class_weights": {"SS": 0.35, "SL": 0.15, "LS": 0.35, "LL": 0.15}}]}
+  ],
+  "capacity_calibration": {
+    "max_concurrency": 4,
+    "frequencies": "all validated HIGH",
+    "routing": "round-robin over four validated pairs",
+    "control": "disabled",
+    "slo": {"ttft_ms": 550.0, "tpot_ms": 65.0},
+    "maximum_selected_slo_violation_rate": 0.05,
+    "trend_thresholds": {
+      "minimum_sustainable_throughput_ratio": 0.90,
+      "admission_delay_slope_ms_per_s": 100.0,
+      "quartile_delay_increase_ms": 1000.0,
+      "minimum_close_waiting": 2.0,
+      "low_mean_client_waiting": 0.25,
+      "low_p95_admission_delay_ms": 250.0
+    },
+    "load_points": [
+      {"id": "rate_005", "scenario": "stationary_005", "offered_rate_rps": 0.05},
+      {"id": "rate_010", "scenario": "stationary_010", "offered_rate_rps": 0.10},
+      {"id": "rate_015", "scenario": "stationary_015", "offered_rate_rps": 0.15},
+      {"id": "rate_020", "scenario": "stationary_020", "offered_rate_rps": 0.20},
+      {"id": "rate_030", "scenario": "stationary_030", "offered_rate_rps": 0.30}
+    ]
+  }
+}

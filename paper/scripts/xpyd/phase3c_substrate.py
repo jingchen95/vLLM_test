@@ -534,6 +534,7 @@ class Phase3CSubstrateHarness:
         metrics_delta = Phase3AHarness._semantic_delta(probe, client_summary, before, after)
         _write_json(self.run_dir / "derived" / "metrics_delta.json", metrics_delta)
         scrape_rows = []
+        endpoint_load_rows = []
         for event in monitoring_events:
             attempt = event.attempt
             scrape_rows.append({
@@ -549,9 +550,39 @@ class Phase3CSubstrateHarness:
                 "missed": event.missed,
                 "error": repr(attempt.error) if attempt and attempt.error else None,
             })
+            snapshot = (
+                attempt.raw.snapshot
+                if attempt and attempt.raw and attempt.error is None else None
+            )
+            endpoint_load_rows.append({
+                "endpoint_id": event.endpoint.endpoint_id,
+                "schedule_index": event.schedule_index,
+                "actual_start_wall_s": (
+                    attempt.actual_wall_start_s if attempt else None
+                ),
+                "num_requests_running": (
+                    snapshot.num_requests_running if snapshot else None
+                ),
+                "num_requests_waiting": (
+                    snapshot.num_requests_waiting if snapshot else None
+                ),
+                "kv_cache_usage_frac": (
+                    snapshot.kv_cache_usage_frac if snapshot else None
+                ),
+                "valid": snapshot is not None,
+            })
         _csv(
             self.run_dir / "derived" / "scrape_schedule.csv", scrape_rows,
             ("endpoint_id", "schedule_index", "scheduled_monotonic_s", "actual_start_wall_s", "actual_finish_wall_s", "scrape_latency_s", "missed", "error"),
+        )
+        _csv(
+            self.run_dir / "derived" / "endpoint_load.csv",
+            endpoint_load_rows,
+            (
+                "endpoint_id", "schedule_index", "actual_start_wall_s",
+                "num_requests_running", "num_requests_waiting",
+                "kv_cache_usage_frac", "valid",
+            ),
         )
 
         successful_requests = [item for item in requests if item.get("ok")]

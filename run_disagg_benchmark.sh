@@ -95,6 +95,9 @@ XPYD_PHASE4C_MATCHED_ACCEPTED_AUDIT="${XPYD_PHASE4C_MATCHED_ACCEPTED_AUDIT:-}"
 XPYD_STAGEB_RUNTIME_CONFIG="${XPYD_STAGEB_RUNTIME_CONFIG:-}"
 XPYD_STAGEB_WORKLOAD_CONFIG="${XPYD_STAGEB_WORKLOAD_CONFIG:-}"
 XPYD_STAGEB_RUN_ID="${XPYD_STAGEB_RUN_ID:-}"
+XPYD_STAGEC0_RUNTIME_CONFIG="${XPYD_STAGEC0_RUNTIME_CONFIG:-}"
+XPYD_STAGEC0_WORKLOAD_CONFIG="${XPYD_STAGEC0_WORKLOAD_CONFIG:-}"
+XPYD_STAGEC0_RUN_ID="${XPYD_STAGEC0_RUN_ID:-}"
 XPYD_ROUTING_CONTROL_FILE="${XPYD_ROUTING_CONTROL_FILE:-}"
 XPYD_NO_GPU_MUTATION="${XPYD_NO_GPU_MUTATION:-0}"
 _xpyd_mode_count=0
@@ -108,21 +111,30 @@ _xpyd_mode_count=0
 [ -n "${XPYD_PHASE4B1_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
 [ -n "${XPYD_PHASE4C_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
 [ -n "${XPYD_STAGEB_RUNTIME_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
+[ -n "${XPYD_STAGEC0_RUNTIME_CONFIG}" ] && _xpyd_mode_count=$((_xpyd_mode_count + 1))
 if [ "${_xpyd_mode_count}" -gt 1 ]; then
-    echo "ERROR: choose exactly one XpYd Phase 3A/3B/3C/3D/4A/4B/4B.1/4C/Stage-B config" >&2
+    echo "ERROR: choose exactly one XpYd Phase 3A/3B/3C/3D/4A/4B/4B.1/4C/Stage-B/Stage-C0 config" >&2
     exit 2
 fi
 if [ -n "${XPYD_STAGEB_RUNTIME_CONFIG}" ] && [ -z "${XPYD_STAGEB_WORKLOAD_CONFIG}" ]; then
     echo "ERROR: XPYD_STAGEB_WORKLOAD_CONFIG is required with XPYD_STAGEB_RUNTIME_CONFIG" >&2
     exit 2
 fi
+if [ -n "${XPYD_STAGEC0_RUNTIME_CONFIG}" ] && [ -z "${XPYD_STAGEC0_WORKLOAD_CONFIG}" ]; then
+    echo "ERROR: XPYD_STAGEC0_WORKLOAD_CONFIG is required with XPYD_STAGEC0_RUNTIME_CONFIG" >&2
+    exit 2
+fi
+if [ -n "${XPYD_STAGEC0_WORKLOAD_CONFIG}" ] && [ -z "${XPYD_STAGEC0_RUNTIME_CONFIG}" ]; then
+    echo "ERROR: XPYD_STAGEC0_RUNTIME_CONFIG is required with XPYD_STAGEC0_WORKLOAD_CONFIG" >&2
+    exit 2
+fi
 if [ -n "${XPYD_STAGEB_WORKLOAD_CONFIG}" ] && [ -z "${XPYD_STAGEB_RUNTIME_CONFIG}" ]; then
     echo "ERROR: XPYD_STAGEB_RUNTIME_CONFIG is required with XPYD_STAGEB_WORKLOAD_CONFIG" >&2
     exit 2
 fi
-[ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}${XPYD_PHASE3D_CONFIG}${XPYD_PHASE4A_CONFIG}${XPYD_PHASE4B_CONFIG}${XPYD_PHASE4B1_CONFIG}${XPYD_PHASE4C_CONFIG}${XPYD_STAGEB_RUNTIME_CONFIG}" ] && XPYD_NO_GPU_MUTATION=1
+[ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}${XPYD_PHASE3D_CONFIG}${XPYD_PHASE4A_CONFIG}${XPYD_PHASE4B_CONFIG}${XPYD_PHASE4B1_CONFIG}${XPYD_PHASE4C_CONFIG}${XPYD_STAGEB_RUNTIME_CONFIG}${XPYD_STAGEC0_RUNTIME_CONFIG}" ] && XPYD_NO_GPU_MUTATION=1
 XPYD_CHARACTERIZATION_CLOCKS_REQUESTED=0
-[ -n "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}${XPYD_PHASE3D_CONFIG}${XPYD_PHASE4A_CONFIG}${XPYD_PHASE4B_CONFIG}${XPYD_PHASE4B1_CONFIG}${XPYD_PHASE4C_CONFIG}${XPYD_STAGEB_RUNTIME_CONFIG}" ] && XPYD_CHARACTERIZATION_CLOCKS_REQUESTED=1
+[ -n "${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}${XPYD_PHASE3D_CONFIG}${XPYD_PHASE4A_CONFIG}${XPYD_PHASE4B_CONFIG}${XPYD_PHASE4B1_CONFIG}${XPYD_PHASE4C_CONFIG}${XPYD_STAGEB_RUNTIME_CONFIG}${XPYD_STAGEC0_RUNTIME_CONFIG}" ] && XPYD_CHARACTERIZATION_CLOCKS_REQUESTED=1
 if [ -n "${XPYD_PHASE3D_CONFIG}" ] && [ "${XPYD_PHASE3D_STAGE}" != "A" ] && [ "${XPYD_PHASE3D_STAGE}" != "B" ]; then
     echo "ERROR: XPYD_PHASE3D_STAGE must be A or B" >&2
     exit 2
@@ -181,7 +193,7 @@ _trap_cleanup() {
     if [ "${XPYD_CHARACTERIZATION_CLOCKS_REQUESTED:-0}" -eq 1 ]; then
         [ -n "${L40S_NODE:-}" ] && reset_characterization_clocks "${L40S_NODE}" P0 0 || true
         [ -n "${L4_NODE:-}" ] && reset_characterization_clocks "${L4_NODE}" D0 0 || true
-        if [ -n "${XPYD_PHASE3C_CONFIG:-}${XPYD_PHASE3D_CONFIG:-}${XPYD_PHASE4A_CONFIG:-}${XPYD_PHASE4B_CONFIG:-}${XPYD_PHASE4B1_CONFIG:-}${XPYD_PHASE4C_CONFIG:-}${XPYD_STAGEB_RUNTIME_CONFIG:-}" ]; then
+        if [ -n "${XPYD_PHASE3C_CONFIG:-}${XPYD_PHASE3D_CONFIG:-}${XPYD_PHASE4A_CONFIG:-}${XPYD_PHASE4B_CONFIG:-}${XPYD_PHASE4B1_CONFIG:-}${XPYD_PHASE4C_CONFIG:-}${XPYD_STAGEB_RUNTIME_CONFIG:-}${XPYD_STAGEC0_RUNTIME_CONFIG:-}" ]; then
             reset_characterization_clocks "${L40S_NODE}" P1 1 || true
             reset_characterization_clocks "${L4_NODE}" D1 1 || true
         fi
@@ -854,7 +866,7 @@ start_vllm_server() {
             ${extra_args} \
             > "${log_file}" 2>&1 &
         _server_pid=$!
-        [ -n "${XPYD_PHASE3C_CONFIG:-}${XPYD_PHASE3D_CONFIG:-}${XPYD_PHASE4A_CONFIG:-}${XPYD_PHASE4B_CONFIG:-}${XPYD_PHASE4B1_CONFIG:-}${XPYD_PHASE4C_CONFIG:-}${XPYD_STAGEB_RUNTIME_CONFIG:-}" ] && PHASE3C_SERVER_PIDS+=("${_server_pid}")
+        [ -n "${XPYD_PHASE3C_CONFIG:-}${XPYD_PHASE3D_CONFIG:-}${XPYD_PHASE4A_CONFIG:-}${XPYD_PHASE4B_CONFIG:-}${XPYD_PHASE4B1_CONFIG:-}${XPYD_PHASE4C_CONFIG:-}${XPYD_STAGEB_RUNTIME_CONFIG:-}${XPYD_STAGEC0_RUNTIME_CONFIG:-}" ] && PHASE3C_SERVER_PIDS+=("${_server_pid}")
         # Record in the appropriate global for the EXIT trap
         if [ "${port}" = "${PREFILL_PORT}" ]; then L40S_SERVER_PID=${_server_pid}
         else                                        L4_SERVER_PID=${_server_pid}; fi
@@ -862,7 +874,7 @@ start_vllm_server() {
         local step_gpu_count="${tp}"
         local step_gpu_bind="map_gpu:${cuda_devs}"
         local step_environment=()
-        if [ -n "${XPYD_PHASE3C_CONFIG:-}${XPYD_PHASE3D_CONFIG:-}${XPYD_PHASE4A_CONFIG:-}${XPYD_PHASE4B_CONFIG:-}${XPYD_PHASE4B1_CONFIG:-}${XPYD_PHASE4C_CONFIG:-}${XPYD_STAGEB_RUNTIME_CONFIG:-}" ]; then
+        if [ -n "${XPYD_PHASE3C_CONFIG:-}${XPYD_PHASE3D_CONFIG:-}${XPYD_PHASE4A_CONFIG:-}${XPYD_PHASE4B_CONFIG:-}${XPYD_PHASE4B1_CONFIG:-}${XPYD_PHASE4C_CONFIG:-}${XPYD_STAGEB_RUNTIME_CONFIG:-}${XPYD_STAGEC0_RUNTIME_CONFIG:-}" ]; then
             # Both Phase 3C servers on this node need cgroup access to the
             # explicitly pinned GPU0/1 set. Each process still sees one GPU.
             step_gpu_count=2
@@ -883,7 +895,7 @@ start_vllm_server() {
                 ${extra_args} \
             > "${log_file}" 2>&1 &
         _server_pid=$!
-        [ -n "${XPYD_PHASE3C_CONFIG:-}${XPYD_PHASE3D_CONFIG:-}${XPYD_PHASE4A_CONFIG:-}${XPYD_PHASE4B_CONFIG:-}${XPYD_PHASE4B1_CONFIG:-}${XPYD_PHASE4C_CONFIG:-}${XPYD_STAGEB_RUNTIME_CONFIG:-}" ] && PHASE3C_SERVER_PIDS+=("${_server_pid}")
+        [ -n "${XPYD_PHASE3C_CONFIG:-}${XPYD_PHASE3D_CONFIG:-}${XPYD_PHASE4A_CONFIG:-}${XPYD_PHASE4B_CONFIG:-}${XPYD_PHASE4B1_CONFIG:-}${XPYD_PHASE4C_CONFIG:-}${XPYD_STAGEB_RUNTIME_CONFIG:-}${XPYD_STAGEC0_RUNTIME_CONFIG:-}" ] && PHASE3C_SERVER_PIDS+=("${_server_pid}")
         if [ "${port}" = "${PREFILL_PORT}" ]; then L40S_SERVER_PID=${_server_pid}
         else                                        L4_SERVER_PID=${_server_pid}; fi
     fi
@@ -1476,7 +1488,7 @@ run_experiment_CD() {
 # client, metrics parser, and NVML monitor are reused by the Phase 3C harness.
 # ---------------------------------------------------------------------------
 run_phase3c_substrate() {
-    local multi_config="${XPYD_STAGEB_RUNTIME_CONFIG:-${XPYD_PHASE3C_CONFIG:-${XPYD_PHASE3D_CONFIG:-${XPYD_PHASE4A_CONFIG:-${XPYD_PHASE4B_CONFIG:-${XPYD_PHASE4B1_CONFIG:-${XPYD_PHASE4C_CONFIG}}}}}}}"
+    local multi_config="${XPYD_STAGEC0_RUNTIME_CONFIG:-${XPYD_STAGEB_RUNTIME_CONFIG:-${XPYD_PHASE3C_CONFIG:-${XPYD_PHASE3D_CONFIG:-${XPYD_PHASE4A_CONFIG:-${XPYD_PHASE4B_CONFIG:-${XPYD_PHASE4B1_CONFIG:-${XPYD_PHASE4C_CONFIG}}}}}}}}"
     local p_ip d_ip p_http d_http
     p_ip=$(get_node_ip "${L40S_NODE}")
     d_ip=$(get_node_ip "${L4_NODE}")
@@ -1502,7 +1514,7 @@ run_phase3c_substrate() {
     export XPYD_PHASE4B_ACCEPTED_ACTIVE_SMOKE_AUDIT
     export XPYD_PHASE4C_ACCEPTED_DYNAMIC_AUDIT
     export XPYD_PHASE4C_MATCHED_ACCEPTED_AUDIT
-    if [ -n "${XPYD_STAGEB_RUNTIME_CONFIG}" ]; then
+    if [ -n "${XPYD_STAGEB_RUNTIME_CONFIG}${XPYD_STAGEC0_RUNTIME_CONFIG}" ]; then
         XPYD_ROUTING_CONTROL_FILE=""
         export XPYD_ROUTING_CONTROL_FILE
     elif [ -n "${XPYD_PHASE3D_CONFIG}" ]; then
@@ -1564,7 +1576,10 @@ run_phase3c_substrate() {
     done
 
     local args
-    if [ -n "${XPYD_STAGEB_RUNTIME_CONFIG}" ]; then
+    if [ -n "${XPYD_STAGEC0_RUNTIME_CONFIG}" ]; then
+        args=(-m xpyd.stagec0_capacity --runtime-config "${XPYD_STAGEC0_RUNTIME_CONFIG}" --workload-config "${XPYD_STAGEC0_WORKLOAD_CONFIG}")
+        [ -n "${XPYD_STAGEC0_RUN_ID}" ] && args+=(--run-id "${XPYD_STAGEC0_RUN_ID}")
+    elif [ -n "${XPYD_STAGEB_RUNTIME_CONFIG}" ]; then
         args=(-m xpyd.stageb_physical --runtime-config "${XPYD_STAGEB_RUNTIME_CONFIG}" --workload-config "${XPYD_STAGEB_WORKLOAD_CONFIG}")
         [ -n "${XPYD_STAGEB_RUN_ID}" ] && args+=(--run-id "${XPYD_STAGEB_RUN_ID}")
     elif [ -n "${XPYD_PHASE4C_CONFIG}" ]; then
@@ -1613,7 +1628,7 @@ run_experiment_E() {
     local vllm_ver
     vllm_ver=$("${PYTHON_BIN}" -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "unknown")
     echo "  vLLM version: ${vllm_ver}"
-    if [ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}${XPYD_PHASE3D_CONFIG}${XPYD_PHASE4A_CONFIG}${XPYD_PHASE4B_CONFIG}${XPYD_PHASE4B1_CONFIG}${XPYD_PHASE4C_CONFIG}${XPYD_STAGEB_RUNTIME_CONFIG}" ] && [ "${vllm_ver}" != "0.15.1" ]; then
+    if [ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}${XPYD_PHASE3D_CONFIG}${XPYD_PHASE4A_CONFIG}${XPYD_PHASE4B_CONFIG}${XPYD_PHASE4B1_CONFIG}${XPYD_PHASE4C_CONFIG}${XPYD_STAGEB_RUNTIME_CONFIG}${XPYD_STAGEC0_RUNTIME_CONFIG}" ] && [ "${vllm_ver}" != "0.15.1" ]; then
         echo "  ERROR: XpYd observation path requires vLLM version 0.15.1 (got ${vllm_ver})"
         return 1
     fi
@@ -1788,15 +1803,17 @@ CONNECTOR_PATCH_EOF
         echo "  WARNING: could not locate p2p_nccl_connector.py — skipping _tensor_key patch"
     fi
 
-    # Phase 3C/3D/4A/4B/4B.1/4C/Stage-B reuse all connector patches above, then own the 2P2D lifecycle.
-    if [ -n "${XPYD_PHASE3C_CONFIG}${XPYD_PHASE3D_CONFIG}${XPYD_PHASE4A_CONFIG}${XPYD_PHASE4B_CONFIG}${XPYD_PHASE4B1_CONFIG}${XPYD_PHASE4C_CONFIG}${XPYD_STAGEB_RUNTIME_CONFIG}" ]; then
+    # Phase 3C/3D/4A/4B/4B.1/4C/Stage-B/Stage-C0 reuse the same 2P2D lifecycle.
+    if [ -n "${XPYD_PHASE3C_CONFIG}${XPYD_PHASE3D_CONFIG}${XPYD_PHASE4A_CONFIG}${XPYD_PHASE4B_CONFIG}${XPYD_PHASE4B1_CONFIG}${XPYD_PHASE4C_CONFIG}${XPYD_STAGEB_RUNTIME_CONFIG}${XPYD_STAGEC0_RUNTIME_CONFIG}" ]; then
         export NCCL_IB_DISABLE=1
         export NCCL_SOCKET_IFNAME=^lo
         export NCCL_DEBUG=INFO
         local phase3c_status=0
         run_phase3c_substrate || phase3c_status=$?
         if [ "${phase3c_status}" -eq 0 ]; then
-            if [ -n "${XPYD_STAGEB_RUNTIME_CONFIG}" ]; then
+            if [ -n "${XPYD_STAGEC0_RUNTIME_CONFIG}" ]; then
+                echo "stagec0_complete" > "${exp_dir}/status.txt"
+            elif [ -n "${XPYD_STAGEB_RUNTIME_CONFIG}" ]; then
                 echo "stageb_complete" > "${exp_dir}/status.txt"
             elif [ -n "${XPYD_PHASE4C_CONFIG}" ]; then
                 echo "phase4c_complete" > "${exp_dir}/status.txt"
