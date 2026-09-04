@@ -29,7 +29,7 @@ class StageBPhysicalTests(unittest.TestCase):
         })
         try:
             cls.runtime, cls.workload = load_configs(
-                cls.root / "paper/configs/xpyd_phase4b_evaluation_neptune_io.json",
+                cls.root / "paper/configs/xpyd_stageb_runtime_neptune_europa.json",
                 cls.root / "paper/configs/xpyd_stageb_workload_harness.json",
             )
         finally:
@@ -81,6 +81,13 @@ class StageBPhysicalTests(unittest.TestCase):
         return stage_dir
 
     def test_matrix_is_fixed_high_round_robin_and_gated_2_then_4(self):
+        endpoint_nodes = {
+            item["endpoint_id"]: item["node"] for item in self.runtime["endpoints"]
+        }
+        self.assertEqual(endpoint_nodes, {
+            "P0": "neptune", "P1": "neptune",
+            "D0": "europa", "D1": "europa",
+        })
         stages = [
             item for item in self.workload["proposed_validation_matrix"]
             if item.get("hardware")

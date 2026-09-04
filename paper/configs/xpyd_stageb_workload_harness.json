@@ -2,6 +2,10 @@
   "schema_version": 1,
   "purpose": "Post-Phase-4 Stage B workload-harness semantics validation; no routing or DVFS policy evaluation",
   "output_root": "results/stageb_realistic_harness",
+  "physical_topology": {
+    "prefill_node": "neptune",
+    "decode_node": "europa"
+  },
   "bucket_definition": {
     "short_input_max_tokens": 512,
     "short_output_max_tokens": 256

@@ -62,12 +62,15 @@ def load_configs(
     runtime = load_runtime_config(runtime_path)
     workload = load_workload_config(workload_path)
     endpoints = {str(item["endpoint_id"]): item for item in runtime["endpoints"]}
+    topology = workload.get("physical_topology", {})
+    expected_prefill_node = str(topology.get("prefill_node", "neptune"))
+    expected_decode_node = str(topology.get("decode_node", "io"))
     if set(endpoints) != {"P0", "P1", "D0", "D1"}:
         raise StageBError("Stage B requires exactly P0/P1/D0/D1")
-    if any(str(endpoints[key]["node"]) != "neptune" for key in ("P0", "P1")):
-        raise StageBError("Stage B fixes P0/P1 to Neptune")
-    if any(str(endpoints[key]["node"]) != "io" for key in ("D0", "D1")):
-        raise StageBError("Stage B fixes D0/D1 to io")
+    if any(str(endpoints[key]["node"]) != expected_prefill_node for key in ("P0", "P1")):
+        raise StageBError("Stage B P0/P1 node does not match physical_topology")
+    if any(str(endpoints[key]["node"]) != expected_decode_node for key in ("D0", "D1")):
+        raise StageBError("Stage B D0/D1 node does not match physical_topology")
     if any(int(item["tp_degree"]) != 1 for item in endpoints.values()):
         raise StageBError("Stage B fixes every endpoint at TP1")
     expected_clocks = {"P0": 2520, "P1": 2520, "D0": 1500, "D1": 1500}
@@ -246,7 +249,13 @@ class StageBPhysicalHarness:
             "run_id": self.run_id,
             "created_utc": datetime.now(timezone.utc).isoformat(),
             "stages": stages,
-            "topology": {"P0": "neptune", "P1": "neptune", "D0": "io", "D1": "io"},
+            "topology": {
+                endpoint_id: str(endpoint["node"])
+                for endpoint_id, endpoint in {
+                    str(item["endpoint_id"]): item
+                    for item in self.runtime["endpoints"]
+                }.items()
+            },
             "frequencies_mhz": {"P0": 2520, "P1": 2520, "D0": 1500, "D1": 1500},
             "controller": "disabled",
             "models": [],

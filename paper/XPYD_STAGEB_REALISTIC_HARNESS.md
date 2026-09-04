@@ -9,7 +9,12 @@ evaluation.
 ## Fixed system
 
 - P0/P1: Neptune L40S, TP1, 2520 MHz
-- D0/D1: io L4, TP1, 1500 MHz
+- D0/D1: Europa L4, TP1, 1500 MHz
+
+Europa replaces the unavailable `io` node for this Stage B sequence. The exact
+GPU UUIDs, PCI IDs, driver state, clocks, and measurement validity are audited
+again; Stage B does not assume node-level equivalence or pool absolute results
+with earlier `io` measurements.
 - all four validated P→D pairs
 - deterministic request-level round-robin
 - no routing controller
@@ -55,12 +60,12 @@ sbatch \
   --nodes=2 \
   --ntasks=16 \
   --ntasks-per-node=8 \
-  --nodelist=neptune,io \
+  --nodelist=neptune,europa \
   --exclusive \
   --mem=0 \
   --time=03:00:00 \
   --output=logs/xpyd_stageb_%j.log \
-  --export=ALL,EXP=E,L40S_NODE=neptune,L4_NODE=io,XPYD_STAGEB_RUNTIME_CONFIG=paper/configs/xpyd_phase4b_evaluation_neptune_io.json,XPYD_STAGEB_WORKLOAD_CONFIG=paper/configs/xpyd_stageb_workload_harness.json,XPYD_STAGEB_RUN_ID=stageb_b1_b3_20260903 \
+  --export=ALL,EXP=E,L40S_NODE=neptune,L4_NODE=europa,XPYD_STAGEB_RUNTIME_CONFIG=paper/configs/xpyd_stageb_runtime_neptune_europa.json,XPYD_STAGEB_WORKLOAD_CONFIG=paper/configs/xpyd_stageb_workload_harness.json,XPYD_STAGEB_RUN_ID=stageb_b1_b3_neptune_europa_20260904 \
   run_disagg_benchmark.sh
 ```
 
