@@ -282,18 +282,18 @@ def analyze_point(
 
 
 def classify_points(
-    rows: list[dict[str, Any]], max_slo_violation_rate: float,
+    rows: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any] | None]:
+    """Choose capacity regimes independently of the later SLO admission gate."""
     for row in rows:
         if not row["sustainable"]:
             row["classification"] = "OVERLOAD"
-    safe = [
-        row for row in rows if row["sustainable"]
-        and row["slo_violation_rate"] <= max_slo_violation_rate
+    sustainable = [row for row in rows if row["sustainable"]]
+    low_candidates = [
+        row for row in sustainable if row["little_or_no_sustained_queue"]
     ]
-    low_candidates = [row for row in safe if row["little_or_no_sustained_queue"]]
     low = min(low_candidates, key=lambda row: row["offered_rate_rps"]) if low_candidates else None
-    remaining = [row for row in safe if low is None or row is not low]
+    remaining = [row for row in sustainable if low is None or row is not low]
     high = max(remaining, key=lambda row: row["offered_rate_rps"]) if remaining else None
     between = [
         row for row in remaining if high is not None and row is not high
@@ -306,7 +306,7 @@ def classify_points(
     medium = min(
         between, key=lambda row: abs(row["offered_rate_rps"] - target)
     ) if between and target is not None else None
-    for row in safe:
+    for row in sustainable:
         if row is low:
             row["classification"] = "LOW"
         elif row is high:
@@ -315,7 +315,7 @@ def classify_points(
             row["classification"] = "MEDIUM"
     for row in rows:
         if row["classification"] == "UNCLASSIFIED":
-            row["classification"] = "OVERLOAD" if not row["sustainable"] else "SLO-LIMITED"
+            row["classification"] = "OVERLOAD"
     return {"LOW": low, "MEDIUM": medium, "HIGH-SUSTAINABLE": high}
 
 
@@ -380,16 +380,45 @@ class StageC0Harness:
                 point, self.run_dir / str(point["id"]),
                 calibration["slo"], calibration["trend_thresholds"],
             ))
-        chosen = classify_points(
-            rows, float(calibration["maximum_selected_slo_violation_rate"])
+        write_reports(self.run_dir, rows, calibration)
+        print(self.run_dir.as_posix())
+        return self.run_dir
+
+
+def write_reports(
+    run_dir: Path, rows: list[dict[str, Any]], calibration: Mapping[str, Any],
+) -> None:
+        chosen = classify_points(rows)
+        maximum_slo_rate = float(
+            calibration["maximum_selected_slo_violation_rate"]
         )
-        ready = all(chosen.values()) and all(row["measurement_valid"] for row in rows)
-        _write_csv(self.run_dir / "stagec0_measurements.csv", rows)
+        regimes_complete = all(chosen.values())
+        selected_slo_safe = regimes_complete and all(
+            value is not None
+            and value["slo_violation_rate"] <= maximum_slo_rate
+            for value in chosen.values()
+        )
+        ready = (
+            regimes_complete and selected_slo_safe
+            and all(row["measurement_valid"] for row in rows)
+        )
+        blockers = []
+        if not regimes_complete:
+            blockers.append("LOW/MEDIUM/HIGH-SUSTAINABLE capacity regimes are incomplete")
+        if regimes_complete and not selected_slo_safe:
+            blockers.append(
+                "fixed-HIGH baseline exceeds the %.1f%% selected-regime SLO-violation gate"
+                % (100.0 * maximum_slo_rate)
+            )
+        _write_csv(run_dir / "stagec0_measurements.csv", rows)
         summary = {
             "schema_version": 1,
             "phase": "Stage_C0_capacity_load_calibration",
             "valid": all(row["measurement_valid"] for row in rows),
+            "capacity_regimes_complete": bool(regimes_complete),
+            "selected_regimes_slo_safe": bool(selected_slo_safe),
             "ready_for_stage_c1": bool(ready),
+            "stage_c1_blockers": blockers,
             "chosen_load_points_rps": {
                 key: value["offered_rate_rps"] if value else None
                 for key, value in chosen.items()
@@ -401,10 +430,10 @@ class StageC0Harness:
             ),
             "next_action": (
                 "start Stage C1 with the selected LOW/MEDIUM/HIGH-SUSTAINABLE rates"
-                if ready else "measure targeted additional rates before Stage C1"
+                if ready else "resolve the fixed-HIGH SLO baseline before Stage C1"
             ),
         }
-        _write_json(self.run_dir / "stagec0_summary.json", summary)
+        _write_json(run_dir / "stagec0_summary.json", summary)
         lines = [
             "# XPYD Stage C0 capacity/load calibration", "",
             "All endpoints were fixed at validated HIGH; routing was four-pair round-robin; no controller was active.", "",
@@ -427,19 +456,36 @@ class StageC0Harness:
                 "READY" if ready else "NOT READY"
             ), "", summary["claim_boundary"], "",
         ])
-        (self.run_dir / "stagec0_summary.md").write_text(
+        (run_dir / "stagec0_summary.md").write_text(
             "\n".join(lines), encoding="utf-8"
         )
-        print(self.run_dir.as_posix())
-        return self.run_dir
+
+
+def reanalyze_existing(run_dir: Path, workload: Mapping[str, Any]) -> None:
+    calibration = workload["capacity_calibration"]
+    rows = [
+        analyze_point(
+            point, run_dir / str(point["id"]), calibration["slo"],
+            calibration["trend_thresholds"],
+        )
+        for point in calibration["load_points"]
+    ]
+    write_reports(run_dir, rows, calibration)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runtime-config", required=True)
+    parser.add_argument("--runtime-config")
     parser.add_argument("--workload-config", required=True)
     parser.add_argument("--run-id")
+    parser.add_argument("--reanalyze-run-dir")
     args = parser.parse_args()
+    if args.reanalyze_run_dir:
+        workload = load_workload_config(Path(args.workload_config))
+        reanalyze_existing(Path(args.reanalyze_run_dir), workload)
+        return 0
+    if not args.runtime_config:
+        parser.error("--runtime-config is required unless --reanalyze-run-dir is used")
     runtime, workload = load_configs(
         Path(args.runtime_config), Path(args.workload_config)
     )

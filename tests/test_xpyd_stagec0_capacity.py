@@ -74,7 +74,7 @@ class StageC0CapacityTests(unittest.TestCase):
                 "slo_violation_rate": slo,
                 "classification": "UNCLASSIFIED",
             })
-        chosen = classify_points(rows, 0.05)
+        chosen = classify_points(rows)
         self.assertEqual(chosen["LOW"]["offered_rate_rps"], 0.05)
         self.assertEqual(chosen["MEDIUM"]["offered_rate_rps"], 0.10)
         self.assertEqual(chosen["HIGH-SUSTAINABLE"]["offered_rate_rps"], 0.15)

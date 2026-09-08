@@ -38,11 +38,12 @@ stagec0_summary.json
 stagec0_summary.md
 ```
 
-The summary selects LOW, MEDIUM, and HIGH-SUSTAINABLE only from valid,
-SLO-acceptable measurements whose drained throughput tracks offered load and
-whose admission backlog does not diverge. An overload point is expected and is
-not itself a failed measurement. If the sweep does not bracket all three safe
-regimes, Stage C1 remains blocked and a targeted additional rate is required.
+The summary selects LOW, MEDIUM, and HIGH-SUSTAINABLE from valid capacity
+measurements whose drained throughput tracks offered load and whose admission
+backlog does not diverge. It reports SLO eligibility as a separate Stage C1
+gate: capacity calibration remains useful even when the fixed-HIGH baseline
+reveals that the chosen SLO is not currently achievable. An overload point is
+expected and is not itself a failed measurement.
 
 ## Submission
 
