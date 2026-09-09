@@ -14,6 +14,7 @@ from xpyd.stagec1_stationary import (
     load_configs,
     oscillation_count,
 )
+from xpyd.stagec1_headroom import _level_frequency
 from xpyd.workload_harness import build_trace
 
 
@@ -107,6 +108,32 @@ class StageC1Tests(unittest.TestCase):
         source = (self.root / "run_disagg_benchmark.sh").read_text(encoding="utf-8")
         self.assertIn("XPYD_STAGEC1_RUNTIME_CONFIG", source)
         self.assertIn("-m xpyd.stagec1_stationary", source)
+
+    def test_headroom_config_starts_high_and_changes_one_axis(self):
+        _, experiment = load_configs(
+            self.root / "paper/configs/xpyd_stageb_runtime_neptune_europa.json",
+            self.root / "paper/configs/xpyd_stagec1_headroom_neptune_europa.json",
+        )
+        points = experiment["stagec1_headroom"]["diagnostic_points"]
+        self.assertEqual((points[0]["P_level"], points[0]["D_level"]), ("HIGH", "HIGH"))
+        self.assertEqual(
+            [(point["P_level"], point["D_level"]) for point in points[1:]],
+            [("HIGH", "MID"), ("HIGH", "LOW"), ("MID", "HIGH"), ("LOW", "HIGH")],
+        )
+        levels = experiment["stagec1"]["frequency_levels_mhz"]
+        self.assertEqual(_level_frequency(levels, "P", "LOW"), 1260)
+        self.assertEqual(_level_frequency(levels, "D", "MID"), 1125)
+
+    def test_headroom_does_not_enable_controller_or_oracle(self):
+        _, experiment = load_configs(
+            self.root / "paper/configs/xpyd_stageb_runtime_neptune_europa.json",
+            self.root / "paper/configs/xpyd_stagec1_headroom_neptune_europa.json",
+        )
+        settings = experiment["stagec1"]
+        self.assertFalse(settings["request_aware_routing"])
+        self.assertFalse(settings["probing"])
+        self.assertFalse(settings["predictor"])
+        self.assertFalse(settings["oracle"])
 
     def test_residency_and_oscillation_reporting(self):
         rows = [

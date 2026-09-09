@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "purpose": "Stage C1 fixed-frequency DVFS-headroom diagnosis",
+  "output_root": "results/stagec1_headroom",
+  "bucket_definition": {
+    "short_input_max_tokens": 512,
+    "short_output_max_tokens": 256
+  },
+  "shapes": {
+    "SS": {"input_len": 128, "output_len": 128},
+    "SL": {"input_len": 128, "output_len": 512},
+    "LS": {"input_len": 2048, "output_len": 128},
+    "LL": {"input_len": 2048, "output_len": 512}
+  },
+  "control_window_s": 200.0,
+  "scenarios": [
+    {
+      "id": "stationary_medium",
+      "segments": [{
+        "id": "steady_mix", "request_count": 20, "rate_rps": 0.10,
+        "class_weights": {"SS": 0.35, "SL": 0.15, "LS": 0.35, "LL": 0.15}
+      }]
+    },
+    {
+      "id": "stationary_high_sustainable",
+      "segments": [{
+        "id": "steady_mix", "request_count": 20, "rate_rps": 0.20,
+        "class_weights": {"SS": 0.35, "SL": 0.15, "LS": 0.35, "LL": 0.15}
+      }]
+    }
+  ],
+  "stagec1": {
+    "policies": ["STATIC-HIGH", "FEEDBACK-DVFS"],
+    "max_concurrency": 4,
+    "routing": "fixed four-pair round-robin",
+    "pool_frequency_state": {"P": ["P0", "P1"], "D": ["D0", "D1"]},
+    "request_aware_routing": false,
+    "probing": false,
+    "predictor": false,
+    "oracle": false,
+    "slo": {"ttft_ms": 600.0, "tpot_ms": 65.0, "attainment": 0.95},
+    "frequency_levels_mhz": {
+      "P0": {"LOW": 1260, "MID": 1890, "HIGH": 2520},
+      "P1": {"LOW": 1260, "MID": 1890, "HIGH": 2520},
+      "D0": {"LOW": 750, "MID": 1125, "HIGH": 1500},
+      "D1": {"LOW": 750, "MID": 1125, "HIGH": 1500}
+    },
+    "load_points": [
+      {"id": "MEDIUM", "scenario": "stationary_medium", "offered_rate_rps": 0.10},
+      {"id": "HIGH-SUSTAINABLE", "scenario": "stationary_high_sustainable", "offered_rate_rps": 0.20}
+    ],
+    "repetitions": 2,
+    "minimum_dwell_s": 1.0,
+    "telemetry_max_age_s": 300.0,
+    "ewma_alpha": 0.5,
+    "step_down_fraction": 0.5,
+    "step_up_fraction": 0.8,
+    "max_queue_depth": 1,
+    "max_kv_cache_usage_frac": 0.9,
+    "severe_queue_depth": 4,
+    "severe_kv_cache_usage_frac": 0.97,
+    "low_kv_cache_usage_frac": 0.5,
+    "trend_thresholds": {
+      "minimum_sustainable_throughput_ratio": 0.90,
+      "admission_delay_slope_ms_per_s": 100.0,
+      "quartile_delay_increase_ms": 1000.0,
+      "minimum_close_waiting": 2.0,
+      "low_mean_client_waiting": 0.25,
+      "low_p95_admission_delay_ms": 250.0
+    }
+  },
+  "stagec1_headroom": {
+    "repetitions": 2,
+    "diagnostic_points": [
+      {"id": "HIGH_HIGH", "P_level": "HIGH", "D_level": "HIGH", "description": "fixed HIGH/HIGH baseline"},
+      {"id": "P_HIGH_D_MID", "P_level": "HIGH", "D_level": "MID", "description": "D-only one-step reduction"},
+      {"id": "P_HIGH_D_LOW", "P_level": "HIGH", "D_level": "LOW", "description": "D-only minimum tested point"},
+      {"id": "P_MID_D_HIGH", "P_level": "MID", "D_level": "HIGH", "description": "P-only one-step reduction"},
+      {"id": "P_LOW_D_HIGH", "P_level": "LOW", "D_level": "HIGH", "description": "P-only minimum tested point"}
+    ]
+  }
+}
