@@ -8,6 +8,7 @@ import unittest
 from xpyd.feedback_scheduler import DVFSAction
 from xpyd.stagec1_stationary import (
     POLICIES,
+    StageC1Harness,
     admission_risk,
     coordinate_pool,
     frequency_residency,
@@ -134,6 +135,52 @@ class StageC1Tests(unittest.TestCase):
         self.assertFalse(settings["probing"])
         self.assertFalse(settings["predictor"])
         self.assertFalse(settings["oracle"])
+
+    def test_actuation_records_after_registry_readback_state_update(self):
+        class State:
+            freq_mhz = 1500
+
+        class Registry:
+            def __init__(self):
+                self.state = State()
+
+            def get_state(self, _endpoint):
+                return self.state
+
+            def update_state(self, state):
+                self.state = state
+
+        class Scheduler:
+            def __init__(self, registry):
+                self.registry = registry
+                self.observed = []
+
+            def record_dvfs_actuation(self, endpoint, observed_freq_mhz, timestamp_s):
+                self.assert_state = self.registry.get_state(endpoint).freq_mhz
+                self.observed.append((endpoint, observed_freq_mhz, timestamp_s))
+
+        class Actuator:
+            requested = {"D0": 1500}
+
+            def actuate(self, endpoint, target, reason):
+                self.requested[endpoint] = target
+                return {
+                    "endpoint_id": endpoint, "requested_freq_mhz": target,
+                    "command_status": "success", "readback_valid": True,
+                }
+
+        registry = Registry()
+        scheduler = Scheduler(registry)
+        harness = StageC1Harness.__new__(StageC1Harness)
+        harness.action_rows = []
+        harness._actuate_targets(
+            Actuator(), type("Context", (), {
+                "registry": registry, "scheduler": scheduler,
+                "targets": {"D0": 1500},
+            })(), {"D0": 1125}, "test", "HEADROOM", "point",
+        )
+        self.assertEqual(scheduler.assert_state, 1125)
+        self.assertEqual(scheduler.observed[0][1], 1125)
 
     def test_residency_and_oscillation_reporting(self):
         rows = [

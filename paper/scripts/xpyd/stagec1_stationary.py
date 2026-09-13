@@ -247,19 +247,25 @@ class StageC1Harness(Phase3DClosedLoopHarness):
     ) -> None:
         for endpoint_id in sorted(targets):
             target = int(targets[endpoint_id])
-            if actuator.requested.get(endpoint_id) != target:
+            changed = actuator.requested.get(endpoint_id) != target
+            if changed:
                 row = actuator.actuate(endpoint_id, target, reason)
                 row.update({"policy": policy, "block_id": block_id})
                 self.action_rows.append(row)
                 if row["command_status"] != "success" or not row["readback_valid"]:
                     raise StageC1Error("physical actuation failed for %s" % endpoint_id)
-                context.scheduler.record_dvfs_actuation(
-                    endpoint_id, observed_freq_mhz=target, timestamp_s=time.time()
-                )
             state = context.registry.get_state(endpoint_id)
             state.freq_mhz = target
             context.registry.update_state(state)
             context.targets[endpoint_id] = target
+            # FeedbackScheduler validates that its registry state already
+            # reflects the successful hardware readback.  Update state before
+            # recording the actuation (important for fixed-point diagnostics
+            # and for controller recovery transitions).
+            if changed:
+                context.scheduler.record_dvfs_actuation(
+                    endpoint_id, observed_freq_mhz=target, timestamp_s=time.time()
+                )
 
     def _control(
         self, context: ControllerContext, capabilities: Mapping[str, EndpointClockCapability],
