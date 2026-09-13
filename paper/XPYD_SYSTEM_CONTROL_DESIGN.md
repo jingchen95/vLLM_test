@@ -79,14 +79,45 @@ XPYD uses **both request-level and window-level control**.
 | TPOT / ITL measurement | Request-level |
 | Token accounting | Request-level |
 | Endpoint power sampling | Continuous / sampled |
-| Endpoint energy | Window-level |
-| Workload summary | Window-level |
-| Feedback-state update | Window-level |
-| Normal energy-saving DVFS | Endpoint-level, usually window-driven |
-| Emergency DVFS upshift | Fast / event-driven |
+| Endpoint energy | Aggregation / accounting interval |
+| Workload summary | Rolling / evidence epoch |
+| Feedback-state update | Evidence-driven |
+| Normal energy-saving DVFS | Endpoint-level, evidence-epoch driven |
+| Emergency DVFS upshift | Event-driven |
 | Final energy objective | Window / trace-level total system energy |
 
-**Core rule: routing is request-level; energy feedback and normal DVFS optimization are window-level.**
+## 2.x Feedback-control granularity
+
+XPYD does not use a fixed-duration window as the sole trigger for feedback
+control. The control structure is hybrid:
+
+- Request routing is performed immediately at request admission.
+- Runtime telemetry is collected continuously.
+- Normal energy-saving DVFS decisions are made at evidence-based control
+  epochs, after sufficient recent observations have accumulated.
+- A control epoch uses both a minimum evidence requirement and a maximum
+  timeout, so low request rates do not prevent updates.
+- Evidence is phase-specific: prefill decisions consider recent input-token /
+  request coverage and TTFT observations, while decode decisions consider
+  output-token / completion coverage and TPOT observations.
+- Safety actions are event-driven and do not wait for the normal feedback
+  epoch. Sudden backlog growth, workload-mix changes, or fresh SLO risk may
+  trigger an immediate upshift.
+
+Fixed windows remain useful for energy accounting, reporting, and workload
+summaries, but they are not mandatory scheduling boundaries.
+
+The resulting principle is:
+
+```java
+routing         = request-level
+telemetry       = continuous
+safety DVFS     = event-driven
+efficiency DVFS = evidence-epoch driven
+```
+
+**Core rule: routing is request-level; telemetry is continuous; safety DVFS is
+event-driven; and normal energy-saving DVFS is evidence-epoch driven.**
 
 ---
 
