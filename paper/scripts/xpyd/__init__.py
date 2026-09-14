@@ -11,6 +11,16 @@ from xpyd.feedback_scheduler import (
     RouteCandidate,
     RouteEvaluation,
 )
+from xpyd.adaptive_exploration import (
+    AdaptiveDecision,
+    AdaptiveExplorationConfig,
+    AdaptivePoolController,
+    EvidenceClass,
+    PoolEvidence,
+    PoolSearchState,
+    SearchPhase,
+    evidence_from_window,
+)
 from xpyd.hardware import (
     GPUTypeProfile,
     HardwareProfile,
@@ -63,6 +73,9 @@ __all__ = [
     "ConnectorCompatibility",
     "AmbiguousMetricError",
     "DVFSAction",
+    "AdaptiveDecision",
+    "AdaptiveExplorationConfig",
+    "AdaptivePoolController",
     "DVFSRecommendation",
     "DuplicateEndpointError",
     "EndpointRegistry",
@@ -71,6 +84,7 @@ __all__ = [
     "EndpointState",
     "EndpointTelemetrySample",
     "EndpointTelemetrySnapshot",
+    "EvidenceClass",
     "EWMA",
     "FeedbackScheduler",
     "FeedbackSchedulerConfig",
@@ -86,8 +100,11 @@ __all__ = [
     "PrometheusHistogram",
     "PrometheusParseError",
     "PrometheusScrape",
+    "PoolEvidence",
+    "PoolSearchState",
     "RouteCandidate",
     "RouteEvaluation",
+    "SearchPhase",
     "RoutingDecision",
     "TelemetryAggregator",
     "VLLMMetricsCollector",
@@ -103,4 +120,5 @@ __all__ = [
     "histogram_violation_fraction_at_boundary",
     "parse_prometheus_text",
     "window_delta_to_telemetry_sample",
+    "evidence_from_window",
 ]

@@ -1,9 +1,10 @@
 """Stage C1 stationary STATIC-HIGH versus pool-level feedback DVFS.
 
-This runner deliberately reuses the Phase 3C measurement path and the Phase
-3D feedback scheduler.  Routing remains the proxy's fixed four-pair round
-robin.  The only new control is a conservative coordinator which converts two
-endpoint recommendations into one shared state per P/D pool.
+This runner deliberately reuses the Phase 3C measurement path.  Routing
+remains the proxy's fixed four-pair round robin.  The legacy Phase 3D
+feedback scheduler is retained for comparison, while the C1 configuration
+can select the model-free adaptive safe-search controller that converts each
+phase's evidence into one shared P/D pool state.
 """
 
 from __future__ import annotations
@@ -23,6 +24,11 @@ import time
 from typing import Any, Mapping, Sequence
 
 from xpyd.feedback_scheduler import DVFSAction
+from xpyd.adaptive_exploration import (
+    AdaptiveExplorationConfig,
+    AdaptivePoolController,
+    evidence_from_window,
+)
 from xpyd.phase3c_substrate import Phase3CSubstrateHarness, _read_json, _write_json
 from xpyd.phase3d_control import (
     EndpointClockCapability,
@@ -49,6 +55,7 @@ class ControllerContext:
     telemetry: Any
     scheduler: Any
     targets: dict[str, int]
+    adaptive_pools: dict[str, AdaptivePoolController] | None = None
 
 
 def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
@@ -101,9 +108,29 @@ def load_configs(runtime_path: Path, experiment_path: Path) -> tuple[dict[str, A
         raise StageC1Error("Stage C1 routing must remain fixed four-pair round-robin")
     if settings.get("pool_frequency_state") != {"P": ["P0", "P1"], "D": ["D0", "D1"]}:
         raise StageC1Error("Stage C1 requires shared P-pool and D-pool frequency states")
+    slo_regimes = {
+        "TIGHT": (600.0, 65.0, 0.95),
+        "MODERATE": (625.0, 66.0, 0.95),
+        "LOOSE": (650.0, 70.0, 0.95),
+    }
+    slo_regime = str(settings.get("slo_regime", "TIGHT")).upper()
+    if slo_regime not in slo_regimes:
+        raise StageC1Error("unsupported Stage C1 SLO regime")
     slo = settings.get("slo", {})
-    if (float(slo.get("ttft_ms", 0)), float(slo.get("tpot_ms", 0)), float(slo.get("attainment", 0))) != (600.0, 65.0, 0.95):
-        raise StageC1Error("Stage C1 requires the calibrated 600/65 ms, 95% contract")
+    expected_slo = slo_regimes[slo_regime]
+    observed_slo = (
+        float(slo.get("ttft_ms", 0)), float(slo.get("tpot_ms", 0)),
+        float(slo.get("attainment", 0)),
+    )
+    if observed_slo != expected_slo:
+        raise StageC1Error("Stage C1 SLO does not match selected calibrated regime")
+    controller_mode = str(settings.get("controller_mode", "legacy_feedback"))
+    if controller_mode not in {"legacy_feedback", "adaptive_safe_search"}:
+        raise StageC1Error("unsupported Stage C1 controller_mode")
+    if controller_mode == "adaptive_safe_search" and not isinstance(
+        settings.get("adaptive_exploration", {}), Mapping
+    ):
+        raise StageC1Error("adaptive_safe_search requires adaptive_exploration settings")
     points = settings.get("load_points", [])
     observed = {str(item["id"]): float(item["offered_rate_rps"]) for item in points}
     if observed != {"MEDIUM": 0.10, "HIGH-SUSTAINABLE": 0.20}:
@@ -122,8 +149,8 @@ def load_configs(runtime_path: Path, experiment_path: Path) -> tuple[dict[str, A
     runtime["phase3d"] = {
         "minimum_dwell_s": float(settings.get("minimum_dwell_s", 1.0)),
         "feedback": {
-            "ttft_slo_ms": 600.0,
-            "tpot_slo_ms": 65.0,
+            "ttft_slo_ms": expected_slo[0],
+            "tpot_slo_ms": expected_slo[1],
             "safety_fraction": 0.9,
             "telemetry_max_age_s": float(settings.get("telemetry_max_age_s", 300.0)),
             "max_queue_depth": int(settings.get("max_queue_depth", 1)),
@@ -267,11 +294,134 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                     endpoint_id, observed_freq_mhz=target, timestamp_s=time.time()
                 )
 
+    def _adaptive_pools(
+        self, capabilities: Mapping[str, EndpointClockCapability]
+    ) -> dict[str, AdaptivePoolController] | None:
+        if str(self.settings.get("controller_mode", "legacy_feedback")) != "adaptive_safe_search":
+            return None
+        feedback = self.config["phase3d"]["feedback"]
+        adaptive = AdaptiveExplorationConfig.from_mapping(
+            self.settings.get("adaptive_exploration", {}),
+            ttft_slo_ms=float(feedback["ttft_slo_ms"]),
+            tpot_slo_ms=float(feedback["tpot_slo_ms"]),
+        )
+        regime = str(self.settings.get("slo_regime", "TIGHT")).upper()
+        return {
+            "P": AdaptivePoolController(
+                "P", "prefill",
+                [capabilities[item].selected_low_mhz for item in POOLS["P"]]
+                + [capabilities[item].selected_mid_mhz for item in POOLS["P"]]
+                + [capabilities[item].selected_high_mhz for item in POOLS["P"]],
+                adaptive, slo_regime=regime,
+            ),
+            "D": AdaptivePoolController(
+                "D", "decode",
+                [capabilities[item].selected_low_mhz for item in POOLS["D"]]
+                + [capabilities[item].selected_mid_mhz for item in POOLS["D"]]
+                + [capabilities[item].selected_high_mhz for item in POOLS["D"]],
+                adaptive, slo_regime=regime,
+            ),
+        }
+
+    def _adaptive_control(
+        self, context: ControllerContext,
+        capabilities: Mapping[str, EndpointClockCapability],
+        actuator: PerEndpointClockActuator,
+        metrics: Mapping[str, Any],
+        requests: Sequence[Mapping[str, Any]],
+        policy: str,
+        block_id: str,
+        window_index: int,
+    ) -> None:
+        """Run one evidence epoch for independent P and D pool searches."""
+        if not context.adaptive_pools:
+            raise StageC1Error("adaptive controller state was not initialized")
+        now = time.time()
+        targets: dict[str, int] = {}
+        decisions_by_pool: dict[str, Any] = {}
+        for pool, endpoint_ids in POOLS.items():
+            controller = context.adaptive_pools[pool]
+            current_values = {context.targets[item] for item in endpoint_ids}
+            if len(current_values) != 1:
+                raise StageC1Error("%s pool entered an asymmetric frequency state" % pool)
+            current = current_values.pop()
+            controller.set_current_frequency(current)
+            evidence = evidence_from_window(
+                pool, metrics, requests,
+                observed_frequency_mhz=current,
+                slo_regime=str(self.settings.get("slo_regime", "TIGHT")).upper(),
+                ttft_slo_ms=float(self.settings["slo"]["ttft_ms"]),
+                tpot_slo_ms=float(self.settings["slo"]["tpot_ms"]),
+                context_signature="stationary:%s" % str(metrics.get("load_point", "unknown")),
+                captured_at_s=now,
+            )
+            decision = controller.decide(evidence, now_s=now)
+            decisions_by_pool[pool] = decision
+            row = decision.as_log()
+            state = controller.state
+            row.update({
+                "timestamp_unix_s": now,
+                "policy": policy,
+                "block_id": block_id,
+                "before_window_index": window_index,
+                "prior_ttft_mean_ms": metrics.get("ttft_mean_ms"),
+                "prior_ttft_p95_ms": metrics.get("ttft_p95_ms"),
+                "prior_tpot_mean_ms": metrics.get("tpot_mean_ms"),
+                "prior_tpot_p95_ms": metrics.get("tpot_p95_ms"),
+                "prior_admission_p95_ms": metrics.get("admission_delay_p95_ms"),
+                "prior_client_waiting_close": metrics.get("client_waiting_at_offered_close"),
+                "prior_backlog_growing": metrics.get("backlog_growing"),
+                "state_evidence_since_action": state.evidence_since_action,
+                "state_last_action_reason": state.last_action_reason,
+                "state_last_action_timestamp_s": state.last_action_timestamp_s,
+                "state_current_index": state.current_index,
+                "state_last_validated_safe_index": state.last_validated_safe_index,
+                "state_unsafe_index": state.unsafe_index,
+                "state_best_measured_safe_energy_j": state.best_measured_safe_energy_j,
+                "state_context_signature": state.context_signature,
+                "state_confidence": state.confidence,
+                "state_transition_reason": state.transition_reason,
+                "evidence_since_action": state.evidence_since_action,
+                "last_action_reason": state.last_action_reason,
+                "last_action_timestamp_s": state.last_action_timestamp_s,
+                "current_index": state.current_index,
+                "last_validated_safe_index": state.last_validated_safe_index,
+                "unsafe_index": state.unsafe_index,
+                "best_measured_safe_energy_j": state.best_measured_safe_energy_j,
+                "context_signature": state.context_signature,
+                "confidence": state.confidence,
+                "transition_reason": state.transition_reason,
+            })
+            self.decision_rows.append(row)
+            targets.update({endpoint_id: int(decision.requested_frequency_mhz) for endpoint_id in endpoint_ids})
+        self._actuate_targets(
+            actuator, context, targets, "stagec1_adaptive_pool_feedback", policy, block_id
+        )
+        for pool, endpoint_ids in POOLS.items():
+            controller = context.adaptive_pools[pool]
+            target = context.targets[endpoint_ids[0]]
+            decision = decisions_by_pool[pool]
+            if int(target) != int(decision.current_frequency_mhz):
+                # The physical actuator and readback have succeeded; only now
+                # does the search clock start for the new candidate.
+                controller.record_actuation(
+                    target, target, readback_valid=True, timestamp_s=now
+                )
+            else:
+                controller.set_current_frequency(target)
+
     def _control(
         self, context: ControllerContext, capabilities: Mapping[str, EndpointClockCapability],
         actuator: PerEndpointClockActuator, metrics: Mapping[str, Any], policy: str,
         block_id: str, window_index: int,
+        requests: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
+        if context.adaptive_pools is not None:
+            self._adaptive_control(
+                context, capabilities, actuator, metrics, requests or [],
+                policy, block_id, window_index,
+            )
+            return
         risk = admission_risk(metrics, self.settings)
         recommendations = [
             context.scheduler.choose_frequency_adjustment(endpoint_id, now_s=time.time())
@@ -338,7 +488,7 @@ class StageC1Harness(Phase3DClosedLoopHarness):
             "repeat": repeat, "window_index": window_index,
             "trace_signature": signature,
             "ttft_attainment": ttft_attainment, "tpot_attainment": tpot_attainment,
-            "slo_contract_pass": ttft_attainment >= 0.95 and tpot_attainment >= 0.95,
+            "slo_contract_pass": ttft_attainment >= float(self.settings["slo"]["attainment"]) and tpot_attainment >= float(self.settings["slo"]["attainment"]),
             "P0_freq_mhz": context.targets["P0"], "P1_freq_mhz": context.targets["P1"],
             "D0_freq_mhz": context.targets["D0"], "D1_freq_mhz": context.targets["D1"],
             "endpoint_load_json": json.dumps(metrics["endpoint_load"], sort_keys=True),
@@ -385,16 +535,20 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                         block_number += 1
                         block_id = "r%02d-%s-%s" % (repeat, point["id"].lower(), policy.lower())
                         registry, telemetry, scheduler = self._build_scheduler(capabilities)
-                        context = ControllerContext(registry, telemetry, scheduler, dict(high))
+                        context = ControllerContext(
+                            registry, telemetry, scheduler, dict(high),
+                            self._adaptive_pools(capabilities),
+                        )
                         self._actuate_targets(
                             actuator, context, high, "stagec1_cold_start_high", policy, block_id
                         )
                         previous: dict[str, Any] | None = None
+                        previous_requests: list[dict[str, Any]] = []
                         for window_index in range(1, windows + 1):
                             if policy == "FEEDBACK-DVFS" and previous is not None:
                                 self._control(
                                     context, capabilities, actuator, previous, policy,
-                                    block_id, window_index,
+                                    block_id, window_index, previous_requests,
                                 )
                             scenario = str(point["scenario"])
                             trace = build_trace(
@@ -417,6 +571,7 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                                 window_id, window_dir, registry, telemetry
                             )
                             previous = row
+                            previous_requests = requests
             valid = True
         except Exception as exc:
             error = "%s: %s" % (type(exc).__name__, exc)
@@ -426,7 +581,10 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                 if "actuator" in locals() and "capabilities" in locals():
                     if "context" not in locals():
                         registry, telemetry, scheduler = self._build_scheduler(capabilities)
-                        context = ControllerContext(registry, telemetry, scheduler, dict(high))
+                        context = ControllerContext(
+                            registry, telemetry, scheduler, dict(high),
+                            self._adaptive_pools(capabilities),
+                        )
                     self._actuate_targets(
                         actuator, context, high, "stagec1_final_restore_high",
                         "RESTORE", "final",
@@ -445,6 +603,9 @@ class StageC1Harness(Phase3DClosedLoopHarness):
         self, rows: list[dict[str, Any]], requests: list[dict[str, Any]],
         run_valid: bool, restoration_valid: bool, error: str | None,
     ) -> None:
+        ttft_limit = float(self.settings["slo"]["ttft_ms"])
+        tpot_limit = float(self.settings["slo"]["tpot_ms"])
+        attainment_gate = float(self.settings["slo"]["attainment"])
         _write_csv(self.run_dir / "stagec1_measurements.csv", rows)
         _write_csv(self.run_dir / "stagec1_requests.csv", requests)
         _write_csv(self.run_dir / "controller_decisions.csv", self.decision_rows)
@@ -475,8 +636,8 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                         "load_point": point["id"], "policy": policy, "repeat": repeat,
                         "request_count": len(selected_requests), "total_gross_energy_j": energy,
                         "joules_per_request": energy / len(selected_requests),
-                        "ttft_attainment": sum(value <= 600.0 for value in ttft) / len(ttft),
-                        "tpot_attainment": sum(value <= 65.0 for value in tpot) / len(tpot),
+                        "ttft_attainment": sum(value <= ttft_limit for value in ttft) / len(ttft),
+                        "tpot_attainment": sum(value <= tpot_limit for value in tpot) / len(tpot),
                     })
         for row in repeat_summaries:
             if row["policy"] != "FEEDBACK-DVFS":
@@ -489,7 +650,7 @@ class StageC1Harness(Phase3DClosedLoopHarness):
             row["paired_energy_saving_fraction"] = (
                 (baseline["joules_per_request"] - row["joules_per_request"])
                 / baseline["joules_per_request"]
-                if row["ttft_attainment"] >= 0.95 and row["tpot_attainment"] >= 0.95
+                if row["ttft_attainment"] >= attainment_gate and row["tpot_attainment"] >= attainment_gate
                 else None
             )
         _write_csv(self.run_dir / "stagec1_repeat_summary.csv", repeat_summaries)
@@ -519,10 +680,10 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                     "D1_energy_j": sum(float(row["D1_energy_j"]) for row in selected),
                     "ttft_mean_ms": statistics.fmean(ttft), "ttft_p95_ms": percentile(ttft, 0.95),
                     "ttft_p99_ms": percentile(ttft, 0.99),
-                    "ttft_attainment": sum(value <= 600.0 for value in ttft) / count,
+                    "ttft_attainment": sum(value <= ttft_limit for value in ttft) / count,
                     "tpot_mean_ms": statistics.fmean(tpot), "tpot_p95_ms": percentile(tpot, 0.95),
                     "tpot_p99_ms": percentile(tpot, 0.99),
-                    "tpot_attainment": sum(value <= 65.0 for value in tpot) / count,
+                    "tpot_attainment": sum(value <= tpot_limit for value in tpot) / count,
                     "admission_delay_mean_ms": statistics.fmean(float(row["client_admission_delay_ms"]) for row in selected_requests),
                     "admission_delay_p95_ms": percentile([float(row["client_admission_delay_ms"]) for row in selected_requests], 0.95),
                     "admission_delay_p99_ms": percentile([float(row["client_admission_delay_ms"]) for row in selected_requests], 0.99),
@@ -552,7 +713,7 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                     }, sort_keys=True),
                     "measurement_valid": all(bool(row["measurement_valid"]) for row in selected),
                 }
-                aggregate["slo_contract_pass"] = aggregate["ttft_attainment"] >= 0.95 and aggregate["tpot_attainment"] >= 0.95
+                aggregate["slo_contract_pass"] = aggregate["ttft_attainment"] >= attainment_gate and aggregate["tpot_attainment"] >= attainment_gate
                 repeat_joules = [
                     float(item["joules_per_request"]) for item in repeat_summaries
                     if item["load_point"] == point["id"] and item["policy"] == policy
@@ -596,17 +757,19 @@ class StageC1Harness(Phase3DClosedLoopHarness):
         summary = {
             "schema_version": 1, "phase": "Stage_C1_stationary_feedback_DVFS",
             "smoke": self.smoke, "valid": hard_valid, "error": error,
+            "controller_mode": self.settings.get("controller_mode", "legacy_feedback"),
+            "slo_regime": self.settings.get("slo_regime", "TIGHT"),
             "matched_trace_audit": matched, "pool_frequency_symmetry_audit": pool_symmetric,
             "final_high_restoration_audit": restoration_valid,
             "routing": "fixed four-pair round-robin", "max_concurrency": 4,
             "slo": self.settings["slo"], "policy_results": aggregates,
             "controller_contract": {
-                "base": "existing Phase 3D measured-feedback recommendations",
-                "fast_up": "any fresh endpoint latency risk or client backlog risk sends its pool directly to HIGH",
-                "slow_down": "both pool endpoints must recommend the same one-step downshift",
+                "base": "adaptive_safe_search" if self.settings.get("controller_mode") == "adaptive_safe_search" else "existing Phase 3D measured-feedback recommendations",
+                "fast_up": "fresh phase-specific SLO/pressure/telemetry/readback risk cancels exploration and recovers HIGH",
+                "slow_down": "sufficient fresh phase evidence selects a configurable coarse or one-level lower candidate; candidate is not safe until observed",
                 "p_running_zero_is_idle_evidence": False,
             },
-            "claim_boundary": "stationary feedback-only pool DVFS; no adaptive routing, probing, model, predictor, or oracle",
+            "claim_boundary": "stationary feedback-only pool DVFS; adaptive safe exploration is model-free and does not attribute physical request energy",
         }
         _write_json(self.run_dir / "stagec1_summary.json", summary)
         lines = [

@@ -31,6 +31,8 @@
   ],
   "stagec1": {
     "policies": ["STATIC-HIGH", "FEEDBACK-DVFS"],
+    "controller_mode": "adaptive_safe_search",
+    "slo_regime": "TIGHT",
     "max_concurrency": 4,
     "routing": "fixed four-pair round-robin",
     "pool_frequency_state": {"P": ["P0", "P1"], "D": ["D0", "D1"]},
@@ -58,6 +60,19 @@
     "ewma_alpha": 0.5,
     "step_down_fraction": 0.5,
     "step_up_fraction": 0.8,
+    "adaptive_exploration": {
+      "min_valid_requests": 8,
+      "min_input_tokens": 1024,
+      "min_output_tokens": 1024,
+      "min_observation_duration_s": 1.0,
+      "max_evidence_timeout_s": 120.0,
+      "telemetry_max_age_s": 300.0,
+      "headroom_for_one_step": 0.01,
+      "headroom_for_large_jump": 0.10,
+      "large_jump_levels": 2,
+      "context_invalidation_on_change": true,
+      "values_status": "implementation defaults only; freeze/calibrate before GPU C1"
+    },
     "max_queue_depth": 1,
     "max_kv_cache_usage_frac": 0.9,
     "severe_queue_depth": 4,
