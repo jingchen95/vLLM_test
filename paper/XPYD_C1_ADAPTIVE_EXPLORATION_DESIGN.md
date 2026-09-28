@@ -21,20 +21,23 @@ an unsafe point can never justify an energy choice.
   `AdaptivePoolController`, `PoolEvidence`, `PoolSearchState`, and
   `AdaptiveDecision` types.
 * `paper/scripts/xpyd/stagec1_stationary.py` accepts the selected SLO regime,
-  builds independent P and D controllers for both online policies, converts
+  builds independent P and D controllers for FEEDBACK-SAFE-SEARCH, converts
   every completed C1 window (including the final window) to phase-specific
   evidence, actuates the shared pool target, and appends the structured log.
 * `paper/configs/xpyd_stagec1_stationary_neptune_europa.json` freezes the
-  three-policy C1c matrix and explicit search parameters.
+  two-policy C1c matrix and explicit search parameters.
 * `paper/scripts/xpyd/__init__.py` exports the new CPU-testable primitives.
 * `tests/test_xpyd_adaptive_exploration.py` covers the deterministic state
   machine.  Existing Stage C1 tests remain unchanged and continue to exercise
   the legacy coordinator and headroom harness.
 
 The legacy `FeedbackScheduler` remains available to older phases and dry-runs,
-but it is not either C1c feedback policy. ONE-STEP and ADAPTIVE use the same
-new evidence/safety state machine; ONE-STEP only restricts every downward
-probe to one frequency level.
+but it is not the C1c feedback policy. FEEDBACK-SAFE-SEARCH uses the adaptive
+state machine with unchanged thresholds. Offline replay found that its TIGHT-
+SLO actions are identical to one-step descent because no SAFE C1b observation
+reached the 10% large-jump gate. Therefore the primary C1c experiment makes no
+adaptive-versus-one-step claim; that comparison is deferred to sensitivity
+work where action sequences differ.
 
 ## SLO regimes and evidence
 

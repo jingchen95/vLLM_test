@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "purpose": "Stage C1c stationary evidence-window-bounded STATIC-HIGH versus one-step and adaptive safe-search DVFS",
+  "purpose": "Stage C1c stationary evidence-window-bounded STATIC-HIGH versus FEEDBACK-SAFE-SEARCH",
   "output_root": "results/stagec1_stationary",
   "bucket_definition": {
     "short_input_max_tokens": 512,
@@ -30,7 +30,7 @@
     }
   ],
   "stagec1": {
-    "policies": ["STATIC-HIGH", "ONE-STEP-FEEDBACK", "ADAPTIVE-SAFE-SEARCH"],
+    "policies": ["STATIC-HIGH", "FEEDBACK-SAFE-SEARCH"],
     "slo_regime": "TIGHT",
     "max_concurrency": 4,
     "routing": "fixed four-pair round-robin",

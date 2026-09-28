@@ -1596,7 +1596,7 @@ Every stage below has one primary research question. Do not add extra experiment
 
 ## Stage C1b — Fixed-frequency headroom characterization
 
-**Status:** current/running.
+**Status:** completed; used only as an independent post-hoc reference for C1c.
 
 **Question:** Is there real SLO-safe DVFS headroom under the current stationary mixed workload?
 
@@ -1627,9 +1627,11 @@ no meaningful safe lower points
   -> evaluate SLO-sensitivity later as a scientific dimension
 ```
 
-## Stage C1c — Adaptive safe-exploration controller, stationary workload
+## Stage C1c — Feedback safe-search, stationary workload
 
-**Question:** Can the deterministic coarse-to-fine controller discover a near-best safe frequency region faster than one-step descent, while preserving the SLO?
+**Question:** Can lightweight runtime feedback discover and exploit SLO-safe
+DVFS headroom under stationary mixed workloads, without offline latency or
+power models?
 
 **Still isolate routing:**
 
@@ -1639,7 +1641,8 @@ D0/D1 share one D frequency state
 routing remains RR
 ```
 
-This stage tests the exploration algorithm, not request-aware routing.
+This stage tests feedback safe-search against static HIGH, not request-aware
+routing and not coarse-jump superiority.
 
 Stage C1c is deliberately **evidence-window-bounded**. Each completed physical
 measurement window produces one controller evidence epoch. Safety recovery can
@@ -1651,15 +1654,16 @@ requires different fixed-clock execution semantics and belongs to Stage C2.
 
 ```text
 STATIC-HIGH
-ONE-STEP-FEEDBACK      # conservative search baseline
-ADAPTIVE-SAFE-SEARCH   # main XPYD search mechanism
+FEEDBACK-SAFE-SEARCH   # current adaptive state machine and frozen thresholds
 ```
 
-`ONE-STEP-FEEDBACK` and `ADAPTIVE-SAFE-SEARCH` must use identical request
-evidence, SLO contract, safety gates, validated frequency action space, and
-HIGH cold start. The only exploration difference is maximum downward jump:
-one level for ONE-STEP and the frozen headroom-guided coarse jump for ADAPTIVE.
-The legacy `0.5*SLO` controller is not the C1c one-step baseline.
+Offline replay of the completed C1b data showed that under the primary TIGHT
+contract every measured SAFE observation had less than the frozen 10% large-
+jump headroom threshold. Consequently ONE-STEP and ADAPTIVE produced identical
+action sequences. Running both in the primary matrix would not identify a
+coarse-to-fine benefit. That comparison is deferred to a predeclared SLO-
+sensitivity experiment where the policies actually differ; the 10% threshold
+must not be retuned merely to manufacture a difference.
 
 The primary C1c SLO remains TTFT <= 600 ms and TPOT <= 65 ms with at least
 95% request-level attainment. MODERATE/LOOSE contracts remain sensitivity
@@ -1693,7 +1697,11 @@ HIGH-SUSTAINABLE 0.20 req/s
 
 **Success criterion:**
 
-Adaptive search must preserve the primary SLO and converge materially faster or with lower cumulative energy than one-step search. If it does not, keep the simpler one-step mechanism rather than claiming complexity without benefit.
+FEEDBACK-SAFE-SEARCH must preserve the primary SLO and reduce matched gross
+four-GPU energy relative to STATIC-HIGH after including all exploration
+windows. Report unsafe probes, recoveries, convergence cost, and any repeat in
+which STATIC-HIGH itself misses the contract. C1c cannot support an adaptive-
+versus-one-step claim.
 
 ## Stage C1d — SLO-headroom sensitivity, only if required
 
@@ -1702,6 +1710,11 @@ Run this only if C1b shows that the primary 600/65 contract leaves almost no DVF
 **Question:** Is lack of savings caused by the feedback method, or simply by an SLO close to fixed-HIGH performance?
 
 Use the same hardware/workload and compare a small number of predeclared SLO budgets. Do not replace the primary 600/65 result; report sensitivity separately.
+
+If ONE-STEP-FEEDBACK versus ADAPTIVE-SAFE-SEARCH is evaluated here, both must
+retain identical evidence, safety gates, frequency action space, and HIGH cold
+start; only maximum downward jump may differ. Run that comparison only for a
+contract where frozen-threshold offline replay predicts different actions.
 
 The exact additional SLO budgets must be selected before observing policy results and documented in the experiment config.
 

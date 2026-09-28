@@ -34,11 +34,11 @@ execution-semantics change belongs to C2.
    mean and observation count by SAFE frequency, plus the empirically best
    measured SAFE frequency/energy. Unsafe energy is never used. Once search is
    resolved, the controller retains/selects that measured best SAFE point.
-6. **Fair C1c policy matrix:** ONE-STEP and ADAPTIVE use the same
-   phase-specific evidence, TIGHT SLO, safety gates, three-frequency action
-   space, HIGH cold start, and shared-pool semantics. ONE-STEP only forces the
-   maximum downward jump to one level. The legacy `0.5*SLO`
-   `FeedbackScheduler` is not a C1c policy.
+6. **Identifiable C1c policy matrix:** offline replay showed that ONE-STEP and
+   ADAPTIVE have identical TIGHT-SLO action sequences with the frozen
+   thresholds. The primary matrix therefore compares STATIC-HIGH with
+   FEEDBACK-SAFE-SEARCH. The legacy `0.5*SLO` `FeedbackScheduler` is not a C1c
+   policy, and C1c makes no adaptive-versus-one-step claim.
 7. **Window-bounded claim:** controller and reports now explicitly say that
    C1c safety decisions happen at completed-window evidence epochs. No
    event-driven safety claim is made.
@@ -72,14 +72,16 @@ The focused CPU tests cover:
 - final state exported into convergence reporting;
 - missing endpoint pressure remains UNKNOWN while explicit zero is usable;
 - best measured SAFE energy may differ from the lowest SAFE frequency;
-- ONE-STEP and ADAPTIVE share gates/SLO/evidence but differ in jump limit;
-- cyclic three-policy ordering;
+- deferred ONE-STEP and ADAPTIVE configurations share gates/SLO/evidence and
+  differ only in jump limit;
+- balanced two-policy ordering across all six load/repeat pairs;
+- policy-independent trace namespaces for exact matched request streams;
 - recommendation, physical action, and readback timestamps remain distinct.
 
 Complete CPU-only XpYd suite:
 
 ```text
-Ran 249 tests in 27.826s
+Ran 250 tests in 27.827s
 OK
 ```
 
@@ -101,22 +103,27 @@ Windows/block:        4
 Requests/window:      20
 Repetitions:          3
 Primary SLO:          TTFT <= 600 ms; TPOT <= 65 ms; >=95% each
-Policies:             STATIC-HIGH / ONE-STEP-FEEDBACK / ADAPTIVE-SAFE-SEARCH
-Total blocks:         18
-Total windows:        72
-Planned requests:     1440
+Policies:             STATIC-HIGH / FEEDBACK-SAFE-SEARCH
+Total blocks:         12
+Total windows:        48
+Planned requests:     960
 ```
 
-Cyclic policy order:
+Balanced policy order across the six load/repeat pairs:
 
 ```text
-r1: STATIC-HIGH -> ONE-STEP-FEEDBACK -> ADAPTIVE-SAFE-SEARCH
-r2: ONE-STEP-FEEDBACK -> ADAPTIVE-SAFE-SEARCH -> STATIC-HIGH
-r3: ADAPTIVE-SAFE-SEARCH -> STATIC-HIGH -> ONE-STEP-FEEDBACK
+r1 MEDIUM: STATIC-HIGH -> FEEDBACK-SAFE-SEARCH
+r1 HIGH:   FEEDBACK-SAFE-SEARCH -> STATIC-HIGH
+r2 MEDIUM: FEEDBACK-SAFE-SEARCH -> STATIC-HIGH
+r2 HIGH:   STATIC-HIGH -> FEEDBACK-SAFE-SEARCH
+r3 MEDIUM: STATIC-HIGH -> FEEDBACK-SAFE-SEARCH
+r3 HIGH:   FEEDBACK-SAFE-SEARCH -> STATIC-HIGH
 ```
 
 MODERATE and LOOSE SLOs remain sensitivity-analysis results and are not used
-in this primary C1c matrix.
+in this primary C1c matrix. Any adaptive-versus-one-step experiment is also
+deferred to sensitivity work where the frozen policies produce different
+actions.
 
 ## Scope confirmation
 

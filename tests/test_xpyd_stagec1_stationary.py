@@ -14,7 +14,8 @@ from xpyd.stagec1_stationary import (
     frequency_residency,
     load_configs,
     oscillation_count,
-    policy_order_for_repeat,
+    policy_order_for_pair,
+    trace_namespace,
 )
 from xpyd.stagec1_headroom import _level_frequency
 from xpyd.workload_harness import build_trace
@@ -66,16 +67,14 @@ class StageC1Tests(unittest.TestCase):
         self.assertFalse(settings["request_aware_routing"])
         self.assertFalse(settings["oracle"])
 
-    def test_three_policy_order_is_balanced_and_cyclic(self):
-        self.assertEqual(policy_order_for_repeat(1), POLICIES)
-        self.assertEqual(
-            policy_order_for_repeat(2),
-            ("ONE-STEP-FEEDBACK", "ADAPTIVE-SAFE-SEARCH", "STATIC-HIGH"),
-        )
-        self.assertEqual(
-            policy_order_for_repeat(3),
-            ("ADAPTIVE-SAFE-SEARCH", "STATIC-HIGH", "ONE-STEP-FEEDBACK"),
-        )
+    def test_two_policy_order_is_balanced_across_six_load_repeat_pairs(self):
+        orders = [
+            policy_order_for_pair(repeat, load_index)
+            for repeat in range(1, 4) for load_index in range(2)
+        ]
+        self.assertEqual(sum(order[0] == "STATIC-HIGH" for order in orders), 3)
+        self.assertEqual(sum(order[0] == "FEEDBACK-SAFE-SEARCH" for order in orders), 3)
+        self.assertTrue(all(set(order) == set(POLICIES) for order in orders))
 
     def test_one_step_and_adaptive_share_gates_but_differ_in_jump_limit(self):
         runtime, experiment = self.load()
@@ -102,16 +101,30 @@ class StageC1Tests(unittest.TestCase):
             self.assertEqual(left.large_jump_levels, 1)
             self.assertEqual(right.large_jump_levels, 2)
 
+    def test_primary_feedback_policy_uses_adaptive_safe_search(self):
+        runtime, experiment = self.load()
+        harness = StageC1Harness(runtime, experiment, run_id="cpu-only")
+        capabilities = {
+            endpoint: SimpleNamespace(
+                selected_low_mhz=1260 if endpoint.startswith("P") else 750,
+                selected_mid_mhz=1890 if endpoint.startswith("P") else 1125,
+                selected_high_mhz=2520 if endpoint.startswith("P") else 1500,
+            )
+            for endpoint in ("P0", "P1", "D0", "D1")
+        }
+        pools = harness._adaptive_pools(capabilities, "FEEDBACK-SAFE-SEARCH")
+        self.assertIsNotNone(pools)
+        self.assertEqual(pools["P"].config.large_jump_levels, 2)
+        self.assertEqual(pools["D"].config.large_jump_levels, 2)
+
     def test_matched_trace_is_exact_35_15_35_15(self):
         _, experiment = self.load()
-        left = build_trace(experiment, "stationary_medium", "static")
-        right = build_trace(experiment, "stationary_medium", "feedback")
+        namespace = trace_namespace(1, "MEDIUM", 1)
+        left = build_trace(experiment, "stationary_medium", namespace)
+        right = build_trace(experiment, "stationary_medium", namespace)
         counts = {key: sum(row["workload_class"] == key for row in left) for key in ("SS", "SL", "LS", "LL")}
         self.assertEqual(counts, {"SS": 7, "SL": 3, "LS": 7, "LL": 3})
-        self.assertEqual(
-            [(row["arrival_time_s"], row["input_len"], row["output_len"]) for row in left],
-            [(row["arrival_time_s"], row["input_len"], row["output_len"]) for row in right],
-        )
+        self.assertEqual(left, right)
 
     def test_pool_downshift_requires_both_endpoints(self):
         mixed = [
