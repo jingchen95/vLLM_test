@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "purpose": "Stage C1 matched stationary STATIC-HIGH versus feedback-only pool DVFS",
+  "purpose": "Stage C1c stationary evidence-window-bounded STATIC-HIGH versus one-step and adaptive safe-search DVFS",
   "output_root": "results/stagec1_stationary",
   "bucket_definition": {
     "short_input_max_tokens": 512,
@@ -30,8 +30,7 @@
     }
   ],
   "stagec1": {
-    "policies": ["STATIC-HIGH", "FEEDBACK-DVFS"],
-    "controller_mode": "adaptive_safe_search",
+    "policies": ["STATIC-HIGH", "ONE-STEP-FEEDBACK", "ADAPTIVE-SAFE-SEARCH"],
     "slo_regime": "TIGHT",
     "max_concurrency": 4,
     "routing": "fixed four-pair round-robin",
@@ -52,14 +51,12 @@
       {"id": "MEDIUM", "scenario": "stationary_medium", "offered_rate_rps": 0.10},
       {"id": "HIGH-SUSTAINABLE", "scenario": "stationary_high_sustainable", "offered_rate_rps": 0.20}
     ],
-    "repetitions": 2,
+    "repetitions": 3,
     "windows_per_block": 4,
     "smoke_windows": 3,
     "minimum_dwell_s": 1.0,
     "telemetry_max_age_s": 300.0,
     "ewma_alpha": 0.5,
-    "step_down_fraction": 0.5,
-    "step_up_fraction": 0.8,
     "adaptive_exploration": {
       "min_valid_requests": 8,
       "min_input_tokens": 1024,
@@ -71,7 +68,7 @@
       "headroom_for_large_jump": 0.10,
       "large_jump_levels": 2,
       "context_invalidation_on_change": true,
-      "values_status": "implementation defaults only; freeze/calibrate before GPU C1"
+      "values_status": "frozen for C1c preflight; numeric values unchanged by correctness patch"
     },
     "max_queue_depth": 1,
     "max_kv_cache_usage_frac": 0.9,

@@ -2,14 +2,14 @@
 
 The controller in this module deliberately knows nothing about the measured
 C1b headroom results.  It only consumes the selected SLO, discrete hardware
-frequencies, and the most recent phase-specific evidence.  The legacy
-``FeedbackScheduler`` remains available as a comparator; C1 can opt into this
-state machine with ``controller_mode=adaptive_safe_search``.
+frequencies, and the most recent phase-specific evidence. The C1c one-step
+and adaptive policies both use this state machine; only the permitted coarse
+jump differs. The legacy ``FeedbackScheduler`` is not a C1c comparator.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import json
 import math
@@ -57,7 +57,7 @@ class PoolEvidence:
     ttft_violation_count: int = 0
     tpot_pass_count: int = 0
     tpot_violation_count: int = 0
-    backlog_stable: bool = False
+    backlog_stable: Optional[bool] = None
     telemetry_fresh: bool = False
     health_valid: bool = False
     readback_valid: bool = False
@@ -185,11 +185,20 @@ class PoolSearchState:
     current_index: int = 0
     last_validated_safe_index: int = 0
     unsafe_index: Optional[int] = None
+    safe_energy_by_frequency_j: dict[int, float] = field(default_factory=dict)
+    safe_energy_observations_by_frequency: dict[int, int] = field(default_factory=dict)
+    best_measured_safe_frequency: Optional[int] = None
     best_measured_safe_energy_j: Optional[float] = None
     search_phase: str = SearchPhase.COLD.value
     context_signature: str = "stationary"
     confidence: float = 0.0
     transition_reason: str = "INITIAL"
+    windows_observed: int = 0
+    requests_observed: int = 0
+    converged: bool = False
+    convergence_reason: Optional[str] = None
+    convergence_window_count: Optional[int] = None
+    convergence_request_count: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -215,7 +224,7 @@ class AdaptiveDecision:
     output_token_coverage: int
     latency_statistic_ms: Optional[float]
     attainment: Optional[float]
-    backlog_stable: bool
+    backlog_stable: Optional[bool]
     pressure_signal: str
     telemetry_fresh: bool
     headroom_fraction: Optional[float]
@@ -317,9 +326,9 @@ class AdaptivePoolController:
         valid = bool(readback_valid and readback_frequency_mhz == requested)
         if requested not in self.frequencies_mhz:
             raise ValueError("requested frequency is not supported")
-        self.state.last_action_timestamp_s = float(timestamp_s)
-        self.state.evidence_since_action = 0
         if valid:
+            self.state.last_action_timestamp_s = float(timestamp_s)
+            self.state.evidence_since_action = 0
             self.set_current_frequency(requested, readback_valid=True)
         else:
             self.state.transition_reason = "READBACK_FAILURE"
@@ -348,6 +357,8 @@ class AdaptivePoolController:
             return EvidenceClass.INVALID_MEASUREMENT, "measurement or request accounting audit failed"
         if not evidence.telemetry_fresh:
             return EvidenceClass.STALE_TELEMETRY, "telemetry is stale or missing"
+        if evidence.backlog_stable is None:
+            return EvidenceClass.PRESSURE_RISK, "required endpoint pressure evidence is unknown"
         if not evidence.backlog_stable:
             return EvidenceClass.PRESSURE_RISK, "backlog/capacity pressure is not stable"
         if not self._enough_evidence(evidence):
@@ -364,11 +375,16 @@ class AdaptivePoolController:
 
     def _next_down_index(self, headroom: Optional[float]) -> tuple[Optional[int], int, str]:
         state = self.state
-        # If a lower bound exists, refine the safe/unsafe bracket before any
-        # further expansion.  This is the only path that can revisit a level.
-        if state.unsafe_index is not None and state.unsafe_index + 1 < state.last_validated_safe_index:
-            index = (state.unsafe_index + state.last_validated_safe_index) // 2
-            return index, 1, "refine safe/unsafe frequency bracket"
+        if headroom is None or headroom < self.config.headroom_for_one_step:
+            return None, 0, "headroom is below the configured one-step probe threshold"
+        # A known unsafe bound constrains every later candidate.  If the bound
+        # is adjacent to the safe anchor, the boundary is resolved; never
+        # fall through and re-probe that unsafe level.
+        if state.unsafe_index is not None:
+            if state.unsafe_index + 1 < state.last_validated_safe_index:
+                index = (state.unsafe_index + state.last_validated_safe_index) // 2
+                return index, state.last_validated_safe_index - index, "refine safe/unsafe frequency bracket"
+            return None, 0, "safe/unsafe boundary is resolved at adjacent frequency levels"
         if state.last_validated_safe_index <= 0:
             return None, 0, "no lower supported frequency remains"
         jump = (
@@ -381,14 +397,42 @@ class AdaptivePoolController:
             return None, 0, "no lower supported frequency remains"
         return index, min(jump, state.last_validated_safe_index - index), "headroom-based coarse-to-fine downshift"
 
+    def _record_safe_energy(self, frequency_mhz: int, energy_j: Optional[float]) -> None:
+        if energy_j is None or not math.isfinite(float(energy_j)):
+            return
+        frequency = int(frequency_mhz)
+        count = self.state.safe_energy_observations_by_frequency.get(frequency, 0)
+        previous = self.state.safe_energy_by_frequency_j.get(frequency, 0.0)
+        updated = (previous * count + float(energy_j)) / float(count + 1)
+        self.state.safe_energy_by_frequency_j[frequency] = updated
+        self.state.safe_energy_observations_by_frequency[frequency] = count + 1
+        best_frequency, best_energy = min(
+            self.state.safe_energy_by_frequency_j.items(), key=lambda item: (item[1], item[0])
+        )
+        self.state.best_measured_safe_frequency = best_frequency
+        self.state.best_measured_safe_energy_j = best_energy
+
+    def _mark_converged(self, reason: str) -> None:
+        if self.state.converged:
+            return
+        self.state.converged = True
+        self.state.convergence_reason = reason
+        self.state.convergence_window_count = self.state.windows_observed
+        self.state.convergence_request_count = self.state.requests_observed
+
+    def _best_safe_target(self) -> int:
+        return (
+            int(self.state.best_measured_safe_frequency)
+            if self.state.best_measured_safe_frequency is not None
+            else int(self.state.known_safe_frequency)
+        )
+
     def _make_decision(
         self, evidence: PoolEvidence, now_s: float, *, decision: str, action: str,
         trigger: str, reason: str, target: int, classification: EvidenceClass,
-        jump: int = 0, action_timestamp_s: Optional[float] = None,
+        jump: int = 0,
     ) -> AdaptiveDecision:
         self.state.last_action_reason = reason
-        if action_timestamp_s is not None:
-            self.state.last_action_timestamp_s = float(action_timestamp_s)
         return AdaptiveDecision(
             pool=self.pool,
             phase=self.phase,
@@ -425,12 +469,15 @@ class AdaptivePoolController:
             headroom_fraction=evidence.headroom_fraction(self._slo_ms()),
             jump_size_levels=jump,
             decision_timestamp_s=float(now_s),
-            action_timestamp_s=action_timestamp_s,
-            readback_timestamp_s=evidence.readback_timestamp_s or evidence.captured_at_s,
+            action_timestamp_s=None,
+            readback_timestamp_s=evidence.readback_timestamp_s,
             search_phase=self.state.search_phase,
         )
 
-    def decide(self, evidence: PoolEvidence, *, now_s: Optional[float] = None) -> AdaptiveDecision:
+    def decide(
+        self, evidence: PoolEvidence, *, now_s: Optional[float] = None,
+        allow_exploration: bool = True,
+    ) -> AdaptiveDecision:
         """Consume one observation and return a safe target/action.
 
         The returned target is merely a recommendation until the caller has
@@ -439,6 +486,8 @@ class AdaptivePoolController:
         """
         now = float(self.clock() if now_s is None else now_s)
         self.state.evidence_since_action += 1
+        self.state.windows_observed += 1
+        self.state.requests_observed += evidence.valid_request_count
         if (
             self.config.context_invalidation_on_change
             and self.state.context_signature not in {"", "stationary"}
@@ -454,6 +503,14 @@ class AdaptivePoolController:
             self.state.unsafe_bound = None
             self.state.context_signature = evidence.context_signature
             self.state.confidence = 0.0
+            self.state.safe_energy_by_frequency_j.clear()
+            self.state.safe_energy_observations_by_frequency.clear()
+            self.state.best_measured_safe_frequency = None
+            self.state.best_measured_safe_energy_j = None
+            self.state.converged = False
+            self.state.convergence_reason = None
+            self.state.convergence_window_count = None
+            self.state.convergence_request_count = None
             action = "RECOVER_HIGH" if high != self.state.current_frequency else "HOLD"
             decision = self._make_decision(
                 evidence, now, decision="RECOVER" if action != "HOLD" else "HOLD",
@@ -514,6 +571,8 @@ class AdaptivePoolController:
             self.state.search_phase = SearchPhase.REFINE.value if self.state.unsafe_index + 1 < safe_index else SearchPhase.HOLD.value
             self.state.search_status = self.state.search_phase
             self.state.transition_reason = "SLO_RISK"
+            if self.state.unsafe_index + 1 >= safe_index:
+                self._mark_converged("safe/unsafe boundary resolved by unsafe probe")
             action = (
                 "RECOVER_HIGH"
                 if target == self.frequencies_mhz[-1] and target != self.state.current_frequency
@@ -537,21 +596,57 @@ class AdaptivePoolController:
             self.state.transition_reason = "SAFE_EVIDENCE"
             self.state.context_signature = evidence.context_signature
             self.state.confidence = min(1.0, self.state.confidence + 0.25)
-            if evidence.gross_energy_j is not None and math.isfinite(float(evidence.gross_energy_j)):
-                if self.state.best_measured_safe_energy_j is None:
-                    self.state.best_measured_safe_energy_j = float(evidence.gross_energy_j)
-                else:
-                    self.state.best_measured_safe_energy_j = min(
-                        self.state.best_measured_safe_energy_j, float(evidence.gross_energy_j)
-                    )
+            self._record_safe_energy(self.state.current_frequency, evidence.gross_energy_j)
+            if self.state.converged:
+                target = self._best_safe_target()
+                action = "HOLD"
+                decision_name = "ACCEPT_SAFE"
+                if target != self.state.current_frequency:
+                    action = "STEP_UP" if target > self.state.current_frequency else "STEP_DOWN"
+                    decision_name = "SELECT_BEST_SAFE"
+                self.state.search_phase = SearchPhase.HOLD.value
+                self.state.search_status = SearchPhase.HOLD.value
+                self.state.transition_reason = "SEARCH_CONVERGED"
+                return self._make_decision(
+                    evidence, now, decision=decision_name, action=action,
+                    trigger="FINAL_EVIDENCE" if not allow_exploration else "SEARCH_CONVERGED",
+                    reason=self.state.convergence_reason or "search already converged",
+                    target=target, classification=classification,
+                )
+            if not allow_exploration:
+                index, _, boundary_reason = self._next_down_index(headroom)
+                target = self.state.current_frequency
+                action = "HOLD"
+                decision_name = "ACCEPT_SAFE"
+                if index is None:
+                    self._mark_converged(boundary_reason)
+                    target = self._best_safe_target()
+                    if target != self.state.current_frequency:
+                        action = "STEP_UP" if target > self.state.current_frequency else "STEP_DOWN"
+                        decision_name = "SELECT_BEST_SAFE"
+                self.state.search_phase = SearchPhase.HOLD.value
+                self.state.search_status = SearchPhase.HOLD.value
+                self.state.transition_reason = "FINAL_EVIDENCE"
+                return self._make_decision(
+                    evidence, now, decision=decision_name, action=action,
+                    trigger="FINAL_EVIDENCE", reason="final window classified; no unmeasured probe allowed",
+                    target=target, classification=classification,
+                )
             index, jump, next_reason = self._next_down_index(headroom)
             if index is None:
                 self.state.search_phase = SearchPhase.HOLD.value
                 self.state.search_status = SearchPhase.HOLD.value
+                self._mark_converged(next_reason)
+                target = self._best_safe_target()
+                action = "HOLD"
+                decision_name = "ACCEPT_SAFE"
+                if target != self.state.current_frequency:
+                    action = "STEP_UP" if target > self.state.current_frequency else "STEP_DOWN"
+                    decision_name = "SELECT_BEST_SAFE"
                 return self._make_decision(
-                    evidence, now, decision="ACCEPT_SAFE", action="HOLD",
+                    evidence, now, decision=decision_name, action=action,
                     trigger="ENOUGH_EVIDENCE", reason=next_reason,
-                    target=self.state.current_frequency, classification=classification,
+                    target=target, classification=classification,
                 )
             target = self.frequencies_mhz[index]
             self.state.candidate_frequency = target
@@ -562,7 +657,6 @@ class AdaptivePoolController:
                 evidence, now, decision="EXPLORE_DOWN", action="STEP_DOWN",
                 trigger=trigger, reason=next_reason, target=target,
                 classification=classification, jump=jump,
-                action_timestamp_s=now,
             )
 
         raise AssertionError("unhandled evidence classification")
@@ -597,29 +691,48 @@ def evidence_from_window(
     output_tokens = sum(int(row.get("observed_output_tokens", row.get("output_len", 0))) for row in valid)
     ttft_pass = sum(value <= ttft_slo_ms for value in ttft)
     tpot_pass = sum(value <= tpot_slo_ms for value in tpot)
-    close_wait = float(metrics.get("client_waiting_at_offered_close") or 0.0)
+    close_wait_raw = metrics.get("client_waiting_at_offered_close")
+    close_wait = float(close_wait_raw) if close_wait_raw is not None else None
     endpoint_load = metrics.get("endpoint_load")
     if endpoint_load is None and metrics.get("endpoint_load_json"):
         try:
             endpoint_load = json.loads(str(metrics["endpoint_load_json"]))
         except (TypeError, ValueError, json.JSONDecodeError):
             endpoint_load = None
+    relevant_endpoints = ("P0", "P1") if pool == "P" else ("D0", "D1")
     server_queue_pressure = False
+    endpoint_pressure_observed = isinstance(endpoint_load, Mapping)
     if isinstance(endpoint_load, Mapping):
-        for value in endpoint_load.values():
+        for endpoint_id in relevant_endpoints:
+            value = endpoint_load.get(endpoint_id)
             if not isinstance(value, Mapping):
+                endpoint_pressure_observed = False
                 continue
             for key in ("waiting_mean", "waiting_max"):
+                raw = value.get(key)
+                if raw is None or raw == "":
+                    endpoint_pressure_observed = False
+                    continue
                 try:
-                    if float(value.get(key) or 0.0) > 0.0:
+                    if float(raw) > 0.0:
                         server_queue_pressure = True
                 except (TypeError, ValueError):
-                    server_queue_pressure = True
-    backlog_stable = (
-        not bool(metrics.get("backlog_growing"))
-        and close_wait <= 0.0
-        and not server_queue_pressure
-    )
+                    endpoint_pressure_observed = False
+    backlog_growing = metrics.get("backlog_growing")
+    client_pressure_observed = backlog_growing is not None and close_wait is not None
+    if not endpoint_pressure_observed or not client_pressure_observed:
+        backlog_stable = None
+        pressure_signal = "unknown_required_pressure"
+    else:
+        backlog_stable = (
+            not bool(backlog_growing)
+            and close_wait <= 0.0
+            and not server_queue_pressure
+        )
+        pressure_signal = (
+            "stable" if backlog_stable
+            else ("server_queue" if server_queue_pressure else "backlog_risk")
+        )
     energy_key = "P0_energy_j" if pool == "P" else "D0_energy_j"
     other_key = "P1_energy_j" if pool == "P" else "D1_energy_j"
     gross = None
@@ -644,14 +757,11 @@ def evidence_from_window(
         health_valid=bool(metrics.get("measurement_valid", False)),
         readback_valid=bool(metrics.get("readback_valid", metrics.get("measurement_valid", False))),
         request_accounting_valid=bool(metrics.get("measurement_valid", False)) and len(valid) == len(requests),
-        pressure_signal=(
-            "stable" if backlog_stable
-            else ("server_queue" if server_queue_pressure else "backlog_risk")
-        ),
+        pressure_signal=pressure_signal,
         gross_energy_j=gross,
         context_signature=context_signature,
         captured_at_s=float(captured_at_s),
-        readback_timestamp_s=float(captured_at_s),
+        readback_timestamp_s=None,
     )
 
 

@@ -1,8 +1,8 @@
 # XPYD System & Control Design
 
-**Status:** authoritative design/experiment contract  
-**Last updated:** 2026-09-13  
-**Current experimental phase:** Stage C1b — fixed-frequency DVFS-headroom characterization  
+**Status:** authoritative design/experiment contract
+**Last updated:** 2026-09-28
+**Current experimental phase:** Stage C1c — stationary evidence-window-bounded safe-search preflight
 
 This file is the authoritative specification for the XPYD project. It is intended to be read by both humans and coding agents such as Codex. When an implementation, experiment script, or older document conflicts with this file, this file wins unless it is explicitly revised first.
 
@@ -1641,6 +1641,12 @@ routing remains RR
 
 This stage tests the exploration algorithm, not request-aware routing.
 
+Stage C1c is deliberately **evidence-window-bounded**. Each completed physical
+measurement window produces one controller evidence epoch. Safety recovery can
+act at that boundary, but C1c does not claim an event-driven fast-safety path
+between windows. Implementing that final hybrid/event-driven architecture
+requires different fixed-clock execution semantics and belongs to Stage C2.
+
 **Policies:**
 
 ```text
@@ -1648,6 +1654,22 @@ STATIC-HIGH
 ONE-STEP-FEEDBACK      # conservative search baseline
 ADAPTIVE-SAFE-SEARCH   # main XPYD search mechanism
 ```
+
+`ONE-STEP-FEEDBACK` and `ADAPTIVE-SAFE-SEARCH` must use identical request
+evidence, SLO contract, safety gates, validated frequency action space, and
+HIGH cold start. The only exploration difference is maximum downward jump:
+one level for ONE-STEP and the frozen headroom-guided coarse jump for ADAPTIVE.
+The legacy `0.5*SLO` controller is not the C1c one-step baseline.
+
+The primary C1c SLO remains TTFT <= 600 ms and TPOT <= 65 ms with at least
+95% request-level attainment. MODERATE/LOOSE contracts remain sensitivity
+results and are not policies in the primary experiment.
+
+Each frequency candidate is classified exactly once from its measured window.
+A known unsafe adjacent bound must not be re-probed unless an explicit context
+invalidation clears that knowledge. The final window is consumed for
+classification and convergence accounting, but cannot start an unmeasured new
+downward probe.
 
 **Loads:**
 
@@ -2137,4 +2159,3 @@ The intended paper narrative is:
 7. The evaluation then asks how much oracle benefit this low-knowledge system captures and whether stronger explicit Canary profiling earns enough extra benefit to amortize its knowledge-acquisition cost.
 
 If any mechanism fails experimentally, revise the story around the evidence rather than preserving the planned claim.
-

@@ -1,10 +1,10 @@
-"""Stage C1 stationary STATIC-HIGH versus pool-level feedback DVFS.
+"""Stage C1c stationary, evidence-window-bounded safe-search validation.
 
 This runner deliberately reuses the Phase 3C measurement path.  Routing
-remains the proxy's fixed four-pair round robin.  The legacy Phase 3D
-feedback scheduler is retained for comparison, while the C1 configuration
-can select the model-free adaptive safe-search controller that converts each
-phase's evidence into one shared P/D pool state.
+remains the proxy's fixed four-pair round robin.  ONE-STEP-FEEDBACK and
+ADAPTIVE-SAFE-SEARCH share evidence, SLOs, safety gates, action space, and cold
+start; only the permitted downward jump size differs.  This stage does not
+claim event-driven safety between physical measurement windows.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import copy
 import csv
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -45,7 +45,7 @@ class StageC1Error(RuntimeError):
     """A Stage C1 semantic, measurement, or physical-control gate failed."""
 
 
-POLICIES = ("STATIC-HIGH", "FEEDBACK-DVFS")
+POLICIES = ("STATIC-HIGH", "ONE-STEP-FEEDBACK", "ADAPTIVE-SAFE-SEARCH")
 POOLS = {"P": ("P0", "P1"), "D": ("D0", "D1")}
 
 
@@ -100,8 +100,10 @@ def load_configs(runtime_path: Path, experiment_path: Path) -> tuple[dict[str, A
     settings = experiment.get("stagec1")
     if not isinstance(settings, Mapping):
         raise StageC1Error("stagec1 settings are required")
-    if settings.get("policies") != list(POLICIES):
-        raise StageC1Error("Stage C1 compares exactly STATIC-HIGH and FEEDBACK-DVFS")
+    headroom_diagnostic = "stagec1_headroom" in experiment
+    expected_policies = ["STATIC-HIGH", "FEEDBACK-DVFS"] if headroom_diagnostic else list(POLICIES)
+    if settings.get("policies") != expected_policies:
+        raise StageC1Error("Stage C1c compares exactly STATIC-HIGH, ONE-STEP-FEEDBACK, and ADAPTIVE-SAFE-SEARCH")
     if int(settings.get("max_concurrency", 0)) != 4:
         raise StageC1Error("Stage C1 requires max concurrency 4")
     if settings.get("routing") != "fixed four-pair round-robin":
@@ -116,6 +118,8 @@ def load_configs(runtime_path: Path, experiment_path: Path) -> tuple[dict[str, A
     slo_regime = str(settings.get("slo_regime", "TIGHT")).upper()
     if slo_regime not in slo_regimes:
         raise StageC1Error("unsupported Stage C1 SLO regime")
+    if not headroom_diagnostic and slo_regime != "TIGHT":
+        raise StageC1Error("full Stage C1c must use the TIGHT 600/65 ms SLO")
     slo = settings.get("slo", {})
     expected_slo = slo_regimes[slo_regime]
     observed_slo = (
@@ -124,13 +128,28 @@ def load_configs(runtime_path: Path, experiment_path: Path) -> tuple[dict[str, A
     )
     if observed_slo != expected_slo:
         raise StageC1Error("Stage C1 SLO does not match selected calibrated regime")
-    controller_mode = str(settings.get("controller_mode", "legacy_feedback"))
-    if controller_mode not in {"legacy_feedback", "adaptive_safe_search"}:
-        raise StageC1Error("unsupported Stage C1 controller_mode")
-    if controller_mode == "adaptive_safe_search" and not isinstance(
-        settings.get("adaptive_exploration", {}), Mapping
-    ):
-        raise StageC1Error("adaptive_safe_search requires adaptive_exploration settings")
+    if not headroom_diagnostic:
+        if not isinstance(settings.get("adaptive_exploration", {}), Mapping):
+            raise StageC1Error("Stage C1c requires adaptive_exploration settings")
+        if int(settings.get("repetitions", 0)) != 3:
+            raise StageC1Error("full Stage C1c requires exactly 3 repetitions")
+        if int(settings.get("windows_per_block", 0)) != 4:
+            raise StageC1Error("full Stage C1c requires 4 windows per block")
+        expected_levels = {
+            "P0": {"LOW": 1260, "MID": 1890, "HIGH": 2520},
+            "P1": {"LOW": 1260, "MID": 1890, "HIGH": 2520},
+            "D0": {"LOW": 750, "MID": 1125, "HIGH": 1500},
+            "D1": {"LOW": 750, "MID": 1125, "HIGH": 1500},
+        }
+        if settings.get("frequency_levels_mhz") != expected_levels:
+            raise StageC1Error("Stage C1c action space must be the validated three-level P/D clocks")
+        scenarios = {str(item["id"]): item for item in experiment.get("scenarios", [])}
+        for scenario_id in ("stationary_medium", "stationary_high_sustainable"):
+            segment = scenarios[scenario_id]["segments"][0]
+            if int(segment["request_count"]) != 20 or segment["class_weights"] != {
+                "SS": 0.35, "SL": 0.15, "LS": 0.35, "LL": 0.15,
+            }:
+                raise StageC1Error("Stage C1c requires 20 requests/window and 35/15/35/15 mix")
     points = settings.get("load_points", [])
     observed = {str(item["id"]): float(item["offered_rate_rps"]) for item in points}
     if observed != {"MEDIUM": 0.10, "HIGH-SUSTAINABLE": 0.20}:
@@ -165,6 +184,12 @@ def load_configs(runtime_path: Path, experiment_path: Path) -> tuple[dict[str, A
         },
     }
     return runtime, experiment
+
+
+def policy_order_for_repeat(repeat: int) -> tuple[str, ...]:
+    """Balanced cyclic order for the three full-C1c policies."""
+    offset = (int(repeat) - 1) % len(POLICIES)
+    return POLICIES[offset:] + POLICIES[:offset]
 
 
 def coordinate_pool(
@@ -242,6 +267,22 @@ def oscillation_count(decisions: Sequence[Mapping[str, Any]]) -> int:
     return sum(left != right for left, right in zip(directions, directions[1:]))
 
 
+def observed_metric_stats(
+    windows: Sequence[Mapping[str, Any]], endpoint_id: str, metric: str,
+) -> dict[str, Any]:
+    """Summarize only explicitly observed endpoint values; never fill zero."""
+    values = [
+        float(window[endpoint_id][metric])
+        for window in windows
+        if endpoint_id in window and window[endpoint_id].get(metric) not in (None, "")
+    ]
+    return {
+        "observed_windows": len(values),
+        "mean": statistics.fmean(values) if values else None,
+        "max": max(values) if values else None,
+    }
+
+
 class StageC1Harness(Phase3DClosedLoopHarness):
     def __init__(
         self, runtime: Mapping[str, Any], experiment: Mapping[str, Any],
@@ -259,6 +300,7 @@ class StageC1Harness(Phase3DClosedLoopHarness):
         self.run_dir = Path(os.path.expandvars(str(experiment["output_root"]))) / self.run_id
         self.action_rows: list[dict[str, Any]] = []
         self.decision_rows: list[dict[str, Any]] = []
+        self.block_search_rows: list[dict[str, Any]] = []
 
     @staticmethod
     def _levels(capability: EndpointClockCapability) -> dict[str, int]:
@@ -271,14 +313,21 @@ class StageC1Harness(Phase3DClosedLoopHarness):
     def _actuate_targets(
         self, actuator: PerEndpointClockActuator, context: ControllerContext,
         targets: Mapping[str, int], reason: str, policy: str, block_id: str,
-    ) -> None:
+    ) -> dict[str, dict[str, Any]]:
+        action_by_endpoint: dict[str, dict[str, Any]] = {}
         for endpoint_id in sorted(targets):
             target = int(targets[endpoint_id])
             changed = actuator.requested.get(endpoint_id) != target
             if changed:
                 row = actuator.actuate(endpoint_id, target, reason)
                 row.update({"policy": policy, "block_id": block_id})
+                if row.get("timestamp_unix_s") is not None and row.get("transition_readback_latency_s") is not None:
+                    row["readback_timestamp_unix_s"] = (
+                        float(row["timestamp_unix_s"])
+                        + float(row["transition_readback_latency_s"])
+                    )
                 self.action_rows.append(row)
+                action_by_endpoint[endpoint_id] = row
                 if row["command_status"] != "success" or not row["readback_valid"]:
                     raise StageC1Error("physical actuation failed for %s" % endpoint_id)
             state = context.registry.get_state(endpoint_id)
@@ -290,14 +339,22 @@ class StageC1Harness(Phase3DClosedLoopHarness):
             # recording the actuation (important for fixed-point diagnostics
             # and for controller recovery transitions).
             if changed:
-                context.scheduler.record_dvfs_actuation(
-                    endpoint_id, observed_freq_mhz=target, timestamp_s=time.time()
+                readback_timestamp = float(
+                    action_by_endpoint[endpoint_id].get(
+                        "readback_timestamp_unix_s",
+                        action_by_endpoint[endpoint_id].get("timestamp_unix_s", time.time()),
+                    )
                 )
+                context.scheduler.record_dvfs_actuation(
+                    endpoint_id, observed_freq_mhz=target,
+                    timestamp_s=readback_timestamp,
+                )
+        return action_by_endpoint
 
     def _adaptive_pools(
-        self, capabilities: Mapping[str, EndpointClockCapability]
+        self, capabilities: Mapping[str, EndpointClockCapability], policy: str,
     ) -> dict[str, AdaptivePoolController] | None:
-        if str(self.settings.get("controller_mode", "legacy_feedback")) != "adaptive_safe_search":
+        if policy not in {"ONE-STEP-FEEDBACK", "ADAPTIVE-SAFE-SEARCH"}:
             return None
         feedback = self.config["phase3d"]["feedback"]
         adaptive = AdaptiveExplorationConfig.from_mapping(
@@ -305,6 +362,8 @@ class StageC1Harness(Phase3DClosedLoopHarness):
             ttft_slo_ms=float(feedback["ttft_slo_ms"]),
             tpot_slo_ms=float(feedback["tpot_slo_ms"]),
         )
+        if policy == "ONE-STEP-FEEDBACK":
+            adaptive = replace(adaptive, large_jump_levels=1)
         regime = str(self.settings.get("slo_regime", "TIGHT")).upper()
         return {
             "P": AdaptivePoolController(
@@ -332,6 +391,8 @@ class StageC1Harness(Phase3DClosedLoopHarness):
         policy: str,
         block_id: str,
         window_index: int,
+        *,
+        allow_exploration: bool = True,
     ) -> None:
         """Run one evidence epoch for independent P and D pool searches."""
         if not context.adaptive_pools:
@@ -355,46 +416,12 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                 context_signature="stationary:%s" % str(metrics.get("load_point", "unknown")),
                 captured_at_s=now,
             )
-            decision = controller.decide(evidence, now_s=now)
+            decision = controller.decide(
+                evidence, now_s=now, allow_exploration=allow_exploration
+            )
             decisions_by_pool[pool] = decision
-            row = decision.as_log()
-            state = controller.state
-            row.update({
-                "timestamp_unix_s": now,
-                "policy": policy,
-                "block_id": block_id,
-                "before_window_index": window_index,
-                "prior_ttft_mean_ms": metrics.get("ttft_mean_ms"),
-                "prior_ttft_p95_ms": metrics.get("ttft_p95_ms"),
-                "prior_tpot_mean_ms": metrics.get("tpot_mean_ms"),
-                "prior_tpot_p95_ms": metrics.get("tpot_p95_ms"),
-                "prior_admission_p95_ms": metrics.get("admission_delay_p95_ms"),
-                "prior_client_waiting_close": metrics.get("client_waiting_at_offered_close"),
-                "prior_backlog_growing": metrics.get("backlog_growing"),
-                "state_evidence_since_action": state.evidence_since_action,
-                "state_last_action_reason": state.last_action_reason,
-                "state_last_action_timestamp_s": state.last_action_timestamp_s,
-                "state_current_index": state.current_index,
-                "state_last_validated_safe_index": state.last_validated_safe_index,
-                "state_unsafe_index": state.unsafe_index,
-                "state_best_measured_safe_energy_j": state.best_measured_safe_energy_j,
-                "state_context_signature": state.context_signature,
-                "state_confidence": state.confidence,
-                "state_transition_reason": state.transition_reason,
-                "evidence_since_action": state.evidence_since_action,
-                "last_action_reason": state.last_action_reason,
-                "last_action_timestamp_s": state.last_action_timestamp_s,
-                "current_index": state.current_index,
-                "last_validated_safe_index": state.last_validated_safe_index,
-                "unsafe_index": state.unsafe_index,
-                "best_measured_safe_energy_j": state.best_measured_safe_energy_j,
-                "context_signature": state.context_signature,
-                "confidence": state.confidence,
-                "transition_reason": state.transition_reason,
-            })
-            self.decision_rows.append(row)
             targets.update({endpoint_id: int(decision.requested_frequency_mhz) for endpoint_id in endpoint_ids})
-        self._actuate_targets(
+        actions = self._actuate_targets(
             actuator, context, targets, "stagec1_adaptive_pool_feedback", policy, block_id
         )
         for pool, endpoint_ids in POOLS.items():
@@ -402,24 +429,120 @@ class StageC1Harness(Phase3DClosedLoopHarness):
             target = context.targets[endpoint_ids[0]]
             decision = decisions_by_pool[pool]
             if int(target) != int(decision.current_frequency_mhz):
-                # The physical actuator and readback have succeeded; only now
-                # does the search clock start for the new candidate.
+                pool_actions = [actions[item] for item in endpoint_ids if item in actions]
+                if len(pool_actions) != len(endpoint_ids):
+                    raise StageC1Error("pool actuation did not cover every shared-frequency endpoint")
+                readback_timestamp = max(float(item["readback_timestamp_unix_s"]) for item in pool_actions)
                 controller.record_actuation(
-                    target, target, readback_valid=True, timestamp_s=now
+                    target, target, readback_valid=True,
+                    timestamp_s=readback_timestamp,
                 )
             else:
                 controller.set_current_frequency(target)
+            row = decision.as_log()
+            state = controller.state
+            pool_actions = [actions[item] for item in endpoint_ids if item in actions]
+            if pool_actions:
+                row["action_timestamp_s"] = min(float(item["timestamp_unix_s"]) for item in pool_actions)
+                row["readback_timestamp_s"] = max(float(item["readback_timestamp_unix_s"]) for item in pool_actions)
+                row["readback_freq_mhz"] = target
+                row["readback_valid"] = all(bool(item["readback_valid"]) for item in pool_actions)
+            row.update({
+                "timestamp_unix_s": now,
+                "policy": policy,
+                "block_id": block_id,
+                "before_window_index": window_index,
+                "evidence_window_index": window_index if not allow_exploration else window_index - 1,
+                "finalization": not allow_exploration,
+                "prior_ttft_mean_ms": metrics.get("ttft_mean_ms"),
+                "prior_ttft_p95_ms": metrics.get("ttft_p95_ms"),
+                "prior_tpot_mean_ms": metrics.get("tpot_mean_ms"),
+                "prior_tpot_p95_ms": metrics.get("tpot_p95_ms"),
+                "prior_admission_p95_ms": metrics.get("admission_delay_p95_ms"),
+                "prior_client_waiting_close": metrics.get("client_waiting_at_offered_close"),
+                "prior_backlog_growing": metrics.get("backlog_growing"),
+                "evidence_since_action": state.evidence_since_action,
+                "last_action_reason": state.last_action_reason,
+                "last_actual_action_timestamp_s": state.last_action_timestamp_s,
+                "current_index": state.current_index,
+                "last_validated_safe_index": state.last_validated_safe_index,
+                "unsafe_index": state.unsafe_index,
+                "safe_energy_by_frequency_j_json": json.dumps(state.safe_energy_by_frequency_j, sort_keys=True),
+                "best_measured_safe_frequency_mhz": state.best_measured_safe_frequency,
+                "best_measured_safe_energy_j": state.best_measured_safe_energy_j,
+                "context_signature": state.context_signature,
+                "confidence": state.confidence,
+                "transition_reason": state.transition_reason,
+                "converged": state.converged,
+                "convergence_reason": state.convergence_reason,
+                "convergence_window_count": state.convergence_window_count,
+                "convergence_request_count": state.convergence_request_count,
+            })
+            self.decision_rows.append(row)
+
+    def _record_block_search_summary(
+        self, context: ControllerContext, *, policy: str, block_id: str,
+        repeat: int, load_point: str,
+    ) -> None:
+        if not context.adaptive_pools:
+            for pool, endpoint_ids in POOLS.items():
+                frequency = context.targets[endpoint_ids[0]]
+                self.block_search_rows.append({
+                    "block_id": block_id, "policy": policy, "repeat": repeat,
+                    "load_point": load_point, "pool": pool,
+                    "probe_count": 0, "unsafe_probe_count": 0,
+                    "recovery_action_count": 0,
+                    "windows_until_convergence": 0,
+                    "requests_until_convergence": 0,
+                    "converged": True, "convergence_reason": "STATIC_HIGH",
+                    "final_validated_safe_frequency_mhz": frequency,
+                    "final_selected_frequency_mhz": frequency,
+                    "best_measured_safe_frequency_mhz": frequency,
+                    "best_measured_safe_energy_j": None,
+                    "safe_energy_by_frequency_j_json": "{}",
+                })
+            return
+        for pool, controller in context.adaptive_pools.items():
+            state = controller.state
+            decisions = [
+                row for row in self.decision_rows
+                if row.get("block_id") == block_id and row.get("pool") == pool
+            ]
+            self.block_search_rows.append({
+                "block_id": block_id, "policy": policy, "repeat": repeat,
+                "load_point": load_point, "pool": pool,
+                "probe_count": sum(row.get("decision") == "EXPLORE_DOWN" for row in decisions),
+                "unsafe_probe_count": sum(
+                    row.get("evidence_classification") == "UNSAFE"
+                    and row.get("candidate_freq_mhz") not in (None, "")
+                    for row in decisions
+                ),
+                "recovery_action_count": sum(row.get("decision") == "RECOVER" for row in decisions),
+                "windows_until_convergence": state.convergence_window_count,
+                "requests_until_convergence": state.convergence_request_count,
+                "converged": state.converged,
+                "convergence_reason": state.convergence_reason,
+                "final_validated_safe_frequency_mhz": state.known_safe_frequency,
+                "final_selected_frequency_mhz": state.current_frequency,
+                "best_measured_safe_frequency_mhz": state.best_measured_safe_frequency,
+                "best_measured_safe_energy_j": state.best_measured_safe_energy_j,
+                "safe_energy_by_frequency_j_json": json.dumps(
+                    state.safe_energy_by_frequency_j, sort_keys=True
+                ),
+            })
 
     def _control(
         self, context: ControllerContext, capabilities: Mapping[str, EndpointClockCapability],
         actuator: PerEndpointClockActuator, metrics: Mapping[str, Any], policy: str,
         block_id: str, window_index: int,
         requests: Sequence[Mapping[str, Any]] | None = None,
+        *, allow_exploration: bool = True,
     ) -> None:
         if context.adaptive_pools is not None:
             self._adaptive_control(
                 context, capabilities, actuator, metrics, requests or [],
                 policy, block_id, window_index,
+                allow_exploration=allow_exploration,
             )
             return
         risk = admission_risk(metrics, self.settings)
@@ -529,7 +652,7 @@ class StageC1Harness(Phase3DClosedLoopHarness):
         try:
             block_number = 0
             for repeat in range(1, repetitions + 1):
-                policy_order = POLICIES if repeat % 2 else tuple(reversed(POLICIES))
+                policy_order = policy_order_for_repeat(repeat)
                 for point in points:
                     for policy in policy_order:
                         block_number += 1
@@ -537,7 +660,7 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                         registry, telemetry, scheduler = self._build_scheduler(capabilities)
                         context = ControllerContext(
                             registry, telemetry, scheduler, dict(high),
-                            self._adaptive_pools(capabilities),
+                            self._adaptive_pools(capabilities, policy),
                         )
                         self._actuate_targets(
                             actuator, context, high, "stagec1_cold_start_high", policy, block_id
@@ -545,7 +668,7 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                         previous: dict[str, Any] | None = None
                         previous_requests: list[dict[str, Any]] = []
                         for window_index in range(1, windows + 1):
-                            if policy == "FEEDBACK-DVFS" and previous is not None:
+                            if policy != "STATIC-HIGH" and previous is not None:
                                 self._control(
                                     context, capabilities, actuator, previous, policy,
                                     block_id, window_index, previous_requests,
@@ -572,6 +695,16 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                             )
                             previous = row
                             previous_requests = requests
+                        if policy != "STATIC-HIGH" and previous is not None:
+                            self._control(
+                                context, capabilities, actuator, previous, policy,
+                                block_id, windows + 1, previous_requests,
+                                allow_exploration=False,
+                            )
+                        self._record_block_search_summary(
+                            context, policy=policy, block_id=block_id,
+                            repeat=repeat, load_point=str(point["id"]),
+                        )
             valid = True
         except Exception as exc:
             error = "%s: %s" % (type(exc).__name__, exc)
@@ -583,7 +716,7 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                         registry, telemetry, scheduler = self._build_scheduler(capabilities)
                         context = ControllerContext(
                             registry, telemetry, scheduler, dict(high),
-                            self._adaptive_pools(capabilities),
+                            None,
                         )
                     self._actuate_targets(
                         actuator, context, high, "stagec1_final_restore_high",
@@ -606,11 +739,24 @@ class StageC1Harness(Phase3DClosedLoopHarness):
         ttft_limit = float(self.settings["slo"]["ttft_ms"])
         tpot_limit = float(self.settings["slo"]["tpot_ms"])
         attainment_gate = float(self.settings["slo"]["attainment"])
+        for block_id in sorted({str(row["block_id"]) for row in rows}):
+            cumulative_energy = 0.0
+            cumulative_requests = 0
+            for row in sorted(
+                (item for item in rows if item["block_id"] == block_id),
+                key=lambda item: int(item["window_index"]),
+            ):
+                cumulative_energy += float(row["total_gross_energy_j"])
+                cumulative_requests += int(row["request_count"])
+                row["cumulative_energy_j"] = cumulative_energy
+                row["cumulative_requests"] = cumulative_requests
+                row["cumulative_joules_per_request"] = cumulative_energy / cumulative_requests
         _write_csv(self.run_dir / "stagec1_measurements.csv", rows)
         _write_csv(self.run_dir / "stagec1_requests.csv", requests)
         _write_csv(self.run_dir / "controller_decisions.csv", self.decision_rows)
         _write_csv(self.run_dir / "clock_actions.csv", self.action_rows)
         _write_csv(self.run_dir / "telemetry_observations.csv", self.telemetry_rows)
+        _write_csv(self.run_dir / "stagec1_search_convergence.csv", self.block_search_rows)
         repeat_summaries = []
         for point in self.settings["load_points"]:
             for policy in POLICIES:
@@ -640,7 +786,7 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                         "tpot_attainment": sum(value <= tpot_limit for value in tpot) / len(tpot),
                     })
         for row in repeat_summaries:
-            if row["policy"] != "FEEDBACK-DVFS":
+            if row["policy"] == "STATIC-HIGH":
                 continue
             baseline = next(
                 item for item in repeat_summaries
@@ -667,6 +813,10 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                 count = len(selected_requests)
                 transitions = [row for row in self.decision_rows if row["policy"] == policy and point["id"].lower() in row["block_id"] and row["action"] != "HOLD"]
                 decisions = [row for row in self.decision_rows if row["policy"] == policy and point["id"].lower() in row["block_id"]]
+                search_rows = [
+                    row for row in self.block_search_rows
+                    if row["policy"] == policy and row["load_point"] == point["id"]
+                ]
                 endpoint_load = [json.loads(row["endpoint_load_json"]) for row in selected]
                 aggregate = {
                     "load_point": point["id"], "policy": policy,
@@ -693,6 +843,25 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                     "proxy_inflight_max": max(float(row["proxy_inflight_max"]) for row in selected),
                     "frequency_transitions": len(transitions),
                     "control_oscillations": oscillation_count(decisions),
+                    "probe_count": sum(int(row["probe_count"]) for row in search_rows),
+                    "unsafe_probe_count": sum(int(row["unsafe_probe_count"]) for row in search_rows),
+                    "emergency_recovery_action_count": sum(int(row["recovery_action_count"]) for row in search_rows),
+                    "converged_pool_blocks": sum(bool(row["converged"]) for row in search_rows),
+                    "total_pool_blocks": len(search_rows),
+                    "windows_until_convergence_json": json.dumps([
+                        row["windows_until_convergence"] for row in search_rows
+                    ]),
+                    "requests_until_convergence_json": json.dumps([
+                        row["requests_until_convergence"] for row in search_rows
+                    ]),
+                    "final_validated_safe_frequency_json": json.dumps({
+                        row["block_id"] + ":" + row["pool"]: row["final_validated_safe_frequency_mhz"]
+                        for row in search_rows
+                    }, sort_keys=True),
+                    "best_measured_safe_frequency_json": json.dumps({
+                        row["block_id"] + ":" + row["pool"]: row["best_measured_safe_frequency_mhz"]
+                        for row in search_rows
+                    }, sort_keys=True),
                     "P_frequency_residency_json": json.dumps(
                         frequency_residency(selected, "P0", self.settings["frequency_levels_mhz"]["P0"]), sort_keys=True
                     ),
@@ -701,14 +870,18 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                     ),
                     "endpoint_running_waiting_json": json.dumps({
                         endpoint_id: {
-                            "running_mean": statistics.fmean(
-                                float(value[endpoint_id]["running_mean"] or 0) for value in endpoint_load
+                            "running_mean": observed_metric_stats(
+                                endpoint_load, endpoint_id, "running_mean"
                             ),
-                            "running_max": max(float(value[endpoint_id]["running_max"] or 0) for value in endpoint_load),
-                            "waiting_mean": statistics.fmean(
-                                float(value[endpoint_id]["waiting_mean"] or 0) for value in endpoint_load
+                            "running_max": observed_metric_stats(
+                                endpoint_load, endpoint_id, "running_max"
                             ),
-                            "waiting_max": max(float(value[endpoint_id]["waiting_max"] or 0) for value in endpoint_load),
+                            "waiting_mean": observed_metric_stats(
+                                endpoint_load, endpoint_id, "waiting_mean"
+                            ),
+                            "waiting_max": observed_metric_stats(
+                                endpoint_load, endpoint_id, "waiting_max"
+                            ),
                         } for endpoint_id in ("P0", "P1", "D0", "D1")
                     }, sort_keys=True),
                     "measurement_valid": all(bool(row["measurement_valid"]) for row in selected),
@@ -724,25 +897,24 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                 aggregates.append(aggregate)
         for point in self.settings["load_points"]:
             static = next((row for row in aggregates if row["load_point"] == point["id"] and row["policy"] == "STATIC-HIGH"), None)
-            feedback = next((row for row in aggregates if row["load_point"] == point["id"] and row["policy"] == "FEEDBACK-DVFS"), None)
-            if static and feedback:
-                feedback["energy_saving_vs_static_fraction"] = (
-                    (static["joules_per_request"] - feedback["joules_per_request"])
-                    / static["joules_per_request"] if feedback["slo_contract_pass"] else None
-                )
-                paired = [
-                    float(row["paired_energy_saving_fraction"])
-                    for row in repeat_summaries
-                    if row["load_point"] == point["id"]
-                    and row["policy"] == "FEEDBACK-DVFS"
-                    and row.get("paired_energy_saving_fraction") is not None
-                ]
-                feedback["paired_energy_saving_mean_fraction"] = (
-                    statistics.fmean(paired) if paired else None
-                )
-                feedback["paired_energy_saving_std_fraction"] = (
-                    statistics.stdev(paired) if len(paired) >= 2 else None
-                )
+            for feedback in (
+                row for row in aggregates
+                if row["load_point"] == point["id"] and row["policy"] != "STATIC-HIGH"
+            ):
+                if static:
+                    feedback["energy_saving_vs_static_fraction"] = (
+                        (static["joules_per_request"] - feedback["joules_per_request"])
+                        / static["joules_per_request"] if feedback["slo_contract_pass"] else None
+                    )
+                    paired = [
+                        float(row["paired_energy_saving_fraction"])
+                        for row in repeat_summaries
+                        if row["load_point"] == point["id"]
+                        and row["policy"] == feedback["policy"]
+                        and row.get("paired_energy_saving_fraction") is not None
+                    ]
+                    feedback["paired_energy_saving_mean_fraction"] = statistics.fmean(paired) if paired else None
+                    feedback["paired_energy_saving_std_fraction"] = statistics.stdev(paired) if len(paired) >= 2 else None
         _write_csv(self.run_dir / "stagec1_policy_summary.csv", aggregates)
         signatures: dict[tuple[int, str, int], set[str]] = {}
         for row in rows:
@@ -757,19 +929,21 @@ class StageC1Harness(Phase3DClosedLoopHarness):
         summary = {
             "schema_version": 1, "phase": "Stage_C1_stationary_feedback_DVFS",
             "smoke": self.smoke, "valid": hard_valid, "error": error,
-            "controller_mode": self.settings.get("controller_mode", "legacy_feedback"),
+            "policy_matrix": list(POLICIES),
             "slo_regime": self.settings.get("slo_regime", "TIGHT"),
             "matched_trace_audit": matched, "pool_frequency_symmetry_audit": pool_symmetric,
             "final_high_restoration_audit": restoration_valid,
             "routing": "fixed four-pair round-robin", "max_concurrency": 4,
             "slo": self.settings["slo"], "policy_results": aggregates,
+            "search_convergence": self.block_search_rows,
             "controller_contract": {
-                "base": "adaptive_safe_search" if self.settings.get("controller_mode") == "adaptive_safe_search" else "existing Phase 3D measured-feedback recommendations",
-                "fast_up": "fresh phase-specific SLO/pressure/telemetry/readback risk cancels exploration and recovers HIGH",
+                "base": "shared evidence/safety state machine; one-step restricts maximum downward jump to one level",
+                "safety_timing": "window-bounded in C1c; no event-driven between-window claim",
+                "fast_up": "at an evidence boundary, phase-specific SLO/pressure/telemetry/readback risk cancels exploration and recovers a validated-safe point",
                 "slow_down": "sufficient fresh phase evidence selects a configurable coarse or one-level lower candidate; candidate is not safe until observed",
                 "p_running_zero_is_idle_evidence": False,
             },
-            "claim_boundary": "stationary feedback-only pool DVFS; adaptive safe exploration is model-free and does not attribute physical request energy",
+            "claim_boundary": "stationary, evidence-window-bounded C1c safe-search validation; no event-driven safety, routing change, predictor, or physical request-energy attribution claim",
         }
         _write_json(self.run_dir / "stagec1_summary.json", summary)
         lines = [
@@ -786,7 +960,7 @@ class StageC1Harness(Phase3DClosedLoopHarness):
                     row["frequency_transitions"], "PASS" if row["slo_contract_pass"] else "FAIL",
                 )
             )
-        lines += ["", "Energy saving is reported only where FEEDBACK-DVFS satisfies both 95% attainment gates.", "", "Hard-gate audit: **%s**." % ("PASS" if hard_valid else "FAIL")]
+        lines += ["", "Energy saving is reported only where a feedback policy satisfies both 95% attainment gates.", "", "C1c safety actions are evidence-window-bounded; event-driven between-window safety is not implemented here.", "", "Hard-gate audit: **%s**." % ("PASS" if hard_valid else "FAIL")]
         (self.run_dir / "stagec1_summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

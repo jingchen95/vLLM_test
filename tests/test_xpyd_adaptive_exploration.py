@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import unittest
 
 from xpyd.adaptive_exploration import (
@@ -68,6 +69,12 @@ class AdaptiveExplorationTests(unittest.TestCase):
 
     def controller(self, pool="P", phase="prefill"):
         return AdaptivePoolController(pool, phase, [100, 200, 300], self.config)
+
+    def one_step_controller(self, pool="P", phase="prefill"):
+        return AdaptivePoolController(
+            pool, phase, [100, 200, 300],
+            replace(self.config, large_jump_levels=1),
+        )
 
     def apply(self, controller, decision, now=1.0):
         if decision.requested_frequency_mhz != decision.current_frequency_mhz:
@@ -182,6 +189,117 @@ class AdaptiveExplorationTests(unittest.TestCase):
         )
         self.assertEqual((evidence.valid_request_count, evidence.input_token_coverage), (1, 128))
         self.assertFalse(evidence.request_accounting_valid)
+
+    def test_known_unsafe_adjacent_level_is_never_reprobed(self):
+        controller = self.one_step_controller()
+        probe_mid = controller.decide(self.evidence(controller, latency=500), now_s=1.0)
+        self.assertEqual(probe_mid.requested_frequency_mhz, 200)
+        self.apply(controller, probe_mid)
+        unsafe_mid = controller.decide(
+            self.evidence(controller, frequency=200, latency=650, passed=7), now_s=2.0
+        )
+        self.assertEqual(unsafe_mid.requested_frequency_mhz, 300)
+        self.apply(controller, unsafe_mid, now=2.0)
+        safe_high = controller.decide(
+            self.evidence(controller, frequency=300, latency=500), now_s=3.0
+        )
+        self.assertEqual((safe_high.action, safe_high.requested_frequency_mhz), ("HOLD", 300))
+        self.assertEqual(controller.state.unsafe_bound, 200)
+        self.assertTrue(controller.state.converged)
+
+    def test_headroom_thresholds_control_hold_one_step_and_coarse_jump(self):
+        low_headroom = self.controller()
+        hold = low_headroom.decide(self.evidence(low_headroom, latency=595), now_s=1.0)
+        self.assertEqual((hold.action, hold.requested_frequency_mhz), ("HOLD", 300))
+
+        moderate = self.controller()
+        one_step = moderate.decide(self.evidence(moderate, latency=570), now_s=1.0)
+        self.assertEqual((one_step.action, one_step.requested_frequency_mhz), ("STEP_DOWN", 200))
+
+        strong = self.controller()
+        coarse = strong.decide(self.evidence(strong, latency=500), now_s=1.0)
+        self.assertEqual((coarse.action, coarse.requested_frequency_mhz), ("STEP_DOWN", 100))
+
+    def test_final_window_candidate_is_classified_without_unmeasured_probe(self):
+        controller = self.controller()
+        probe = controller.decide(self.evidence(controller, latency=500, energy=100), now_s=1.0)
+        self.apply(controller, probe)
+        final = controller.decide(
+            self.evidence(controller, frequency=100, latency=500, energy=80),
+            now_s=2.0, allow_exploration=False,
+        )
+        self.assertEqual((final.trigger, final.action), ("FINAL_EVIDENCE", "HOLD"))
+        self.assertEqual(controller.state.known_safe_frequency, 100)
+        self.assertEqual(controller.state.best_measured_safe_frequency, 100)
+        self.assertTrue(controller.state.converged)
+        self.assertEqual(controller.state.convergence_window_count, 2)
+        self.assertEqual(controller.state.convergence_request_count, 20)
+
+    def test_missing_endpoint_pressure_is_unknown_and_explicit_zero_is_safe(self):
+        requests = [
+            {"real_sse": "True", "logical_request_id_propagated": "True",
+             "input_len": "128", "observed_output_tokens": "128",
+             "ttft_ms": "500", "tpot_ms": "55"}
+            for _ in range(10)
+        ]
+        metrics = {
+            "measurement_valid": True, "observation_duration_s": 2.0,
+            "ttft_p95_ms": 500.0, "tpot_p95_ms": 55.0,
+            "P0_energy_j": 10.0, "P1_energy_j": 10.0,
+            "backlog_growing": False, "client_waiting_at_offered_close": 0,
+            "endpoint_load": {
+                "P0": {"waiting_mean": 0.0, "waiting_max": 0.0},
+                "P1": {"waiting_mean": 0.0, "waiting_max": 0.0},
+            },
+        }
+        explicit_zero = evidence_from_window(
+            "P", metrics, requests, observed_frequency_mhz=300,
+            slo_regime="TIGHT", ttft_slo_ms=600, tpot_slo_ms=65,
+        )
+        self.assertTrue(explicit_zero.backlog_stable)
+        controller = self.controller()
+        self.assertEqual(
+            controller.decide(explicit_zero, now_s=1.0).evidence_classification,
+            EvidenceClass.SAFE.value,
+        )
+
+        missing = dict(metrics)
+        missing["endpoint_load"] = {
+            "P0": {"waiting_mean": 0.0, "waiting_max": 0.0},
+            "P1": {"waiting_mean": None, "waiting_max": None},
+        }
+        unknown = evidence_from_window(
+            "P", missing, requests, observed_frequency_mhz=300,
+            slo_regime="TIGHT", ttft_slo_ms=600, tpot_slo_ms=65,
+        )
+        self.assertIsNone(unknown.backlog_stable)
+        other = self.controller()
+        self.assertEqual(
+            other.decide(unknown, now_s=1.0).evidence_classification,
+            EvidenceClass.PRESSURE_RISK.value,
+        )
+
+    def test_best_measured_safe_energy_point_not_lowest_frequency(self):
+        controller = self.controller()
+        probe = controller.decide(self.evidence(controller, latency=500, energy=80), now_s=1.0)
+        self.apply(controller, probe)
+        select = controller.decide(
+            self.evidence(controller, frequency=100, latency=500, energy=120), now_s=2.0
+        )
+        self.assertEqual(controller.state.safe_energy_by_frequency_j, {300: 80.0, 100: 120.0})
+        self.assertEqual(controller.state.best_measured_safe_frequency, 300)
+        self.assertEqual((select.decision, select.requested_frequency_mhz), ("SELECT_BEST_SAFE", 300))
+
+    def test_recommendation_does_not_change_last_actual_action_time(self):
+        controller = self.controller()
+        decision = controller.decide(self.evidence(controller, latency=500), now_s=10.0)
+        self.assertEqual(decision.action_timestamp_s, None)
+        self.assertEqual(controller.state.last_action_timestamp_s, 0.0)
+        controller.record_actuation(
+            decision.requested_frequency_mhz, decision.requested_frequency_mhz,
+            readback_valid=True, timestamp_s=11.5,
+        )
+        self.assertEqual(controller.state.last_action_timestamp_s, 11.5)
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ from xpyd.stagec1_stationary import (
     frequency_residency,
     load_configs,
     oscillation_count,
+    policy_order_for_repeat,
 )
 from xpyd.stagec1_headroom import _level_frequency
 from xpyd.workload_harness import build_trace
@@ -52,6 +53,8 @@ class StageC1Tests(unittest.TestCase):
         runtime, experiment = self.load()
         settings = experiment["stagec1"]
         self.assertEqual(tuple(settings["policies"]), POLICIES)
+        self.assertEqual(settings["repetitions"], 3)
+        self.assertEqual(settings["windows_per_block"], 4)
         self.assertEqual(settings["max_concurrency"], 4)
         self.assertEqual(
             [point["offered_rate_rps"] for point in settings["load_points"]],
@@ -62,6 +65,42 @@ class StageC1Tests(unittest.TestCase):
         self.assertTrue(runtime["phase3d"]["feedback"]["latency_risk_to_max"])
         self.assertFalse(settings["request_aware_routing"])
         self.assertFalse(settings["oracle"])
+
+    def test_three_policy_order_is_balanced_and_cyclic(self):
+        self.assertEqual(policy_order_for_repeat(1), POLICIES)
+        self.assertEqual(
+            policy_order_for_repeat(2),
+            ("ONE-STEP-FEEDBACK", "ADAPTIVE-SAFE-SEARCH", "STATIC-HIGH"),
+        )
+        self.assertEqual(
+            policy_order_for_repeat(3),
+            ("ADAPTIVE-SAFE-SEARCH", "STATIC-HIGH", "ONE-STEP-FEEDBACK"),
+        )
+
+    def test_one_step_and_adaptive_share_gates_but_differ_in_jump_limit(self):
+        runtime, experiment = self.load()
+        harness = StageC1Harness(runtime, experiment, run_id="cpu-only")
+        capabilities = {
+            endpoint: SimpleNamespace(
+                selected_low_mhz=1260 if endpoint.startswith("P") else 750,
+                selected_mid_mhz=1890 if endpoint.startswith("P") else 1125,
+                selected_high_mhz=2520 if endpoint.startswith("P") else 1500,
+            )
+            for endpoint in ("P0", "P1", "D0", "D1")
+        }
+        one_step = harness._adaptive_pools(capabilities, "ONE-STEP-FEEDBACK")
+        adaptive = harness._adaptive_pools(capabilities, "ADAPTIVE-SAFE-SEARCH")
+        self.assertIsNotNone(one_step)
+        self.assertIsNotNone(adaptive)
+        for pool in ("P", "D"):
+            left, right = one_step[pool].config, adaptive[pool].config
+            self.assertEqual(left.ttft_slo_ms, right.ttft_slo_ms)
+            self.assertEqual(left.tpot_slo_ms, right.tpot_slo_ms)
+            self.assertEqual(left.attainment_gate, right.attainment_gate)
+            self.assertEqual(left.min_valid_requests, right.min_valid_requests)
+            self.assertEqual(left.headroom_for_one_step, right.headroom_for_one_step)
+            self.assertEqual(left.large_jump_levels, 1)
+            self.assertEqual(right.large_jump_levels, 2)
 
     def test_matched_trace_is_exact_35_15_35_15(self):
         _, experiment = self.load()
@@ -167,6 +206,8 @@ class StageC1Tests(unittest.TestCase):
                 return {
                     "endpoint_id": endpoint, "requested_freq_mhz": target,
                     "command_status": "success", "readback_valid": True,
+                    "timestamp_unix_s": 100.0,
+                    "transition_readback_latency_s": 0.5,
                 }
 
         registry = Registry()
@@ -181,6 +222,7 @@ class StageC1Tests(unittest.TestCase):
         )
         self.assertEqual(scheduler.assert_state, 1125)
         self.assertEqual(scheduler.observed[0][1], 1125)
+        self.assertEqual(scheduler.observed[0][2], 100.5)
 
     def test_residency_and_oscillation_reporting(self):
         rows = [
@@ -198,6 +240,35 @@ class StageC1Tests(unittest.TestCase):
             ]),
             2,
         )
+
+    def test_final_controller_state_is_exported_to_convergence_report(self):
+        harness = StageC1Harness.__new__(StageC1Harness)
+        harness.decision_rows = [{
+            "block_id": "b", "pool": "P", "decision": "EXPLORE_DOWN",
+            "evidence_classification": "SAFE", "candidate_freq_mhz": 1260,
+        }]
+        harness.block_search_rows = []
+        state = SimpleNamespace(
+            convergence_window_count=4, convergence_request_count=80,
+            converged=True, convergence_reason="no lower supported frequency remains",
+            known_safe_frequency=1260, best_measured_safe_frequency=1890,
+            current_frequency=1890,
+            best_measured_safe_energy_j=70.0,
+            safe_energy_by_frequency_j={2520: 90.0, 1890: 70.0, 1260: 75.0},
+        )
+        context = SimpleNamespace(
+            adaptive_pools={"P": SimpleNamespace(state=state)},
+            targets={"P0": 1260, "P1": 1260},
+        )
+        harness._record_block_search_summary(
+            context, policy="ADAPTIVE-SAFE-SEARCH", block_id="b",
+            repeat=1, load_point="MEDIUM",
+        )
+        row = harness.block_search_rows[0]
+        self.assertEqual(row["final_validated_safe_frequency_mhz"], 1260)
+        self.assertEqual(row["best_measured_safe_frequency_mhz"], 1890)
+        self.assertEqual(row["windows_until_convergence"], 4)
+        self.assertEqual(row["requests_until_convergence"], 80)
 
 
 if __name__ == "__main__":
