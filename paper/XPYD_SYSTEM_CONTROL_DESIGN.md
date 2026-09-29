@@ -1,8 +1,8 @@
 # XPYD System & Control Design
 
 **Status:** authoritative design/experiment contract
-**Last updated:** 2026-09-28
-**Current experimental phase:** Stage C1c — stationary evidence-window-bounded safe-search preflight
+**Last updated:** 2026-09-29
+**Current experimental phase:** Stage C2a — stationary fast-safety recovery isolation
 
 This file is the authoritative specification for the XPYD project. It is intended to be read by both humans and coding agents such as Codex. When an implementation, experiment script, or older document conflicts with this file, this file wins unless it is explicitly revised first.
 
@@ -1629,6 +1629,10 @@ no meaningful safe lower points
 
 ## Stage C1c — Feedback safe-search, stationary workload
 
+**Status:** completed and accepted. Feedback independently found the C1b safe
+boundary. MEDIUM passed with about 9.4% gross-energy saving; HIGH exposed the
+full-window SLO cost of unsafe D=MID and P=LOW probes.
+
 **Question:** Can lightweight runtime feedback discover and exploit SLO-safe
 DVFS headroom under stationary mixed workloads, without offline latency or
 power models?
@@ -1718,9 +1722,52 @@ contract where frozen-threshold offline replay predicts different actions.
 
 The exact additional SLO budgets must be selected before observing policy results and documented in the experiment config.
 
-## Stage C2 — Dynamic shared-pool feedback adaptation
+## Stage C2a — Stationary event-driven safety isolation
 
-**Prerequisite:** Stage C1c controller semantics frozen.
+**Prerequisite:** the accepted C1c search trajectory and frozen controller
+semantics.
+
+**Question:** Can event-driven safety recovery reduce the SLO cost of online
+DVFS exploration compared with the existing evidence-window-bounded
+controller?
+
+Use the exact C1 stationary loads, mix, SLO, action space, routing, TP, shared
+pool state, evidence gates, downward-search algorithm, and HIGH cold start.
+Compare exactly:
+
+```text
+STATIC-HIGH
+WINDOW-BOUNDED-FEEDBACK
+FAST-SAFETY-FEEDBACK
+```
+
+Only the recovery granularity differs between the two feedback policies.
+Normal downward exploration remains evidence-epoch driven. While a lower
+candidate is active, a fresh hard TTFT or TPOT violation may immediately
+restore the affected pool to its prior validated-safe anchor. Stale/invalid
+required safety telemetry and actuation/readback failure fail closed. The
+triggering request remains in every SLO statistic.
+
+C2a permits a physical frequency recovery inside an accounting window.
+Therefore requested/observed frequency residency must be reconstructed from
+timestamped stable and transition segments; no mixed-frequency window may be
+reported as if it ran at one clock. Gross NVML energy remains a window/trace
+quantity and is not attributed exactly to requests.
+
+The previous attempt to find a dynamic context where HIGH was safe and P=MID
+was unsafe did not establish a valid pair. Do not continue that context
+search. C2a instead isolates the unsafe probes already reproduced in every C1c
+feedback repeat: D=MID TPOT risk and P=LOW TTFT risk. These outcomes are not
+controller inputs and must not be hard-coded.
+
+**Gate:** a short matched preflight must show both P and D event-driven
+recoveries before their evidence-window boundaries, with valid clock segments,
+energy, request, token, pair, and readback audits. The full matched experiment
+runs only after that gate.
+
+## Stage C2b — Dynamic shared-pool feedback adaptation
+
+**Prerequisite:** Stage C2a fast-safety semantics validated.
 
 **Question:** Can feedback/exploration react safely to changing load and phase balance without routing/frequency asymmetry as a confound?
 
@@ -2084,31 +2131,26 @@ When a result is surprising, diagnose measurement/semantics first. Do not immedi
 As of this update, the correct sequence is:
 
 ```text
-1. Finish Stage C1b fixed-frequency headroom characterization.
+1. Preserve the accepted C1b/C1c fixed-frequency and stationary-search
+   evidence without retuning it.
 
-2. Classify the result:
-   A) safe lower-frequency headroom exists
-      -> freeze evidence/headroom thresholds
-      -> implement C1c adaptive safe search.
-   B) little/no headroom exists
-      -> record the limitation
-      -> do not force downclocking
-      -> decide whether C1d SLO sensitivity is needed.
+2. Run C2a STATIC versus window-bounded versus fast-safety stationary
+   isolation. Stop if the preflight cannot physically terminate both unsafe
+   probe types before their evidence-window boundaries.
 
-3. Run C1c stationary adaptive-search comparison.
+3. If C2a is valid, decide whether a separate C2b dynamic-context stage is
+   still necessary. Do not resume the failed HIGH-safe/P-MID-unsafe context
+   search automatically.
 
-4. Only after C1c is stable, implement/calibrate the normalized
-   system-context state for C2 dynamic adaptation.
-
-5. After dynamic feedback works, move to D1 per-endpoint asymmetry
+4. After shared-pool safety behavior is stable, move to D1 per-endpoint asymmetry
    and request-aware load-aware routing.
 
-6. Only after D1 is interpretable, deploy a matched TP-diverse inventory
+5. Only after D1 is interpretable, deploy a matched TP-diverse inventory
    for D2.
 
-7. Combine mechanisms in Stage E.
+6. Combine mechanisms in Stage E.
 
-8. Finish with Stage F knowledge-cost / Canary / empirical-oracle study.
+7. Finish with Stage F knowledge-cost / Canary / empirical-oracle study.
 ```
 
 Do **not** jump directly from the current C1b diagnosis to a 3P3D full controller. That would combine frequency search, per-endpoint asymmetry, routing, TP diversity, and context logic before the individual mechanisms are validated.

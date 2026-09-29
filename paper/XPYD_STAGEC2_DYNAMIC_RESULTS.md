@@ -1,5 +1,10 @@
 # XPYD Stage C2 dynamic-control result
 
+> Historical gate result: the context-pair search below remains a valid
+> negative calibration result, but the project has explicitly replaced that
+> question with Stage C2a stationary fast-safety isolation. Do not continue
+> searching for a HIGH-safe/P-MID-unsafe Context B.
+
 ## Verdict
 
 **STOPPED AT THE CONTEXT-PAIR CALIBRATION GATE.**

@@ -274,6 +274,36 @@ class StageC2DynamicTests(unittest.TestCase):
         self.assertEqual(p.current_frequency_mhz, 300)
         self.assertEqual(runtime.event_rows[0]["trigger"], "INVALID_SAFETY_TELEMETRY")
 
+    def test_readback_failure_fails_closed_to_safe_anchor(self):
+        p, d = self.controller("P"), self.controller("D")
+        self.activate_mid(p)
+        controllers = {"P": p, "D": d}
+
+        def recover(pool, recommendation):
+            controllers[pool].record_actuation(300, 300, readback_valid=True, timestamp_s=2.1)
+            return {"action_timestamp_s": 2.0, "readback_timestamp_s": 2.1,
+                    "readback_frequency_mhz": 300, "readback_valid": True}
+
+        runtime = self.runtime(controllers, recover)
+        runtime.process_internal_failure("P", "ACTUATOR_READBACK_FAILURE", 1.9)
+        self.assertEqual(p.current_frequency_mhz, 300)
+        self.assertEqual(runtime.event_rows[0]["action"], "FAST_RECOVER")
+        self.assertLess(runtime.event_rows[0]["readback_timestamp_s"], 100.0)
+
+    def test_hard_violation_does_not_reclassify_a_validated_non_candidate(self):
+        p, d = self.controller("P"), self.controller("D")
+        p.set_current_frequency(200)
+        p.state.known_safe_frequency = 200
+        p.state.last_validated_safe_index = 1
+        calls = []
+        runtime = self.runtime({"P": p, "D": d}, lambda *args: calls.append(args))
+        runtime.process_safety_event({
+            "event": "TTFT_OBSERVED", "timestamp_unix_s": 2.0,
+            "logical_request_id": "noise", "ttft_ms": 601.0,
+        })
+        self.assertEqual(runtime.event_rows[0]["action"], "LOG_ONLY_NO_ACTIVE_CANDIDATE")
+        self.assertEqual(calls, [])
+
     def test_context_signature_uses_tokens_and_policy_order_is_balanced(self):
         requests = [
             {"input_len": 2048, "requested_output_len": 128, "segment": "secret-a"}

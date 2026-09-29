@@ -393,7 +393,10 @@ class FastSafetyRuntime:
     def attach(self, run_dir: Path) -> None:
         self.run_dir = run_dir
 
-    def _log_and_maybe_recover(self, pool: str, trigger: str, event: Mapping[str, Any]) -> None:
+    def _log_and_maybe_recover(
+        self, pool: str, trigger: str, event: Mapping[str, Any], *,
+        candidate_required: bool = False,
+    ) -> None:
         timestamp = float(event.get("timestamp_unix_s") or time.time())
         row = {
             "policy": self.policy, "block_id": self.block_id,
@@ -406,12 +409,25 @@ class FastSafetyRuntime:
             "violation_recorded": trigger in {"HARD_TTFT_VIOLATION", "HARD_TPOT_VIOLATION"},
             "fast_path_enabled": self.enabled,
         }
-        if self.enabled:
+        controller = self.controllers[pool]
+        candidate_active = (
+            controller.state.candidate_frequency is not None
+            and int(controller.state.candidate_frequency) == controller.current_frequency_mhz
+        )
+        if self.enabled and candidate_required and not candidate_active:
+            recommendation = {
+                "action": "LOG_ONLY_NO_ACTIVE_CANDIDATE",
+                "target_mhz": controller.current_frequency_mhz,
+                "prior_mhz": controller.current_frequency_mhz,
+                "trigger": trigger,
+                "decision_timestamp_s": timestamp,
+            }
+        elif self.enabled:
             recommendation = fast_recovery_recommendation(
-                self.controllers[pool], trigger, timestamp
+                controller, trigger, timestamp
             )
         else:
-            current = self.controllers[pool].current_frequency_mhz
+            current = controller.current_frequency_mhz
             recommendation = {
                 "action": "WINDOW_DEFER",
                 "target_mhz": current,
@@ -428,10 +444,16 @@ class FastSafetyRuntime:
     def process_safety_event(self, event: Mapping[str, Any]) -> None:
         if event.get("event") == "TTFT_OBSERVED" and _finite(event.get("ttft_ms")):
             if float(event["ttft_ms"]) > float(self.settings["slo"]["ttft_ms"]):
-                self._log_and_maybe_recover("P", "HARD_TTFT_VIOLATION", event)
+                self._log_and_maybe_recover(
+                    "P", "HARD_TTFT_VIOLATION", event,
+                    candidate_required=True,
+                )
         if event.get("event") == "REQUEST_COMPLETED" and _finite(event.get("tpot_ms")):
             if float(event["tpot_ms"]) > float(self.settings["slo"]["tpot_ms"]):
-                self._log_and_maybe_recover("D", "HARD_TPOT_VIOLATION", event)
+                self._log_and_maybe_recover(
+                    "D", "HARD_TPOT_VIOLATION", event,
+                    candidate_required=True,
+                )
 
     def process_load_event(self, event: Mapping[str, Any]) -> None:
         raw_waiting = event.get("client_waiting_requests")
@@ -721,6 +743,10 @@ class StageC2Harness(Phase3DClosedLoopHarness):
                         "policy": policy, "block_id": block_id,
                         "decision_timestamp_s": decision_ts,
                         "readback_timestamp_unix_s": readback_ts,
+                        "window_id": (
+                            self.active_ledger.window_id
+                            if self.active_ledger is not None else None
+                        ),
                     })
                     self.action_rows.append(row)
                     if row["command_status"] != "success" or not row["readback_valid"]:
@@ -771,6 +797,10 @@ class StageC2Harness(Phase3DClosedLoopHarness):
                 "policy": policy, "block_id": block_id,
                 "decision_timestamp_s": detected,
                 "readback_timestamp_unix_s": readback_ts,
+                "window_id": (
+                    self.active_ledger.window_id
+                    if self.active_ledger is not None else None
+                ),
             })
             self.action_rows.append(row)
             if row["command_status"] != "success" or not row["readback_valid"]:

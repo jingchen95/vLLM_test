@@ -168,8 +168,8 @@ if [ -n "${XPYD_STAGEC2_EXPERIMENT_CONFIG}" ] && [ -z "${XPYD_STAGEC2_RUNTIME_CO
     echo "ERROR: XPYD_STAGEC2_RUNTIME_CONFIG is required with XPYD_STAGEC2_EXPERIMENT_CONFIG" >&2
     exit 2
 fi
-if [ -n "${XPYD_STAGEC2_RUNTIME_CONFIG}" ] && [ "${XPYD_STAGEC2_STAGE}" != "calibration" ] && [ "${XPYD_STAGEC2_STAGE}" != "preflight" ] && [ "${XPYD_STAGEC2_STAGE}" != "full" ]; then
-    echo "ERROR: XPYD_STAGEC2_STAGE must be calibration, preflight, or full" >&2
+if [ -n "${XPYD_STAGEC2_RUNTIME_CONFIG}" ] && [ "${XPYD_STAGEC2_STAGE}" != "calibration" ] && [ "${XPYD_STAGEC2_STAGE}" != "preflight" ] && [ "${XPYD_STAGEC2_STAGE}" != "full" ] && [ "${XPYD_STAGEC2_STAGE}" != "c2a-preflight" ] && [ "${XPYD_STAGEC2_STAGE}" != "c2a-full" ]; then
+    echo "ERROR: XPYD_STAGEC2_STAGE must be calibration, preflight, full, c2a-preflight, or c2a-full" >&2
     exit 2
 fi
 if [ -n "${XPYD_STAGEB_WORKLOAD_CONFIG}" ] && [ -z "${XPYD_STAGEB_RUNTIME_CONFIG}" ]; then
@@ -1623,7 +1623,11 @@ run_phase3c_substrate() {
 
     local args
     if [ -n "${XPYD_STAGEC2_RUNTIME_CONFIG}" ]; then
-        args=(-m xpyd.stagec2_dynamic --runtime-config "${XPYD_STAGEC2_RUNTIME_CONFIG}" --experiment-config "${XPYD_STAGEC2_EXPERIMENT_CONFIG}" --stage "${XPYD_STAGEC2_STAGE}")
+        if [ "${XPYD_STAGEC2_STAGE}" = "c2a-preflight" ] || [ "${XPYD_STAGEC2_STAGE}" = "c2a-full" ]; then
+            args=(-m xpyd.stagec2a_fast_safety --runtime-config "${XPYD_STAGEC2_RUNTIME_CONFIG}" --experiment-config "${XPYD_STAGEC2_EXPERIMENT_CONFIG}" --stage "${XPYD_STAGEC2_STAGE#c2a-}")
+        else
+            args=(-m xpyd.stagec2_dynamic --runtime-config "${XPYD_STAGEC2_RUNTIME_CONFIG}" --experiment-config "${XPYD_STAGEC2_EXPERIMENT_CONFIG}" --stage "${XPYD_STAGEC2_STAGE}")
+        fi
         [ -n "${XPYD_STAGEC2_RUN_ID}" ] && args+=(--run-id "${XPYD_STAGEC2_RUN_ID}")
     elif [ -n "${XPYD_STAGEC1_HEADROOM_RUNTIME_CONFIG}" ]; then
         args=(-m xpyd.stagec1_headroom --runtime-config "${XPYD_STAGEC1_HEADROOM_RUNTIME_CONFIG}" --experiment-config "${XPYD_STAGEC1_HEADROOM_EXPERIMENT_CONFIG}")
