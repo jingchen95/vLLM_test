@@ -233,6 +233,35 @@ class StreamingTokenAccountingTests(unittest.TestCase):
         self.assertEqual(result["echoed_logical_request_id"], "trace-request-007")
         self.assertTrue(result["logical_request_id_propagated"])
 
+    def test_live_ttft_and_client_load_events_are_emitted_immediately(self):
+        tokenizer = FakeTokenizer(retokenized_count=1)
+        events = [
+            sse({"choices": [{"text": "a"}]}),
+            sse({"choices": [], "usage": {"completion_tokens": 1}}),
+            "data: [DONE]\n\n",
+        ]
+        safety_events = []
+        result = asyncio.run(consume_sse_completion(
+            FakeSession(events), "http://proxy/v1/completions", {}, tokenizer,
+            logical_request_id="live-1", safety_event_sink=safety_events.append,
+            request_context={"workload_class": "LS", "input_len": 2048},
+        ))
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(safety_events), 1)
+        self.assertEqual(safety_events[0]["event"], "TTFT_OBSERVED")
+        self.assertEqual(safety_events[0]["logical_request_id"], "live-1")
+        self.assertEqual(safety_events[0]["workload_class"], "LS")
+
+        load_events = []
+        tracker = ClientLoadTracker(load_events.append)
+        tracker.arrive("live-1", 1.0, 10.0)
+        tracker.admit("live-1", 1.1, 10.1)
+        tracker.complete("live-1", 1.2, 10.2)
+        self.assertEqual(
+            [row["event"] for row in load_events],
+            ["TRACE_ARRIVAL", "CLIENT_ADMIT", "REQUEST_COMPLETE"],
+        )
+
     def test_missing_usage_is_explicitly_marked_as_fallback(self):
         tokenizer = FakeTokenizer(retokenized_count=7)
         events = [

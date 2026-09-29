@@ -24,6 +24,7 @@ import csv
 import json
 import math
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,24 +52,28 @@ class ClientLoadTracker:
     is never folded into server TTFT.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, event_sink: Any = None) -> None:
         self.waiting = 0
         self.in_flight = 0
         self.maximum_waiting = 0
         self.maximum_in_flight = 0
         self.events: list[dict[str, Any]] = []
+        self.event_sink = event_sink
 
     def _record(
         self, event: str, request_id: str, monotonic_s: float, unix_s: float
     ) -> None:
-        self.events.append({
+        record = {
             "event": event,
             "request_id": request_id,
             "timestamp_monotonic_s": monotonic_s,
             "timestamp_unix_s": unix_s,
             "client_waiting_requests": self.waiting,
             "client_in_flight_requests": self.in_flight,
-        })
+        }
+        self.events.append(record)
+        if self.event_sink is not None:
+            self.event_sink(record)
 
     def arrive(self, request_id: str, monotonic_s: float, unix_s: float) -> None:
         self.waiting += 1
@@ -90,6 +95,24 @@ class ClientLoadTracker:
         self._record("REQUEST_COMPLETE", request_id, monotonic_s, unix_s)
 
 
+class JsonlEventSink:
+    """Durably expose live client events to an external safety controller."""
+
+    def __init__(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.stream = path.open("x", encoding="utf-8", buffering=1)
+        self.lock = threading.Lock()
+
+    def __call__(self, record: dict[str, Any]) -> None:
+        with self.lock:
+            self.stream.write(json.dumps(record, sort_keys=True) + "\n")
+            self.stream.flush()
+
+    def close(self) -> None:
+        with self.lock:
+            self.stream.close()
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--base-url", required=True)
@@ -99,6 +122,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--summary-json", required=True)
     p.add_argument("--requests-jsonl")
     p.add_argument("--load-events-jsonl")
+    p.add_argument("--safety-events-jsonl")
+    p.add_argument("--live-load-events-jsonl")
     p.add_argument("--tokenizer-model")
     p.add_argument("--max-concurrency", type=int, default=64)
     p.add_argument("--num-warmups", type=int, default=0)
@@ -211,10 +236,13 @@ async def consume_sse_completion(
     payload: dict[str, Any],
     tokenizer: Any,
     logical_request_id: str | None = None,
+    safety_event_sink: Any = None,
+    request_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     send_unix_s = time.time()
     send_mono = time.perf_counter()
     first_token_mono: float | None = None
+    first_token_unix_s: float | None = None
     token_event_monos: list[float] = []
     text_chunks: list[str] = []
     server_completion_tokens: int | None = None
@@ -309,6 +337,17 @@ async def consume_sse_completion(
                 token_event_monos.append(time.perf_counter())
                 if first_token_mono is None:
                     first_token_mono = token_event_monos[-1]
+                    first_token_unix_s = time.time()
+                    if safety_event_sink is not None:
+                        safety_event_sink({
+                            "event": "TTFT_OBSERVED",
+                            "timestamp_unix_s": first_token_unix_s,
+                            "logical_request_id": logical_request_id,
+                            "ttft_ms": (first_token_mono - send_mono) * 1000.0,
+                            "selected_prefill_endpoint_id": selected_prefill_endpoint_id,
+                            "selected_decode_endpoint_id": selected_decode_endpoint_id,
+                            **dict(request_context or {}),
+                        })
                 text_chunks.append(text)
 
     complete_unix_s = time.time()
@@ -362,6 +401,7 @@ async def consume_sse_completion(
     return {
         "ok": True,
         "send_unix_s": send_unix_s,
+        "first_token_unix_s": first_token_unix_s,
         "complete_unix_s": complete_unix_s,
         "e2e_latency_ms": (complete_mono - send_mono) * 1000.0,
         "ttft_ms": ttft_ms,
@@ -424,6 +464,8 @@ async def replay_trace(
     max_concurrency: int,
     request_timeout_s: float,
     num_warmups: int,
+    safety_event_sink: Any = None,
+    live_load_event_sink: Any = None,
 ) -> dict[str, Any]:
     if max_concurrency <= 0:
         raise ValueError("max_concurrency must be positive")
@@ -435,7 +477,7 @@ async def replay_trace(
 
     timeout = aiohttp.ClientTimeout(total=request_timeout_s, connect=10, sock_connect=10)
     connector = aiohttp.TCPConnector(limit=max_concurrency)
-    load = ClientLoadTracker()
+    load = ClientLoadTracker(live_load_event_sink)
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         first_req = requests[0]
         await run_warmups(
@@ -477,6 +519,13 @@ async def replay_trace(
                         payload,
                         tokenizer,
                         logical_request_id=req.request_id,
+                        safety_event_sink=safety_event_sink,
+                        request_context={
+                            "workload_class": req.workload_class,
+                            "segment": req.segment,
+                            "input_len": req.input_len,
+                            "requested_output_len": req.output_len,
+                        },
                     )
                 finally:
                     load.complete(
@@ -501,6 +550,21 @@ async def replay_trace(
                     0.0, (admitted_mono - scheduled_mono) * 1000.0
                 )
                 result["client_waiting_after_arrival"] = waiting_at_arrival
+                if safety_event_sink is not None:
+                    safety_event_sink({
+                        "event": "REQUEST_COMPLETED",
+                        "timestamp_unix_s": result.get("complete_unix_s", time.time()),
+                        "logical_request_id": req.request_id,
+                        "ttft_ms": result.get("ttft_ms"),
+                        "tpot_ms": result.get("tpot_ms"),
+                        "ok": result.get("ok"),
+                        "workload_class": req.workload_class,
+                        "segment": req.segment,
+                        "input_len": req.input_len,
+                        "requested_output_len": req.output_len,
+                        "selected_prefill_endpoint_id": result.get("selected_prefill_endpoint_id"),
+                        "selected_decode_endpoint_id": result.get("selected_decode_endpoint_id"),
+                    })
                 return result
 
         for req in requests:
@@ -656,6 +720,14 @@ def main() -> int:
     load_events_jsonl = (
         Path(args.load_events_jsonl) if args.load_events_jsonl else None
     )
+    safety_sink = (
+        JsonlEventSink(Path(args.safety_events_jsonl))
+        if args.safety_events_jsonl else None
+    )
+    live_load_sink = (
+        JsonlEventSink(Path(args.live_load_events_jsonl))
+        if args.live_load_events_jsonl else None
+    )
 
     requests = load_trace(trace_csv)
     tokenizer_name = args.tokenizer_model or args.model
@@ -663,20 +735,28 @@ def main() -> int:
     prompt_cache = build_prompt_cache(tokenizer, {r.input_len for r in requests})
 
     try:
-        summary = asyncio.run(
-            replay_trace(
-                requests=requests,
-                base_url=args.base_url,
-                model=args.model,
-                prompt_cache=prompt_cache,
-                tokenizer=tokenizer,
-                max_concurrency=args.max_concurrency,
-                request_timeout_s=args.request_timeout_s,
-                num_warmups=args.num_warmups,
+        try:
+            summary = asyncio.run(
+                replay_trace(
+                    requests=requests,
+                    base_url=args.base_url,
+                    model=args.model,
+                    prompt_cache=prompt_cache,
+                    tokenizer=tokenizer,
+                    max_concurrency=args.max_concurrency,
+                    request_timeout_s=args.request_timeout_s,
+                    num_warmups=args.num_warmups,
+                    safety_event_sink=safety_sink,
+                    live_load_event_sink=live_load_sink,
+                )
             )
-        )
-    except KeyboardInterrupt:
-        return 130
+        except KeyboardInterrupt:
+            return 130
+    finally:
+        if safety_sink is not None:
+            safety_sink.close()
+        if live_load_sink is not None:
+            live_load_sink.close()
 
     request_results = summary.pop("request_results")
     load_events = summary.pop("client_load_events")

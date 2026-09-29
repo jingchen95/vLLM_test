@@ -277,6 +277,33 @@ class Phase3CSubstrateHarness:
         self.scrape_lock = threading.Lock()
         self.trace_rows = tuple(dict(row) for row in trace_rows or ())
 
+    def _metadata_overrides(self) -> dict[str, Any]:
+        return {}
+
+    def _client_extra_args(self) -> list[str]:
+        return []
+
+    def _on_client_started(self, client: subprocess.Popen[Any]) -> None:
+        del client
+
+    def _on_client_finished(self, client: subprocess.Popen[Any]) -> None:
+        del client
+
+    def _clock_audit_for_endpoint(
+        self, endpoint_id: str, records: Sequence[Mapping[str, Any]],
+        start_wall_s: float, end_wall_s: float,
+    ) -> dict[str, Any]:
+        return _clock_audit(
+            records, start_wall_s, end_wall_s,
+            self.config["fixed_clocks"][endpoint_id],
+        )
+
+    def _clock_hard_gate_name(self) -> str:
+        return "fixed_clocks"
+
+    def _claim_boundary(self) -> str:
+        return "substrate validation only; no routing novelty or optimization claim"
+
     def _layout(self) -> None:
         if self.run_dir.exists():
             raise Phase3CError("run directory already exists: %s" % self.run_dir)
@@ -345,11 +372,12 @@ class Phase3CSubstrateHarness:
             "--num-warmups", "0",
             "--request-timeout-s", str(float(client.get("request_timeout_s", 900))),
             "--fail-on-request-error",
+            *self._client_extra_args(),
         ]
 
     def run(self) -> Path:
         self._layout()
-        _write_json(self.run_dir / "metadata.json", {
+        metadata = {
             "schema_version": 1,
             "phase": "3C_real_multi_endpoint_substrate_validation",
             "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -363,7 +391,9 @@ class Phase3CSubstrateHarness:
             "model_training": False,
             "adaptive_routing": False,
             "adaptive_dvfs": False,
-        })
+        }
+        metadata.update(self._metadata_overrides())
+        _write_json(self.run_dir / "metadata.json", metadata)
         proxy_log = Path(os.path.expandvars(str(self.config["proxy_diagnostics_log"])))
         proxy_log.parent.mkdir(parents=True, exist_ok=True)
         proxy_log.write_text("", encoding="utf-8")
@@ -401,13 +431,17 @@ class Phase3CSubstrateHarness:
                 client = subprocess.Popen(
                     self._client_command(trace), stdout=log, stderr=subprocess.STDOUT
                 )
-                orchestrator = FixedPeriodScrapeOrchestrator(
-                    self.endpoints,
-                    lambda endpoint, scheduled: self._scrape(endpoint, scheduled),
-                    float(self.config.get("scrape_interval_s", 1.0)),
-                )
-                monitoring_events = orchestrator.run_while(lambda: client.poll() is None)
-                returncode = client.wait()
+                self._on_client_started(client)
+                try:
+                    orchestrator = FixedPeriodScrapeOrchestrator(
+                        self.endpoints,
+                        lambda endpoint, scheduled: self._scrape(endpoint, scheduled),
+                        float(self.config.get("scrape_interval_s", 1.0)),
+                    )
+                    monitoring_events = orchestrator.run_while(lambda: client.poll() is None)
+                    returncode = client.wait()
+                finally:
+                    self._on_client_finished(client)
             if returncode != 0:
                 raise Phase3CError("client exited with status %d" % returncode)
             client_requests = _read_jsonl(
@@ -511,6 +545,9 @@ class Phase3CSubstrateHarness:
                 "workload_class": request.get("workload_class"),
                 "segment": request.get("segment"),
                 "arrival_time_s": request.get("arrival_time_s"),
+                "send_unix_s": request.get("send_unix_s"),
+                "first_token_unix_s": request.get("first_token_unix_s"),
+                "complete_unix_s": request.get("complete_unix_s"),
                 "scheduled_arrival_unix_s": request.get("scheduled_arrival_unix_s"),
                 "client_admitted_unix_s": request.get("client_admitted_unix_s"),
                 "client_admission_delay_ms": request.get("client_admission_delay_ms"),
@@ -613,7 +650,9 @@ class Phase3CSubstrateHarness:
                 max_boundary_gap_s=float(self.config["sampling"]["maximum_boundary_gap_s"]),
             )
             endpoint_energy[endpoint_id] = window
-            endpoint_clocks[endpoint_id] = _clock_audit(records, start, end, self.config["fixed_clocks"][endpoint_id])
+            endpoint_clocks[endpoint_id] = self._clock_audit_for_endpoint(
+                endpoint_id, records, start, end
+            )
             endpoint_throttle[endpoint_id] = _throttle_audit(records, start, end)
             routed = [item for item in request_rows if item["prefill_endpoint_id" if endpoint.role == "prefill" else "decode_endpoint_id"] == endpoint_id]
             expected_prompt = sum(int(item["input_len"]) + 1 for item in routed)
@@ -719,7 +758,7 @@ class Phase3CSubstrateHarness:
             "pair_coverage": pair_coverage,
             "phase3a_token_semantics": metrics_valid,
             "nvml_energy_windows": energy_valid,
-            "fixed_clocks": clocks_valid,
+            self._clock_hard_gate_name(): clocks_valid,
             "no_invalidating_thermal_or_hw_slowdown": throttle_valid,
             "no_resource_overlap": True,
         }
@@ -786,12 +825,13 @@ class Phase3CSubstrateHarness:
             "token_errors": token_errors,
             "route_counts": pair_counts,
             "endpoint_request_counts": route_counts,
-            "claim_boundary": "substrate validation only; no routing novelty or optimization claim",
+            "claim_boundary": self._claim_boundary(),
         }
         _write_json(self.run_dir / "summary.json", summary)
         _write_json(self.run_dir / "audit.json", audit)
         _csv(self.run_dir / "requests.csv", request_rows, (
             "request_id", "workload_class", "segment", "arrival_time_s",
+            "send_unix_s", "first_token_unix_s", "complete_unix_s",
             "scheduled_arrival_unix_s", "client_admitted_unix_s",
             "client_admission_delay_ms", "client_waiting_after_arrival",
             "input_len", "requested_output_len", "observed_output_tokens",
