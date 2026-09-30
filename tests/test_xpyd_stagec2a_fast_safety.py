@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import threading
+import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 
@@ -16,7 +18,7 @@ from xpyd.stagec2a_fast_safety import (
     policy_order,
     segment_residency,
 )
-from xpyd.stagec2_dynamic import RecoveredActuationFailure
+from xpyd.stagec2_dynamic import FastSafetyRuntime, RecoveredActuationFailure
 
 
 class StageC2AContractTests(unittest.TestCase):
@@ -194,6 +196,80 @@ class StageC2AContractTests(unittest.TestCase):
         self.assertEqual(context.targets["P1"], 300)
         self.assertEqual(harness.safety_rows[0]["trigger"], "ACTUATOR_READBACK_FAILURE")
         self.assertTrue(harness.safety_rows[0]["readback_valid"])
+
+    def test_telemetry_freshness_is_armed_by_first_workload_event(self):
+        config = AdaptiveExplorationConfig(
+            ttft_slo_ms=600, tpot_slo_ms=65, min_valid_requests=1,
+            min_input_tokens=1, min_output_tokens=1,
+            min_observation_duration_s=0,
+        )
+        p = AdaptivePoolController("P", "prefill", [100, 200, 300], config)
+        d = AdaptivePoolController("D", "decode", [100, 200, 300], config)
+        p.state.candidate_frequency = 200
+        p.set_current_frequency(200)
+        recovered = []
+        runtime = FastSafetyRuntime(
+            {"P": p, "D": d}, lambda pool, recommendation: recovered.append(pool) or {},
+            {
+                "slo": {"ttft_ms": 600, "tpot_ms": 65},
+                "fast_safety": {"telemetry_max_age_s": 0.01},
+                "severe_queue_depth": 4,
+            },
+            policy="FAST-SAFETY-FEEDBACK", block_id="fixture",
+            window_index=1, enabled=True,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            runtime.attach(Path(directory))
+            runtime.started_wall_s = time.time() - 10
+            runtime._poll_once()
+            self.assertEqual(recovered, [])
+
+            runtime.process_load_event({
+                "event": "TRACE_ARRIVAL", "client_waiting_requests": 0,
+                "timestamp_unix_s": time.time(),
+            })
+            runtime.measurement_started_monotonic_s = time.monotonic() - 1
+            runtime._poll_once()
+            self.assertEqual(recovered, ["P"])
+
+    def test_freshness_uses_local_observation_not_remote_wall_clock(self):
+        config = AdaptiveExplorationConfig(
+            ttft_slo_ms=600, tpot_slo_ms=65, min_valid_requests=1,
+            min_input_tokens=1, min_output_tokens=1,
+            min_observation_duration_s=0,
+        )
+        p = AdaptivePoolController("P", "prefill", [100, 200, 300], config)
+        d = AdaptivePoolController("D", "decode", [100, 200, 300], config)
+        p.state.candidate_frequency = 200
+        p.set_current_frequency(200)
+        recovered = []
+        runtime = FastSafetyRuntime(
+            {"P": p, "D": d}, lambda pool, recommendation: recovered.append(pool) or {},
+            {
+                "slo": {"ttft_ms": 600, "tpot_ms": 65},
+                "fast_safety": {"telemetry_max_age_s": 1.0},
+                "severe_queue_depth": 4,
+            },
+            policy="FAST-SAFETY-FEEDBACK", block_id="fixture",
+            window_index=1, enabled=True,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime.attach(root)
+            for endpoint_id in ("P0", "P1", "D0", "D1"):
+                endpoint = root / endpoint_id
+                endpoint.mkdir()
+                (endpoint / "samples.jsonl").write_text(
+                    json.dumps({"status": "success", "actual_start_wall_s": 1.0}) + "\n",
+                    encoding="utf-8",
+                )
+            runtime.process_load_event({
+                "event": "TRACE_ARRIVAL", "client_waiting_requests": 0,
+                "timestamp_unix_s": time.time(),
+            })
+            runtime.measurement_started_monotonic_s = time.monotonic() - 2
+            runtime._poll_once()
+            self.assertEqual(recovered, [])
 
 
 if __name__ == "__main__":

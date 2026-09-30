@@ -387,8 +387,12 @@ class FastSafetyRuntime:
         self.error: Optional[BaseException] = None
         self.seen = {"safety": 0, "load": 0, "samples": {key: 0 for key in ("P0", "P1", "D0", "D1")}}
         self.last_sample_wall = {key: None for key in ("P0", "P1", "D0", "D1")}
+        self.last_sample_observed_monotonic_s = {
+            key: None for key in ("P0", "P1", "D0", "D1")
+        }
         self.waiting_history: list[int] = []
         self.started_wall_s: Optional[float] = None
+        self.measurement_started_monotonic_s: Optional[float] = None
 
     def attach(self, run_dir: Path) -> None:
         self.run_dir = run_dir
@@ -442,6 +446,8 @@ class FastSafetyRuntime:
         self.event_rows.append(row)
 
     def process_safety_event(self, event: Mapping[str, Any]) -> None:
+        if self.measurement_started_monotonic_s is None:
+            self.measurement_started_monotonic_s = time.monotonic()
         if event.get("event") == "TTFT_OBSERVED" and _finite(event.get("ttft_ms")):
             if float(event["ttft_ms"]) > float(self.settings["slo"]["ttft_ms"]):
                 self._log_and_maybe_recover(
@@ -456,6 +462,8 @@ class FastSafetyRuntime:
                 )
 
     def process_load_event(self, event: Mapping[str, Any]) -> None:
+        if self.measurement_started_monotonic_s is None:
+            self.measurement_started_monotonic_s = time.monotonic()
         raw_waiting = event.get("client_waiting_requests")
         if raw_waiting is None:
             for pool in ("P", "D"):
@@ -472,6 +480,14 @@ class FastSafetyRuntime:
                 self._log_and_maybe_recover(pool, trigger, event)
 
     def process_internal_failure(self, pool: str, trigger: str, timestamp_s: float) -> None:
+        # The client process loads its tokenizer before the first trace arrival.
+        # No request is exposed during that startup interval, so a transient NFS
+        # visibility delay in a remote sample file is not a safety event yet.
+        if (
+            trigger in {"STALE_SAFETY_TELEMETRY", "INVALID_SAFETY_TELEMETRY"}
+            and self.measurement_started_monotonic_s is None
+        ):
+            return
         self._log_and_maybe_recover(pool, trigger, {"timestamp_unix_s": timestamp_s})
 
     def _new_rows(self, path: Path, key: str) -> list[dict[str, Any]]:
@@ -514,18 +530,28 @@ class FastSafetyRuntime:
             for row in rows[start:]:
                 if row.get("status") == "success" and _finite(row.get("actual_start_wall_s")):
                     self.last_sample_wall[endpoint_id] = float(row["actual_start_wall_s"])
+                    # Freshness is the age at which the controller observed a
+                    # new sample, not the remote node's wall-clock timestamp.
+                    # This avoids cross-node clock/NFS artefacts while still
+                    # failing closed when updates stop reaching the controller.
+                    self.last_sample_observed_monotonic_s[endpoint_id] = time.monotonic()
         if not check_staleness:
             return
         now = time.time()
+        now_monotonic = time.monotonic()
         max_age = float(self.settings["fast_safety"]["telemetry_max_age_s"])
-        if self.started_wall_s is not None and now - self.started_wall_s >= max_age:
+        if (
+            self.measurement_started_monotonic_s is not None
+            and now_monotonic - self.measurement_started_monotonic_s >= max_age
+        ):
             for pool, endpoint_ids in POOLS.items():
                 controller = self.controllers[pool]
                 if controller.current_frequency_mhz >= controller.frequencies_mhz[-1]:
                     continue
                 stale = any(
-                    self.last_sample_wall[item] is None
-                    or now - float(self.last_sample_wall[item]) > max_age
+                    self.last_sample_observed_monotonic_s[item] is None
+                    or now_monotonic
+                    - float(self.last_sample_observed_monotonic_s[item]) > max_age
                     for item in endpoint_ids
                 )
                 if stale:

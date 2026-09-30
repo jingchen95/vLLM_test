@@ -270,6 +270,10 @@ class StageC2DynamicTests(unittest.TestCase):
                     "readback_frequency_mhz": 300, "readback_valid": True}
 
         runtime = self.runtime(controllers, recover)
+        runtime.process_load_event({
+            "event": "TRACE_ARRIVAL", "client_waiting_requests": 0,
+            "timestamp_unix_s": 1.8,
+        })
         runtime.process_internal_failure("P", "INVALID_SAFETY_TELEMETRY", 1.9)
         self.assertEqual(p.current_frequency_mhz, 300)
         self.assertEqual(runtime.event_rows[0]["trigger"], "INVALID_SAFETY_TELEMETRY")
