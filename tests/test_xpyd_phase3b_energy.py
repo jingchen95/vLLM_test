@@ -3,11 +3,13 @@
 import io
 import json
 import math
+import os
 from pathlib import Path
 import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 from xpyd.nvml_readonly import NVMLReadOnlyError, ReadOnlyNVMLSource
 from xpyd.phase3b_energy import (
@@ -441,6 +443,22 @@ class SamplerTests(unittest.TestCase):
         self.assertEqual(raw.getvalue(), "".join(records))
         self.assertLessEqual(raw.flush_count, 9)
         self.assertLess(elapsed, 1.0)
+
+    def test_async_file_writer_fsyncs_each_visible_batch(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "samples.jsonl"
+            with path.open("x", encoding="utf-8") as raw:
+                with mock.patch(
+                    "xpyd.phase3b_energy.os.fsync", wraps=os.fsync
+                ) as fsync:
+                    stream = AsyncFlushingStream(raw)
+                    stream.write(json.dumps({"sequence": 1}) + "\n")
+                    stream.close()
+            self.assertGreaterEqual(fsync.call_count, 1)
+            self.assertEqual(
+                [json.loads(line) for line in path.read_text().splitlines()],
+                [{"sequence": 1}],
+            )
 
 
 class RuntimeGuardTests(unittest.TestCase):

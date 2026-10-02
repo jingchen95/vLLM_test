@@ -88,6 +88,17 @@ class AsyncFlushingStream:
                     batch.append(item)
                 self.stream.write("".join(batch))
                 self.stream.flush()
+                # ``flush`` only drains Python's userspace buffer.  Minerva's
+                # controller may read this file from a different node while
+                # the monitor keeps it open, so force each bounded batch to
+                # the shared filesystem as well.  This runs on the dedicated
+                # writer thread and therefore does not move sampling
+                # deadlines.
+                try:
+                    os.fsync(self.stream.fileno())
+                except (AttributeError, OSError, ValueError):
+                    # In-memory/test streams do not expose a real descriptor.
+                    pass
                 if closing:
                     break
         except BaseException as exc:
