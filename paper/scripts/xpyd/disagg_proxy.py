@@ -18,6 +18,11 @@ from typing import Any, AsyncIterator, Callable, Mapping, Optional, Sequence
 import uuid
 
 from xpyd.compatibility import CompatibilityTable, EndpointPairCompatibility
+from xpyd.d1_routing import (
+    D1PairRouter,
+    D1RoutingDecision,
+    RequestRoutingContext,
+)
 from xpyd.registry import EndpointRegistry
 from xpyd.types import EndpointSpec, EndpointState, LifecycleState
 
@@ -48,6 +53,8 @@ class ProxyLoadTracker:
         self._unassigned = 0
         self._maximum_in_flight = 0
         self._active_pairs: dict[tuple[str, str], int] = {}
+        self._active_input_tokens: dict[str, int] = {}
+        self._active_output_tokens: dict[str, int] = {}
         self._last_update_unix_s: Optional[float] = None
 
     def ingress(self) -> None:
@@ -60,15 +67,32 @@ class ProxyLoadTracker:
             )
             self._last_update_unix_s = self.wall_clock()
 
-    def assign(self, pair: tuple[str, str]) -> None:
+    def assign(
+        self,
+        pair: tuple[str, str],
+        context: Optional[RequestRoutingContext] = None,
+    ) -> None:
         with self._lock:
             if self._unassigned <= 0:
                 raise RuntimeError("proxy load tracker has no unassigned request")
             self._unassigned -= 1
             self._active_pairs[pair] = self._active_pairs.get(pair, 0) + 1
+            if context is not None:
+                self._active_input_tokens[pair[0]] = (
+                    self._active_input_tokens.get(pair[0], 0) + context.input_tokens
+                )
+                self._active_output_tokens[pair[1]] = (
+                    self._active_output_tokens.get(pair[1], 0)
+                    + context.requested_output_tokens
+                )
             self._last_update_unix_s = self.wall_clock()
 
-    def finish(self, pair: Optional[tuple[str, str]], succeeded: bool) -> None:
+    def finish(
+        self,
+        pair: Optional[tuple[str, str]],
+        succeeded: bool,
+        context: Optional[RequestRoutingContext] = None,
+    ) -> None:
         with self._lock:
             if self._in_flight <= 0:
                 raise RuntimeError("proxy load tracker has no in-flight request")
@@ -85,6 +109,17 @@ class ProxyLoadTracker:
                     self._active_pairs.pop(pair)
                 else:
                     self._active_pairs[pair] = active - 1
+                if context is not None:
+                    self._active_input_tokens[pair[0]] = max(
+                        0,
+                        self._active_input_tokens.get(pair[0], 0)
+                        - context.input_tokens,
+                    )
+                    self._active_output_tokens[pair[1]] = max(
+                        0,
+                        self._active_output_tokens.get(pair[1], 0)
+                        - context.requested_output_tokens,
+                    )
             if succeeded:
                 self._completed += 1
             else:
@@ -111,6 +146,12 @@ class ProxyLoadTracker:
                 "maximum_in_flight_requests": self._maximum_in_flight,
                 "active_requests_by_pair": by_pair,
                 "active_requests_by_endpoint": dict(sorted(by_endpoint.items())),
+                "active_input_tokens_by_endpoint": dict(
+                    sorted(self._active_input_tokens.items())
+                ),
+                "active_output_tokens_by_endpoint": dict(
+                    sorted(self._active_output_tokens.items())
+                ),
                 "last_update_unix_s": self._last_update_unix_s,
                 "semantics": (
                     "proxy-admitted demand; combine with client admission delay "
@@ -160,6 +201,8 @@ class ProxyDiagnostics:
     error: Optional[str] = None
     selected_prefill_endpoint_id: str = "P0"
     selected_decode_endpoint_id: str = "D0"
+    routing_context: Optional[dict[str, Any]] = None
+    routing_decision: Optional[dict[str, Any]] = None
 
     def record(self, name: str, value: float) -> None:
         self.timestamps_monotonic_s[name] = value
@@ -186,6 +229,8 @@ class ProxyDiagnostics:
                 "prefill_endpoint_id": self.selected_prefill_endpoint_id,
                 "decode_endpoint_id": self.selected_decode_endpoint_id,
             },
+            "routing_context": self.routing_context,
+            "routing_decision": self.routing_decision,
             "incoming_client_stream": self.incoming_client_stream,
             "outgoing_decode_stream": self.outgoing_decode_stream,
             "decode_content_type": self.decode_content_type,
@@ -275,6 +320,31 @@ def ingress_logical_request_id(headers: Mapping[str, str]) -> Optional[str]:
     ):
         raise ValueError("conflicting ingress logical request ID headers")
     return logical_request_id or request_id
+
+
+def ingress_routing_context(
+    headers: Mapping[str, str], logical_request_id: str,
+) -> Optional[RequestRoutingContext]:
+    """Parse admission-time context; never infer realized output length."""
+    names = {
+        "input_tokens": "X-Xpyd-Input-Tokens",
+        "requested_output_tokens": "X-Xpyd-Requested-Output-Tokens",
+        "request_class": "X-Xpyd-Request-Class",
+    }
+    present = {key: headers.get(name) for key, name in names.items()}
+    if all(value is None for value in present.values()):
+        return None
+    if any(value is None for value in present.values()):
+        raise ValueError("incomplete XPYD routing context headers")
+    try:
+        return RequestRoutingContext(
+            request_id=logical_request_id,
+            input_tokens=int(str(present["input_tokens"])),
+            requested_output_tokens=int(str(present["requested_output_tokens"])),
+            request_class=str(present["request_class"]),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid XPYD routing context headers") from exc
 
 
 async def _close_upstream(response: Any, session: Any) -> None:
@@ -403,6 +473,8 @@ class DisaggProxyCore:
         self,
         client_body: Mapping[str, Any],
         logical_request_id: Optional[str] = None,
+        routing_context: Optional[RequestRoutingContext] = None,
+        routing_decision: Optional[D1RoutingDecision] = None,
     ) -> PreparedProxyResponse:
         incoming_stream = bool(client_body.get("stream", False))
         request_id = self._logical_request_id(logical_request_id)
@@ -441,6 +513,12 @@ class DisaggProxyCore:
             wall_clock=self.wall_clock,
             selected_prefill_endpoint_id=self.config.prefill_endpoint_id,
             selected_decode_endpoint_id=self.config.decode_endpoint_id,
+            routing_context=(
+                routing_context.as_dict() if routing_context is not None else None
+            ),
+            routing_decision=(
+                routing_decision.as_dict() if routing_decision is not None else None
+            ),
         )
         diagnostics.record("route_selected", self.clock())
         headers = upstream_headers(request_id, vllm_request_id)
@@ -604,7 +682,11 @@ class RoundRobinCompatiblePairs:
         self._index = 0
         self._lock = threading.Lock()
 
-    def choose(self) -> tuple[str, str]:
+    def choose(
+        self,
+        context: Optional[RequestRoutingContext] = None,
+        load_snapshot: Optional[Mapping[str, Any]] = None,
+    ) -> tuple[str, str]:
         with self._lock:
             pair = self.pairs[self._index % len(self.pairs)]
             self._index += 1
@@ -635,7 +717,11 @@ class FileControlledCompatiblePairs(RoundRobinCompatiblePairs):
         if self.maximum_age_s <= 0:
             raise ValueError("routing control maximum age must be positive")
 
-    def choose(self) -> tuple[str, str]:
+    def choose(
+        self,
+        context: Optional[RequestRoutingContext] = None,
+        load_snapshot: Optional[Mapping[str, Any]] = None,
+    ) -> tuple[str, str]:
         try:
             value = json.loads(self.control_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -663,6 +749,55 @@ class FileControlledCompatiblePairs(RoundRobinCompatiblePairs):
             return pair
 
 
+class D1RuntimeCompatiblePairs(RoundRobinCompatiblePairs):
+    """Request-level D1 selector backed by fresh atomic controller state."""
+
+    def __init__(
+        self,
+        registry: EndpointRegistry,
+        compatibility: CompatibilityTable,
+        pairs: Sequence[tuple[str, str]],
+        control_file: str,
+        maximum_age_s: float,
+        *,
+        cold_start_requests: int = 4,
+        candidate_probe_interval_requests: int = 2,
+        exploration_interval_requests: int = 8,
+        wall_clock: Clock = time.time,
+    ) -> None:
+        super().__init__(registry, compatibility, pairs)
+        self.control_file = Path(control_file)
+        self.router = D1PairRouter(
+            self.pairs,
+            self._load,
+            maximum_age_s=maximum_age_s,
+            cold_start_requests=cold_start_requests,
+            candidate_probe_interval_requests=candidate_probe_interval_requests,
+            exploration_interval_requests=exploration_interval_requests,
+            wall_clock=wall_clock,
+        )
+        self.last_decision: Optional[D1RoutingDecision] = None
+
+    def _load(self) -> Mapping[str, Any]:
+        try:
+            value = json.loads(self.control_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("D1 routing control file unavailable or invalid") from exc
+        if not isinstance(value, Mapping):
+            raise ValueError("D1 routing control state must be an object")
+        return value
+
+    def choose(
+        self,
+        context: Optional[RequestRoutingContext] = None,
+        load_snapshot: Optional[Mapping[str, Any]] = None,
+    ) -> tuple[str, str]:
+        if context is None:
+            raise ValueError("D1 routing requires admission-time request context")
+        self.last_decision = self.router.choose(context, load_snapshot)
+        return self.last_decision.pair
+
+
 class MultiEndpointDisaggProxyCore:
     """Select one exact compatible pair, then reuse the accepted proxy core."""
 
@@ -677,6 +812,10 @@ class MultiEndpointDisaggProxyCore:
         model: str = "mistralai/Mistral-7B-v0.1",
         routing_control_file: Optional[str] = None,
         routing_control_maximum_age_s: float = 900.0,
+        routing_policy: str = "round_robin",
+        routing_cold_start_requests: int = 4,
+        routing_candidate_probe_interval_requests: int = 2,
+        routing_exploration_interval_requests: int = 8,
         clock: Clock = time.monotonic,
         wall_clock: Clock = time.time,
         diagnostic_sink: Optional[DiagnosticSink] = None,
@@ -687,7 +826,25 @@ class MultiEndpointDisaggProxyCore:
         self.transports = dict(transports)
         self.load_tracker = load_tracker or ProxyLoadTracker(wall_clock)
         control_file = os.path.expandvars(str(routing_control_file or ""))
-        if control_file:
+        if routing_policy == "d1_runtime_feedback":
+            if not control_file:
+                raise ValueError("D1 runtime routing requires routing_control_file")
+            self.selector = D1RuntimeCompatiblePairs(
+                registry,
+                compatibility,
+                pairs,
+                control_file,
+                float(routing_control_maximum_age_s),
+                cold_start_requests=int(routing_cold_start_requests),
+                candidate_probe_interval_requests=int(
+                    routing_candidate_probe_interval_requests
+                ),
+                exploration_interval_requests=int(
+                    routing_exploration_interval_requests
+                ),
+                wall_clock=wall_clock,
+            )
+        elif control_file:
             self.selector = FileControlledCompatiblePairs(
                 registry,
                 compatibility,
@@ -728,21 +885,28 @@ class MultiEndpointDisaggProxyCore:
         self,
         client_body: Mapping[str, Any],
         logical_request_id: Optional[str] = None,
+        routing_context: Optional[RequestRoutingContext] = None,
     ) -> PreparedProxyResponse:
         pair: Optional[tuple[str, str]] = None
         self.load_tracker.ingress()
         try:
-            pair = self.selector.choose()
-            self.load_tracker.assign(pair)
+            pair = self.selector.choose(routing_context, self.load_tracker.snapshot())
+            decision = getattr(self.selector, "last_decision", None)
+            self.load_tracker.assign(pair, routing_context)
             prepared = await self.cores[pair].prepare(
-                client_body, logical_request_id
+                client_body,
+                logical_request_id,
+                routing_context=routing_context,
+                routing_decision=decision,
             )
         except Exception:
-            self.load_tracker.finish(pair, False)
+            self.load_tracker.finish(pair, False, routing_context)
             raise
 
         if prepared.stream is None:
-            self.load_tracker.finish(pair, prepared.status_code < 400)
+            self.load_tracker.finish(
+                pair, prepared.status_code < 400, routing_context
+            )
             return prepared
 
         upstream_stream = prepared.stream
@@ -754,7 +918,7 @@ class MultiEndpointDisaggProxyCore:
                     yield chunk
                 succeeded = True
             finally:
-                self.load_tracker.finish(pair, succeeded)
+                self.load_tracker.finish(pair, succeeded, routing_context)
 
         prepared.stream = tracked_stream()
         return prepared
@@ -818,6 +982,16 @@ def _build_multi_core(
         routing_control_file=config.get("routing_control_file"),
         routing_control_maximum_age_s=float(
             config.get("routing_control_maximum_age_s", 900.0)
+        ),
+        routing_policy=str(config.get("routing_policy", "round_robin")),
+        routing_cold_start_requests=int(
+            config.get("routing_cold_start_requests", 4)
+        ),
+        routing_candidate_probe_interval_requests=int(
+            config.get("routing_candidate_probe_interval_requests", 2)
+        ),
+        routing_exploration_interval_requests=int(
+            config.get("routing_exploration_interval_requests", 8)
         ),
         diagnostic_sink=diagnostic_sink,
     )
@@ -927,7 +1101,11 @@ def create_multi_app(
     async def health() -> dict[str, Any]:
         return {
             "status": "ok",
-            "routing_policy": "round_robin_explicit_compatible_pairs",
+            "routing_policy": (
+                "d1_runtime_feedback"
+                if isinstance(core.selector, D1RuntimeCompatiblePairs)
+                else "round_robin_explicit_compatible_pairs"
+            ),
             "compatible_pairs": [list(item) for item in core.selector.pairs],
         }
 
@@ -938,9 +1116,16 @@ def create_multi_app(
     @app.post("/v1/completions")
     async def completions(raw_request: Request) -> Any:
         try:
+            logical_request_id = ingress_logical_request_id(raw_request.headers)
+            if logical_request_id is None:
+                logical_request_id = uuid.uuid4().hex
+            routing_context = ingress_routing_context(
+                raw_request.headers, logical_request_id
+            )
             prepared = await core.prepare(
                 await raw_request.json(),
-                logical_request_id=ingress_logical_request_id(raw_request.headers),
+                logical_request_id=logical_request_id,
+                routing_context=routing_context,
             )
         except (ProxyUpstreamError, ValueError, KeyError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=502)

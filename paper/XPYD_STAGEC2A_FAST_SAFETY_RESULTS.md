@@ -111,8 +111,10 @@ records 49 hard violations. FAST exposes 91 requests and records 12 hard
 violations, reductions of 62.1% and 75.5%, respectively. FAST reduces total
 unsafe-candidate residence from 1965.17 s to 584.29 s. More importantly, it
 reduces requests sent after the first violation from 153 to 6. P recovery
-allows no additional request admission after the triggering TTFT violation;
-one already scheduled/in-flight request remains after each D trigger.
+had no additional observed request admission after the triggering TTFT
+violation. One additional request was admitted/sent during each observed D
+recovery interval; C2a does not pause admissions during recovery. These are
+observed trace-timing outcomes, not admission-quiescence guarantees.
 
 FAST cannot remove the first violating request because that request supplies
 the safety signal. Its measured benefit is terminating further exposure

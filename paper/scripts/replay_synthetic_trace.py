@@ -254,6 +254,19 @@ async def consume_sse_completion(
             "X-Request-Id": logical_request_id,
             "X-Xpyd-Logical-Request-Id": logical_request_id,
         }
+        routing_keys = {
+            "input_len", "requested_output_len", "workload_class"
+        }
+        if request_context is not None and routing_keys.issubset(request_context):
+            request_headers.update({
+                "X-Xpyd-Input-Tokens": str(request_context["input_len"]),
+                "X-Xpyd-Requested-Output-Tokens": str(
+                    request_context["requested_output_len"]
+                ),
+                "X-Xpyd-Request-Class": str(
+                    request_context["workload_class"]
+                ),
+            })
     async with session.post(url, json=payload, headers=request_headers) as resp:
         echoed_logical_request_id = resp.headers.get(
             "X-Xpyd-Logical-Request-Id"

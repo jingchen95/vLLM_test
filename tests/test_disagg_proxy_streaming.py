@@ -16,6 +16,7 @@ from xpyd.disagg_proxy import (
     ProxyLoadTracker,
     ProxyUpstreamError,
     ingress_logical_request_id,
+    ingress_routing_context,
     load_multi_endpoint_config,
 )
 from xpyd.compatibility import CompatibilityTable, EndpointPairCompatibility
@@ -262,6 +263,21 @@ class DisaggProxyStreamingTests(unittest.TestCase):
                 "X-Xpyd-Logical-Request-Id": "client-2",
             })
 
+    def test_admission_context_is_validated_before_d1_pair_selection(self):
+        parsed = ingress_routing_context({
+            "X-Xpyd-Input-Tokens": "2048",
+            "X-Xpyd-Requested-Output-Tokens": "128",
+            "X-Xpyd-Request-Class": "LS",
+        }, "request-9")
+        self.assertEqual(parsed.request_id, "request-9")
+        self.assertEqual(parsed.input_tokens, 2048)
+        self.assertEqual(parsed.requested_output_tokens, 128)
+        self.assertEqual(parsed.request_class, "LS")
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            ingress_routing_context({
+                "X-Xpyd-Input-Tokens": "128",
+            }, "request-10")
+
     def test_proxy_module_entrypoint_does_not_shadow_stdlib_types(self):
         repo_root = Path(__file__).resolve().parents[1]
         env = {"PYTHONPATH": str(repo_root / "paper/scripts")}
@@ -300,6 +316,7 @@ class DisaggProxyStreamingTests(unittest.TestCase):
                     "stream": True,
                 },
                 logical_request_id="trace-request-007",
+                routing_context=None,
             )
             self.assertIsNotNone(prepared.stream)
             first = await prepared.stream.__anext__()

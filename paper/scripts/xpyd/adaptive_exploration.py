@@ -673,6 +673,7 @@ def evidence_from_window(
     tpot_slo_ms: float,
     context_signature: str = "stationary",
     captured_at_s: float = 0.0,
+    endpoint_ids: Optional[Sequence[str]] = None,
 ) -> PoolEvidence:
     """Convert an existing C1 window into phase-specific pool evidence."""
     phase = "prefill" if pool == "P" else "decode"
@@ -699,7 +700,9 @@ def evidence_from_window(
             endpoint_load = json.loads(str(metrics["endpoint_load_json"]))
         except (TypeError, ValueError, json.JSONDecodeError):
             endpoint_load = None
-    relevant_endpoints = ("P0", "P1") if pool == "P" else ("D0", "D1")
+    relevant_endpoints = tuple(endpoint_ids or (
+        ("P0", "P1") if pool == "P" else ("D0", "D1")
+    ))
     server_queue_pressure = False
     endpoint_pressure_observed = isinstance(endpoint_load, Mapping)
     if isinstance(endpoint_load, Mapping):
@@ -733,11 +736,10 @@ def evidence_from_window(
             "stable" if backlog_stable
             else ("server_queue" if server_queue_pressure else "backlog_risk")
         )
-    energy_key = "P0_energy_j" if pool == "P" else "D0_energy_j"
-    other_key = "P1_energy_j" if pool == "P" else "D1_energy_j"
+    energy_values = [metrics.get("%s_energy_j" % item) for item in relevant_endpoints]
     gross = None
-    if metrics.get(energy_key) is not None and metrics.get(other_key) is not None:
-        gross = float(metrics[energy_key]) + float(metrics[other_key])
+    if energy_values and all(item is not None for item in energy_values):
+        gross = sum(float(item) for item in energy_values)
     return PoolEvidence(
         pool=pool,
         phase=phase,

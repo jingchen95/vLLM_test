@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "purpose": "Stage D1 isolation of per-endpoint DVFS and runtime-feedback pair routing",
+  "output_root": "results/stage_d1",
+  "bucket_definition": {
+    "short_input_max_tokens": 512,
+    "short_output_max_tokens": 256
+  },
+  "shapes": {
+    "SS": {"input_len": 128, "output_len": 128},
+    "SL": {"input_len": 128, "output_len": 512},
+    "LS": {"input_len": 2048, "output_len": 128},
+    "LL": {"input_len": 2048, "output_len": 512}
+  },
+  "control_window_s": 200.0,
+  "scenarios": [
+    {
+      "id": "stationary_medium",
+      "segments": [{
+        "id": "steady_mix", "request_count": 20, "rate_rps": 0.10,
+        "class_weights": {"SS": 0.35, "SL": 0.15, "LS": 0.35, "LL": 0.15}
+      }]
+    },
+    {
+      "id": "stationary_high_sustainable",
+      "segments": [{
+        "id": "steady_mix", "request_count": 20, "rate_rps": 0.20,
+        "class_weights": {"SS": 0.35, "SL": 0.15, "LS": 0.35, "LL": 0.15}
+      }]
+    }
+  ],
+  "stage_d1": {
+    "policies": [
+      "STATIC-HIGH-RR",
+      "SHARED-FAST-RR",
+      "PER-ENDPOINT-FAST-RR",
+      "JOINT-ROUTING-PER-ENDPOINT"
+    ],
+    "slo_regime": "TIGHT",
+    "slo": {"ttft_ms": 600.0, "tpot_ms": 65.0, "attainment": 0.95},
+    "max_concurrency": 4,
+    "routing": "fixed RR for comparators; runtime-feedback full-pair routing for JOINT",
+    "frequency_state": "independent per endpoint",
+    "cold_start": "all endpoints HIGH for every full policy/load/repeat block",
+    "predictor": false,
+    "offline_profile": false,
+    "rl": false,
+    "bandit": false,
+    "tp2": false,
+    "frequency_levels_mhz": {
+      "P0": {"LOW": 1260, "MID": 1890, "HIGH": 2520},
+      "P1": {"LOW": 1260, "MID": 1890, "HIGH": 2520},
+      "D0": {"LOW": 750, "MID": 1125, "HIGH": 1500},
+      "D1": {"LOW": 750, "MID": 1125, "HIGH": 1500}
+    },
+    "load_points": [
+      {"id": "MEDIUM", "scenario": "stationary_medium", "offered_rate_rps": 0.10},
+      {"id": "HIGH-SUSTAINABLE", "scenario": "stationary_high_sustainable", "offered_rate_rps": 0.20}
+    ],
+    "preflight_load_point": "HIGH-SUSTAINABLE",
+    "preflight_windows": 3,
+    "windows_per_block": 5,
+    "repetitions": 3,
+    "minimum_dwell_s": 1.0,
+    "adaptive_exploration": {
+      "min_valid_requests": 8,
+      "min_input_tokens": 1024,
+      "min_output_tokens": 1024,
+      "min_observation_duration_s": 1.0,
+      "max_evidence_timeout_s": 120.0,
+      "telemetry_max_age_s": 300.0,
+      "headroom_for_one_step": 0.01,
+      "headroom_for_large_jump": 0.10,
+      "large_jump_levels": 2,
+      "context_invalidation_on_change": true,
+      "values_status": "unchanged accepted C1/C2 efficiency-path thresholds"
+    },
+    "fast_safety": {
+      "telemetry_max_age_s": 1.0,
+      "hard_ttft_trigger_ms": 600.0,
+      "hard_tpot_trigger_ms": 65.0,
+      "risk_fraction_trigger": null
+    },
+    "context_inference": {
+      "long_input_tokens": 512,
+      "long_output_tokens": 256,
+      "prefill_heavy_fraction": 0.75,
+      "decode_heavy_fraction": 0.50,
+      "semantics": "derived only from observed request tokens; no context label enters control"
+    },
+    "severe_queue_depth": 4,
+    "trend_thresholds": {
+      "minimum_sustainable_throughput_ratio": 0.90,
+      "admission_delay_slope_ms_per_s": 100.0,
+      "quartile_delay_increase_ms": 1000.0,
+      "minimum_close_waiting": 2.0,
+      "low_mean_client_waiting": 0.25,
+      "low_p95_admission_delay_ms": 250.0
+    },
+    "claim_boundary": "stationary D1 isolation; runtime-only feedback; no request-energy attribution, model, TP diversity, scaling, or dynamic contexts"
+  }
+}
