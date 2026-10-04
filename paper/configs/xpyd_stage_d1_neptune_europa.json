@@ -58,6 +58,8 @@
       {"id": "HIGH-SUSTAINABLE", "scenario": "stationary_high_sustainable", "offered_rate_rps": 0.20}
     ],
     "preflight_load_point": "HIGH-SUSTAINABLE",
+    "preflight_warmup_windows": 1,
+    "preflight_warmup_semantics": "declared all-HIGH startup warm-up; excluded from controller and fixed-asymmetry evidence",
     "preflight_windows": 3,
     "windows_per_block": 5,
     "repetitions": 3,

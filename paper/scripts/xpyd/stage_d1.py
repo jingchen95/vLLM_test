@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 import copy
 import json
+import math
 import os
 from pathlib import Path
 import statistics
@@ -39,7 +40,6 @@ from xpyd.stagec2_dynamic import (
     FastSafetyRuntime,
     StageC2Error,
     _bool,
-    derived_context_signature,
 )
 from xpyd.stagec2a_fast_safety import StageC2AFastSafetyHarness, segment_residency
 from xpyd.workload_harness import build_trace, load_config as load_workload_config
@@ -53,6 +53,280 @@ POLICIES = (
 )
 ENDPOINTS = ("P0", "P1", "D0", "D1")
 PAIRS = (("P0", "D0"), ("P0", "D1"), ("P1", "D0"), ("P1", "D1"))
+
+
+NORMALIZED_D1_REQUIRED_FIELDS = {
+    "request_id",
+    "prefill_endpoint_id",
+    "decode_endpoint_id",
+    "input_len",
+    "requested_output_len",
+    "workload_class",
+    "ttft_ms",
+    "tpot_ms",
+    "send_unix_s",
+    "first_token_unix_s",
+    "complete_unix_s",
+    "real_sse",
+    "logical_request_id_propagated",
+}
+
+
+@dataclass(frozen=True)
+class D1RequestRecord:
+    """Canonical internal request schema used by all D1 control/report code."""
+
+    request_id: str
+    prefill_endpoint_id: str
+    decode_endpoint_id: str
+    requested_input_len: int
+    requested_output_len: int
+    actual_output_len: Optional[int]
+    request_class: str
+    ttft_ms: float
+    tpot_ms: float
+    send_unix_s: float
+    first_token_unix_s: float
+    complete_unix_s: float
+    client_admission_delay_ms: Optional[float]
+    real_sse: bool
+    logical_request_id_propagated: bool
+
+    def __post_init__(self) -> None:
+        if not self.request_id:
+            raise StageC2Error("D1 canonical request_id must be non-empty")
+        if self.prefill_endpoint_id not in {"P0", "P1"}:
+            raise StageC2Error("D1 canonical prefill endpoint is invalid")
+        if self.decode_endpoint_id not in {"D0", "D1"}:
+            raise StageC2Error("D1 canonical decode endpoint is invalid")
+        if self.requested_input_len <= 0 or self.requested_output_len <= 0:
+            raise StageC2Error("D1 canonical requested token counts must be positive")
+        if self.actual_output_len is not None and self.actual_output_len < 0:
+            raise StageC2Error("D1 canonical actual output length cannot be negative")
+        if self.request_class not in {"SS", "SL", "LS", "LL"}:
+            raise StageC2Error("D1 canonical request class is invalid")
+        if not all(math.isfinite(value) for value in (
+            self.ttft_ms, self.tpot_ms, self.send_unix_s,
+            self.first_token_unix_s, self.complete_unix_s,
+        )):
+            raise StageC2Error("D1 canonical latency/timing values must be finite")
+        if not self.send_unix_s <= self.first_token_unix_s <= self.complete_unix_s:
+            raise StageC2Error("D1 canonical request timestamps are out of order")
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _required_text(row: Mapping[str, Any], key: str) -> str:
+    value = row.get(key)
+    if value is None or str(value).strip() == "":
+        raise StageC2Error("D1 normalized request schema missing required field: %s" % key)
+    return str(value)
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    if value is None or str(value).strip() == "":
+        return None
+    return float(value)
+
+
+def _required_bool(row: Mapping[str, Any], key: str) -> bool:
+    value = _required_text(row, key).strip().lower()
+    if value not in {"true", "false"}:
+        raise StageC2Error("D1 normalized request schema has invalid %s" % key)
+    return value == "true"
+
+
+def normalize_d1_request(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Map one Phase3C normalized CSV row into the sole D1 request schema."""
+    missing = sorted(
+        key for key in NORMALIZED_D1_REQUIRED_FIELDS
+        if row.get(key) is None or str(row.get(key)).strip() == ""
+    )
+    if missing:
+        raise StageC2Error(
+            "D1 normalized request schema missing required fields: %s"
+            % ", ".join(missing)
+        )
+    try:
+        actual_raw = row.get("observed_output_tokens")
+        record = D1RequestRecord(
+            request_id=_required_text(row, "request_id"),
+            prefill_endpoint_id=_required_text(row, "prefill_endpoint_id"),
+            decode_endpoint_id=_required_text(row, "decode_endpoint_id"),
+            requested_input_len=int(_required_text(row, "input_len")),
+            requested_output_len=int(_required_text(row, "requested_output_len")),
+            actual_output_len=(
+                int(actual_raw)
+                if actual_raw is not None and str(actual_raw).strip() != ""
+                else None
+            ),
+            request_class=_required_text(row, "workload_class"),
+            ttft_ms=float(_required_text(row, "ttft_ms")),
+            tpot_ms=float(_required_text(row, "tpot_ms")),
+            send_unix_s=float(_required_text(row, "send_unix_s")),
+            first_token_unix_s=float(_required_text(row, "first_token_unix_s")),
+            complete_unix_s=float(_required_text(row, "complete_unix_s")),
+            client_admission_delay_ms=_optional_float(
+                row.get("client_admission_delay_ms")
+            ),
+            real_sse=_required_bool(row, "real_sse"),
+            logical_request_id_propagated=_required_bool(
+                row, "logical_request_id_propagated"
+            ),
+        )
+    except (TypeError, ValueError) as exc:
+        raise StageC2Error("D1 normalized request schema contains invalid values") from exc
+    value = record.as_dict()
+    # Preserve experiment coordinates only after the request contract validates.
+    for key in ("block_id", "policy", "repeat", "window_index", "context", "load_point"):
+        if key in row:
+            value[key] = row[key]
+    return value
+
+
+def normalize_d1_requests(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    if not rows:
+        raise StageC2Error("D1 normalized request input is empty")
+    return [normalize_d1_request(row) for row in rows]
+
+
+def endpoint_evidence_summary(
+    requests: Sequence[Mapping[str, Any]], metrics: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Build exact endpoint-local evidence from canonical D1 records."""
+    output: dict[str, dict[str, Any]] = {}
+    for endpoint_id in ENDPOINTS:
+        phase = ENDPOINT_PHASE[endpoint_id]
+        key = "prefill_endpoint_id" if phase == "P" else "decode_endpoint_id"
+        selected = [row for row in requests if row[key] == endpoint_id]
+        latency_key = "ttft_ms" if phase == "P" else "tpot_ms"
+        latency = [float(row[latency_key]) for row in selected]
+        energy = metrics.get("%s_energy_j" % endpoint_id)
+        output[endpoint_id] = {
+            "request_count": len(selected),
+            "class_counts": {
+                request_class: sum(
+                    row["request_class"] == request_class for row in selected
+                ) for request_class in ("SS", "SL", "LS", "LL")
+            },
+            "requested_input_tokens": sum(
+                int(row["requested_input_len"]) for row in selected
+            ),
+            "requested_output_tokens": sum(
+                int(row["requested_output_len"]) for row in selected
+            ),
+            "actual_output_tokens": sum(
+                int(row["actual_output_len"] or 0) for row in selected
+            ),
+            "latency_metric": "TTFT" if phase == "P" else "TPOT",
+            "latency_count": len(latency),
+            "latency_mean_ms": statistics.fmean(latency) if latency else None,
+            "latency_p95_ms": percentile(latency, 0.95) if latency else None,
+            "gross_energy_j": float(energy) if energy is not None else None,
+            "gross_energy_j_per_assigned_request": (
+                float(energy) / len(selected)
+                if energy is not None and selected else None
+            ),
+        }
+    return output
+
+
+def d1_context_signature(
+    phase: str,
+    requests: Sequence[Mapping[str, Any]],
+    settings: Mapping[str, Any],
+) -> str:
+    """Derive controller context exclusively from canonical D1 fields."""
+    if not requests:
+        return "%s:unknown" % phase
+    if phase == "P":
+        boundary = int(settings["context_inference"]["long_input_tokens"])
+        fraction = sum(
+            int(row["requested_input_len"]) > boundary for row in requests
+        ) / len(requests)
+        threshold = float(
+            settings["context_inference"]["prefill_heavy_fraction"]
+        )
+        return "P:long-input-high" if fraction >= threshold else "P:mixed-input"
+    boundary = int(settings["context_inference"]["long_output_tokens"])
+    fraction = sum(
+        int(row["requested_output_len"]) > boundary for row in requests
+    ) / len(requests)
+    threshold = float(settings["context_inference"]["decode_heavy_fraction"])
+    return "D:long-output-high" if fraction >= threshold else "D:mixed-output"
+
+
+def d1_evidence_from_window(
+    phase: str,
+    metrics: Mapping[str, Any],
+    requests: Sequence[Mapping[str, Any]],
+    *,
+    endpoint_id: str,
+    observed_frequency_mhz: int,
+    settings: Mapping[str, Any],
+    captured_at_s: float,
+) -> Any:
+    """Adapt canonical D1 records once at the generic C1 evidence boundary."""
+    latency_key = "ttft_ms" if phase == "P" else "tpot_ms"
+    latency = [float(row[latency_key]) for row in requests]
+    evidence_metrics = dict(metrics)
+    evidence_metrics.update({
+        "measurement_valid": True,
+        "telemetry_fresh": True,
+        "readback_valid": True,
+        "%s_p95_ms" % latency_key.removesuffix("_ms"): percentile(latency, 0.95),
+    })
+    # evidence_from_window is shared with C1/C2 and consumes their normalized
+    # names. This is the sole adapter from the canonical D1 schema.
+    adapted = canonical_to_c1_evidence_rows(requests)
+    return evidence_from_window(
+        phase,
+        evidence_metrics,
+        adapted,
+        observed_frequency_mhz=observed_frequency_mhz,
+        slo_regime="TIGHT",
+        ttft_slo_ms=600.0,
+        tpot_slo_ms=65.0,
+        context_signature=d1_context_signature(phase, requests, settings),
+        captured_at_s=captured_at_s,
+        endpoint_ids=(endpoint_id,),
+    )
+
+
+def canonical_to_c1_evidence_rows(
+    requests: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """One adapter for reused shared-pool C1/C2 evidence code."""
+    return [{
+        "ttft_ms": row["ttft_ms"],
+        "tpot_ms": row["tpot_ms"],
+        "input_len": row["requested_input_len"],
+        "requested_output_len": row["requested_output_len"],
+        "observed_output_tokens": (
+            row["actual_output_len"]
+            if row["actual_output_len"] is not None
+            else 0
+        ),
+        "real_sse": row["real_sse"],
+        "logical_request_id_propagated": row["logical_request_id_propagated"],
+    } for row in requests]
+
+
+class D1EvidenceLedger:
+    """Separate declared warm-up traffic from controller-eligible evidence."""
+
+    def __init__(self) -> None:
+        self.warmup_request_count = 0
+        self.control_requests: list[dict[str, Any]] = []
+
+    def record(
+        self, requests: Sequence[Mapping[str, Any]], *, evidence_eligible: bool,
+    ) -> None:
+        if evidence_eligible:
+            self.control_requests.extend(dict(row) for row in requests)
+        else:
+            self.warmup_request_count += len(requests)
 
 
 def policy_order(repeat: int, load_index: int) -> tuple[str, ...]:
@@ -76,6 +350,8 @@ def load_configs(
         raise StageC2Error("D1 must retain the TIGHT 600/65 SLO")
     if int(settings.get("max_concurrency", 0)) != 4:
         raise StageC2Error("D1 requires concurrency 4")
+    if int(settings.get("preflight_warmup_windows", 0)) < 1:
+        raise StageC2Error("D1 preflight requires a declared all-HIGH warm-up")
     if settings.get("frequency_state") != "independent per endpoint":
         raise StageC2Error("D1 requires independent endpoint frequency state")
     forbidden = ("predictor", "offline_profile", "rl", "bandit", "tp2")
@@ -175,6 +451,10 @@ class StageD1Harness(StageC2AFastSafetyHarness):
         self.endpoint_energy: dict[str, Optional[float]] = {item: None for item in ENDPOINTS}
         self.endpoint_latency: dict[str, Optional[float]] = {item: None for item in ENDPOINTS}
         self.pair_feedback: dict[str, dict[str, dict[str, Any]]] = {}
+        self.routing_diagnostic_rows: list[dict[str, Any]] = []
+        self.preflight_warmup_rows: list[dict[str, Any]] = []
+        self.evidence_ledger = D1EvidenceLedger()
+        self.latest_endpoint_evidence: dict[str, dict[str, Any]] = {}
 
     def _controllers_endpoint(self) -> dict[str, AdaptivePoolController]:
         config = AdaptiveExplorationConfig.from_mapping(
@@ -265,28 +545,22 @@ class StageD1Harness(StageC2AFastSafetyHarness):
     def _update_runtime_feedback(
         self, metrics: Mapping[str, Any], requests: Sequence[Mapping[str, Any]],
     ) -> None:
-        for endpoint_id in ENDPOINTS:
-            key = (
-                "selected_prefill_endpoint_id"
-                if endpoint_id.startswith("P") else "selected_decode_endpoint_id"
-            )
-            selected = [row for row in requests if row.get(key) == endpoint_id]
-            energy = metrics.get("%s_energy_j" % endpoint_id)
-            self.endpoint_energy[endpoint_id] = (
-                float(energy) / len(selected) if energy is not None and selected else None
-            )
-            latency_key = "ttft_ms" if endpoint_id.startswith("P") else "tpot_ms"
-            values = [float(row[latency_key]) for row in selected]
-            self.endpoint_latency[endpoint_id] = percentile(values, 0.95) if values else None
+        evidence = endpoint_evidence_summary(requests, metrics)
+        self.latest_endpoint_evidence = evidence
+        for endpoint_id, values in evidence.items():
+            self.endpoint_energy[endpoint_id] = values[
+                "gross_energy_j_per_assigned_request"
+            ]
+            self.endpoint_latency[endpoint_id] = values["latency_p95_ms"]
         feedback: dict[str, dict[str, dict[str, Any]]] = {}
         for workload_class in ("SS", "SL", "LS", "LL"):
             feedback[workload_class] = {}
             for pair in PAIRS:
                 selected = [
                     row for row in requests
-                    if row.get("workload_class") == workload_class
-                    and row.get("selected_prefill_endpoint_id") == pair[0]
-                    and row.get("selected_decode_endpoint_id") == pair[1]
+                    if row["request_class"] == workload_class
+                    and row["prefill_endpoint_id"] == pair[0]
+                    and row["decode_endpoint_id"] == pair[1]
                 ]
                 if not selected:
                     continue
@@ -428,10 +702,9 @@ class StageD1Harness(StageC2AFastSafetyHarness):
             controller = controllers[endpoint_id]
             controller.set_current_frequency(int(context.targets[endpoint_id]))
             key = (
-                "selected_prefill_endpoint_id"
-                if phase == "P" else "selected_decode_endpoint_id"
+                "prefill_endpoint_id" if phase == "P" else "decode_endpoint_id"
             )
-            selected = [row for row in requests if row.get(key) == endpoint_id]
+            selected = [row for row in requests if row[key] == endpoint_id]
             if not selected:
                 self.decision_rows.append({
                     "policy": policy, "block_id": block_id,
@@ -443,24 +716,15 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                     "before_window_index": before_window_index,
                 })
                 continue
-            evidence_metrics = dict(metrics)
-            evidence_metrics.update({
-                "measurement_valid": True,
-                "telemetry_fresh": True,
-                "readback_valid": True,
-            })
-            signature = derived_context_signature(phase, selected, self.settings)
-            evidence = evidence_from_window(
+            signature = d1_context_signature(phase, selected, self.settings)
+            evidence = d1_evidence_from_window(
                 phase,
-                evidence_metrics,
+                metrics,
                 selected,
+                endpoint_id=endpoint_id,
                 observed_frequency_mhz=int(context.targets[endpoint_id]),
-                slo_regime="TIGHT",
-                ttft_slo_ms=600.0,
-                tpot_slo_ms=65.0,
-                context_signature=signature,
+                settings=self.settings,
                 captured_at_s=now,
-                endpoint_ids=(endpoint_id,),
             )
             decision = controller.decide(
                 evidence,
@@ -524,6 +788,80 @@ class StageD1Harness(StageC2AFastSafetyHarness):
             if row.get("logical_request_id") in request_ids
         ]
 
+    def _capture_window_diagnostics(
+        self, requests: Sequence[Mapping[str, Any]],
+    ) -> None:
+        request_ids = {str(row["request_id"]) for row in requests}
+        captured = self._diagnostics(request_ids)
+        if len(captured) != len(request_ids):
+            raise StageC2Error(
+                "D1 routing diagnostics mismatch for completed window: "
+                "%d diagnostics for %d requests" % (len(captured), len(request_ids))
+            )
+        self.routing_diagnostic_rows.extend(captured)
+
+    def _run_preflight_warmup(
+        self,
+        *,
+        actuator: PerEndpointClockActuator,
+        context: ControllerContext,
+        capabilities: Mapping[str, Any],
+        point: Mapping[str, Any],
+        repeat: int,
+        policy: str,
+        block_id: str,
+        windows_root: Path,
+    ) -> None:
+        """Run declared all-HIGH warm-up without feeding controller evidence."""
+        high = {key: value.selected_high_mhz for key, value in capabilities.items()}
+        for warmup_index in range(
+            1, int(self.settings["preflight_warmup_windows"]) + 1
+        ):
+            self._write_routing_state(
+                block_id=block_id,
+                routing_mode="FIXED_RR",
+                context=context,
+                endpoint_controllers=None,
+                generation_suffix="warmup-%02d" % warmup_index,
+            )
+            trace = build_trace(
+                self.experiment,
+                str(point["scenario"]),
+                "d1-warmup-%s-r%02d-w%02d" % (
+                    str(point["id"]).lower(), repeat, warmup_index,
+                ),
+            )
+            window_id = "%s-warmup-%02d" % (block_id, warmup_index)
+            ledger = ClockSegmentLedger(window_id)
+            self.active_ledger = ledger
+            config = self._window_config(high, windows_root)
+            window_dir = D1AccountingWindowHarness(
+                config, window_id, trace, ledger, None,
+                self.settings["frequency_levels_mhz"],
+            ).run()
+            self.active_ledger = None
+            row, raw_requests = self._measure_window(
+                window_dir,
+                block_id=block_id,
+                policy=policy,
+                repeat=repeat,
+                window_index=0,
+                context_id=str(point["id"]),
+                trace_signature=_trace_signature(trace),
+                ledger=ledger,
+            )
+            for raw in raw_requests:
+                raw["load_point"] = point["id"]
+            canonical = normalize_d1_requests(raw_requests)
+            self.evidence_ledger.record(canonical, evidence_eligible=False)
+            self.preflight_warmup_rows.append({
+                **row,
+                "warmup_index": warmup_index,
+                "evidence_eligible": False,
+                "canonical_request_count": len(canonical),
+                "frequency_state": "P0=P1=HIGH,D0=D1=HIGH",
+            })
+
     def _run_experiment(self) -> Path:
         if self.stage == "full":
             self._check_accepted("XPYD_STAGED1_ACCEPTED_PREFLIGHT", "preflight_pass")
@@ -556,6 +894,9 @@ class StageD1Harness(StageC2AFastSafetyHarness):
         ] if self.stage == "preflight" else list(self.settings["load_points"])
         rows: list[dict[str, Any]] = []
         requests_all: list[dict[str, Any]] = []
+        self.routing_diagnostic_rows = []
+        self.preflight_warmup_rows = []
+        self.evidence_ledger = D1EvidenceLedger()
         run_error: Optional[str] = None
         restoration_valid = False
         try:
@@ -597,6 +938,16 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                         )
                         if self.stage == "preflight":
                             assert endpoint_controllers is not None
+                            self._run_preflight_warmup(
+                                actuator=actuator,
+                                context=context,
+                                capabilities=capabilities,
+                                point=point,
+                                repeat=repeat,
+                                policy=policy,
+                                block_id=block_id,
+                                windows_root=windows_root,
+                            )
                             mid = capabilities["P0"].selected_mid_mhz
                             self._actuate_targets(
                                 actuator, context, {"P0": mid},
@@ -613,7 +964,8 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                                 if shared is not None:
                                     self._efficiency_control(
                                         context, capabilities, actuator, previous,
-                                        previous_requests, policy, block_id, window_index,
+                                        canonical_to_c1_evidence_rows(previous_requests),
+                                        policy, block_id, window_index,
                                     )
                                 elif endpoint_controllers is not None:
                                     self._endpoint_efficiency_control(
@@ -687,17 +1039,23 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                             )
                             row["load_point"] = point["id"]
                             row["offered_rate_rps"] = point["offered_rate_rps"]
-                            rows.append(row)
                             for item in request_rows:
                                 item["load_point"] = point["id"]
-                            requests_all.extend(request_rows)
-                            previous, previous_requests = row, request_rows
+                            canonical_requests = normalize_d1_requests(request_rows)
+                            self._capture_window_diagnostics(canonical_requests)
+                            self.evidence_ledger.record(
+                                canonical_requests, evidence_eligible=True
+                            )
+                            rows.append(row)
+                            requests_all.extend(canonical_requests)
+                            previous, previous_requests = row, canonical_requests
                         if previous is not None:
                             self._update_runtime_feedback(previous, previous_requests)
                             if shared is not None:
                                 self._efficiency_control(
                                     context, capabilities, actuator, previous,
-                                    previous_requests, policy, block_id, windows + 1,
+                                    canonical_to_c1_evidence_rows(previous_requests),
+                                    policy, block_id, windows + 1,
                                     allow_exploration=False,
                                 )
                             elif endpoint_controllers is not None:
@@ -714,6 +1072,7 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                                         "endpoint_id": endpoint_id,
                                         "current_frequency_mhz": state.current_frequency,
                                         "final_validated_safe_frequency_mhz": state.known_safe_frequency,
+                                        "candidate_frequency_mhz": state.candidate_frequency,
                                         "unsafe_bound_mhz": state.unsafe_bound,
                                         "best_measured_safe_frequency_mhz": state.best_measured_safe_frequency,
                                         "best_measured_safe_energy_j": state.best_measured_safe_energy_j,
@@ -776,8 +1135,10 @@ class StageD1Harness(StageC2AFastSafetyHarness):
         _write_csv(self.run_dir / "clock_actions.csv", self.action_rows)
         _write_csv(self.run_dir / "clock_segments.csv", self.segment_rows)
         _write_csv(self.run_dir / "endpoint_search_state.csv", self.search_rows)
-        request_ids = {str(row["trace_request_id"]) for row in requests}
-        diagnostics = self._diagnostics(request_ids)
+        _write_csv(
+            self.run_dir / "preflight_warmup.csv", self.preflight_warmup_rows
+        )
+        diagnostics = list(self.routing_diagnostic_rows)
         routing_rows = []
         for item in diagnostics:
             decision = item.get("routing_decision") or {}
@@ -814,25 +1175,80 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                     continue
                 for endpoint_id in ENDPOINTS:
                     selection_key = (
-                        "selected_prefill_endpoint_id"
-                        if endpoint_id.startswith("P")
-                        else "selected_decode_endpoint_id"
+                        "prefill_endpoint_id"
+                        if endpoint_id.startswith("P") else "decode_endpoint_id"
                     )
                     assigned = [
                         row for row in policy_requests
-                        if row.get(selection_key) == endpoint_id
+                        if row[selection_key] == endpoint_id
                     ]
+                    latency_key = (
+                        "ttft_ms" if endpoint_id.startswith("P") else "tpot_ms"
+                    )
+                    latency = [float(row[latency_key]) for row in assigned]
+                    gross_energy = sum(
+                        float(row["%s_energy_j" % endpoint_id])
+                        for row in policy_windows
+                    )
+                    final_state = next((
+                        row for row in reversed(self.search_rows)
+                        if row.get("policy") == policy
+                        and row.get("load_point") == load
+                        and row.get("endpoint_id") == endpoint_id
+                    ), {})
                     endpoint_rows.append({
                         "load_point": load, "policy": policy,
                         "endpoint_id": endpoint_id,
                         "request_count": len(assigned),
-                        "input_tokens": sum(int(row["input_len"]) for row in assigned),
-                        "requested_output_tokens": sum(
-                            int(row["output_len"]) for row in assigned
+                        "class_counts_json": json.dumps({
+                            request_class: sum(
+                                row["request_class"] == request_class
+                                for row in assigned
+                            ) for request_class in ("SS", "SL", "LS", "LL")
+                        }, sort_keys=True),
+                        "input_tokens": sum(
+                            int(row["requested_input_len"]) for row in assigned
                         ),
-                        "gross_energy_j": sum(
-                            float(row["%s_energy_j" % endpoint_id])
-                            for row in policy_windows
+                        "requested_output_tokens": sum(
+                            int(row["requested_output_len"]) for row in assigned
+                        ),
+                        "actual_output_tokens": sum(
+                            int(row["actual_output_len"] or 0) for row in assigned
+                        ),
+                        "latency_metric": (
+                            "TTFT" if endpoint_id.startswith("P") else "TPOT"
+                        ),
+                        "latency_count": len(latency),
+                        "latency_mean_ms": (
+                            statistics.fmean(latency) if latency else None
+                        ),
+                        "latency_p95_ms": (
+                            percentile(latency, 0.95) if latency else None
+                        ),
+                        "gross_energy_j": gross_energy,
+                        "gross_energy_j_per_assigned_request": (
+                            gross_energy / len(assigned) if assigned else None
+                        ),
+                        "current_frequency_mhz": final_state.get(
+                            "current_frequency_mhz"
+                        ),
+                        "validated_safe_frequency_mhz": final_state.get(
+                            "final_validated_safe_frequency_mhz"
+                        ),
+                        "candidate_frequency_mhz": final_state.get(
+                            "candidate_frequency_mhz"
+                        ),
+                        "probe_count": sum(
+                            row.get("policy") == policy
+                            and row.get("endpoint_id") == endpoint_id
+                            and row.get("decision") == "EXPLORE_DOWN"
+                            for row in self.decision_rows
+                        ),
+                        "recovery_count": sum(
+                            row.get("policy") == policy
+                            and row.get("endpoint_id") == endpoint_id
+                            and row.get("action") == "FAST_RECOVER"
+                            for row in self.safety_rows
                         ),
                         "frequency_residency_json": json.dumps(
                             segment_residency(
@@ -849,7 +1265,7 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                 for workload_class in ("SS", "SL", "LS", "LL"):
                     class_requests = [
                         row for row in policy_requests
-                        if row.get("workload_class") == workload_class
+                        if row["request_class"] == workload_class
                     ]
                     for pair in PAIRS:
                         route_class_rows.append({
@@ -858,8 +1274,8 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                             "prefill_endpoint_id": pair[0],
                             "decode_endpoint_id": pair[1],
                             "request_count": sum(
-                                row.get("selected_prefill_endpoint_id") == pair[0]
-                                and row.get("selected_decode_endpoint_id") == pair[1]
+                                row["prefill_endpoint_id"] == pair[0]
+                                and row["decode_endpoint_id"] == pair[1]
                                 for row in class_requests
                             ),
                         })
@@ -940,7 +1356,7 @@ class StageD1Harness(StageC2AFastSafetyHarness):
             for row in routing_rows
         )
         observed_pairs = {
-            (str(row["selected_prefill_endpoint_id"]), str(row["selected_decode_endpoint_id"]))
+            (str(row["prefill_endpoint_id"]), str(row["decode_endpoint_id"]))
             for row in requests
         }
         all_pairs = observed_pairs == set(PAIRS)
@@ -955,10 +1371,53 @@ class StageD1Harness(StageC2AFastSafetyHarness):
         energy_preference = any(
             row["routing_reason"] == "ENERGY_PREFERENCE" for row in routing_rows
         )
+        endpoint_evidence_valid = bool(endpoint_rows) and all(
+            int(row["request_count"]) > 0
+            and int(row["input_tokens"]) > 0
+            and int(row["requested_output_tokens"]) > 0
+            and int(row["latency_count"]) > 0
+            and row["gross_energy_j"] is not None
+            for row in endpoint_rows
+        )
+        final_state_endpoints = {
+            str(row["endpoint_id"]) for row in self.search_rows
+            if row.get("policy") == "JOINT-ROUTING-PER-ENDPOINT"
+        }
+        independent_state_valid = final_state_endpoints == set(ENDPOINTS)
+        search_progress_valid = independent_state_valid and all(
+            int(row.get("windows_observed") or 0) > 0
+            and int(row.get("requests_observed") or 0) > 0
+            for row in self.search_rows
+            if row.get("policy") == "JOINT-ROUTING-PER-ENDPOINT"
+        )
+        warmup_valid = (
+            self.stage != "preflight"
+            or (
+                bool(self.preflight_warmup_rows)
+                and all(
+                    _bool(row["window_hard_gate_valid"])
+                    and not _bool(row["evidence_eligible"])
+                    for row in self.preflight_warmup_rows
+                )
+                and self.evidence_ledger.warmup_request_count == sum(
+                    int(row["canonical_request_count"])
+                    for row in self.preflight_warmup_rows
+                )
+                and len(self.evidence_ledger.control_requests) == len(requests)
+            )
+        )
+        asymmetry_actuated = any(
+            row.get("endpoint_id") == "P0"
+            and row.get("reason") == "stage_d1_preflight_fixed_asymmetry"
+            and int(row.get("observed_freq_after_mhz") or 0) == 1890
+            for row in self.action_rows
+        )
         preflight_pass = (
             self.stage == "preflight" and run_error is None and hard
             and context_valid and all_pairs and restoration_valid
             and energy_safe and energy_preference and pressure_spill
+            and endpoint_evidence_valid and independent_state_valid
+            and search_progress_valid and warmup_valid and asymmetry_actuated
         )
         summaries = []
         for load in {str(row["load_point"]) for row in rows}:
@@ -1000,8 +1459,8 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                     ),
                     "route_distribution_json": json.dumps({
                         "%s->%s" % pair: sum(
-                            row.get("selected_prefill_endpoint_id") == pair[0]
-                            and row.get("selected_decode_endpoint_id") == pair[1]
+                            row["prefill_endpoint_id"] == pair[0]
+                            and row["decode_endpoint_id"] == pair[1]
                             for row in selected_requests
                         ) for pair in PAIRS
                     }, sort_keys=True),
@@ -1030,6 +1489,17 @@ class StageD1Harness(StageC2AFastSafetyHarness):
             "energy_preference_known_safe_only_audit": energy_safe,
             "energy_preference_observed_audit": energy_preference,
             "pressure_spillover_observed_audit": pressure_spill,
+            "endpoint_evidence_populated_audit": endpoint_evidence_valid,
+            "independent_endpoint_search_state_audit": independent_state_valid,
+            "endpoint_safe_search_progress_audit": search_progress_valid,
+            "preflight_all_high_warmup_audit": warmup_valid,
+            "preflight_warmup_request_count": (
+                self.evidence_ledger.warmup_request_count
+            ),
+            "preflight_control_evidence_request_count": len(
+                self.evidence_ledger.control_requests
+            ),
+            "preflight_p0_mid_p1_high_asymmetry_audit": asymmetry_actuated,
             "final_high_restoration_audit": restoration_valid,
             "policies": list(POLICIES),
             "repetitions": repetitions,

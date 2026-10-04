@@ -72,7 +72,10 @@ and segment-based frequency-residency accounting.
 
 ## Fixed-asymmetry preflight
 
-The preflight deliberately sets P0=MID and P1=HIGH, with D0=D1=HIGH. It must
+The preflight first runs one declared startup/warm-up window with all four
+endpoints at HIGH. Warm-up requests are audited separately and are ineligible
+for controller evidence or for declaring MID safe/energy-optimal. The measured
+preflight then deliberately sets P0=MID and P1=HIGH, with D0=D1=HIGH. It must
 verify request-context delivery, use of all four compatible pairs, endpoint
 safety/pressure response, runtime energy preference, pressure spillover,
 per-endpoint accounting, readback validity, and all existing hard gates.
