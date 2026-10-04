@@ -125,6 +125,64 @@ class D1ControlTests(unittest.TestCase):
         self.assertEqual(recovered, [("P0", 2520)])
         self.assertEqual(monitor.event_rows[0]["endpoint_id"], "P0")
 
+    def test_single_outlier_does_not_revoke_validated_point_with_safe_attainment(self):
+        values = controllers()
+        d0 = values["D0"]
+        d0.set_current_frequency(1125)
+        d0.state.known_safe_frequency = 1125
+        d0.state.validated_safe_frequencies.add(1125)
+        d0.state.recent_evidence_frequency = 1125
+        d0.state.recent_valid_request_count = 100
+        d0.state.recent_phase_pass_count = 100
+        d0.state.recent_phase_token_coverage = 12800
+        d0.state.recent_evidence_captured_at_s = 1.0
+        recovered = []
+        monitor = runtime(values, recovered)
+        monitor.process_safety_event({
+            "event": "REQUEST_COMPLETED", "ok": True,
+            "tpot_ms": 65.1, "actual_output_len": 128,
+            "selected_decode_endpoint_id": "D0",
+            "logical_request_id": "isolated", "timestamp_unix_s": 2.0,
+        })
+        self.assertEqual(recovered, [])
+        self.assertTrue(d0.is_frequency_validated_safe(1125))
+        self.assertEqual(
+            monitor.event_rows[0]["action"], "LOG_ONLY_NO_ACTIVE_CANDIDATE"
+        )
+
+    def test_sufficient_recent_evidence_revokes_validated_point_and_recovers(self):
+        values = controllers()
+        d0 = values["D0"]
+        d0.set_current_frequency(1125)
+        d0.state.known_safe_frequency = 1125
+        d0.state.validated_safe_frequencies.add(1125)
+        d0.state.safe_energy_by_frequency_j[1125] = 42.0
+        d0.state.safe_energy_observations_by_frequency[1125] = 1
+        d0.state.recent_evidence_frequency = 1125
+        d0.state.recent_valid_request_count = 10
+        d0.state.recent_phase_pass_count = 10
+        d0.state.recent_phase_token_coverage = 1280
+        d0.state.recent_evidence_captured_at_s = 1.0
+        recovered = []
+        monitor = runtime(values, recovered)
+        monitor.process_safety_event({
+            "event": "REQUEST_COMPLETED", "ok": True,
+            "tpot_ms": 65.1, "actual_output_len": 128,
+            "selected_decode_endpoint_id": "D0",
+            "logical_request_id": "sufficient", "timestamp_unix_s": 2.0,
+        })
+        self.assertEqual(recovered, [("D0", 1500)])
+        self.assertFalse(d0.is_frequency_validated_safe(1125))
+        self.assertEqual(d0.state.known_safe_frequency, 1500)
+        self.assertNotIn(1125, d0.state.safe_energy_by_frequency_j)
+        self.assertEqual(
+            d0.state.revoked_safe_energy_history[-1]["energy_j"], 42.0
+        )
+        self.assertEqual(
+            monitor.event_rows[-1]["trigger"],
+            "ENDPOINT_EVIDENCE_SLO_RISK",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

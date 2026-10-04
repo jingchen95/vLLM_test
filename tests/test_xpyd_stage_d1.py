@@ -12,8 +12,10 @@ from xpyd.stage_d1 import (
     ENDPOINTS,
     POLICIES,
     StageD1Harness,
+    d1_preflight_acceptance,
     d1_context_signature,
     endpoint_evidence_summary,
+    final_d1_safety_state_consistent,
     load_configs,
     normalize_d1_request,
     policy_order,
@@ -184,8 +186,10 @@ class StageD1ContractTests(unittest.TestCase):
     def test_class_reaches_pair_feedback_and_energy_stays_endpoint_local(self):
         harness = StageD1Harness.__new__(StageD1Harness)
         harness.endpoint_energy = {item: None for item in ENDPOINTS}
+        harness.endpoint_energy_frequency = {item: None for item in ENDPOINTS}
         harness.endpoint_latency = {item: None for item in ENDPOINTS}
         harness.pair_feedback = {}
+        harness.pair_feedback_frequencies = {}
         harness.latest_endpoint_evidence = {}
         request = normalize_d1_request(self.normalized_row())
         harness._update_runtime_feedback({
@@ -198,6 +202,26 @@ class StageD1ContractTests(unittest.TestCase):
         self.assertEqual(
             harness.pair_feedback["LL"]["P0->D1"]["observations"], 1
         )
+
+    def test_mixed_frequency_window_energy_is_not_routing_eligible(self):
+        harness = StageD1Harness.__new__(StageD1Harness)
+        harness.endpoint_energy = {item: None for item in ENDPOINTS}
+        harness.endpoint_energy_frequency = {item: None for item in ENDPOINTS}
+        harness.endpoint_latency = {item: None for item in ENDPOINTS}
+        harness.pair_feedback = {}
+        harness.pair_feedback_frequencies = {}
+        harness.latest_endpoint_evidence = {}
+        request = normalize_d1_request(self.normalized_row())
+        harness._update_runtime_feedback({
+            "P0_energy_j": 100, "P1_energy_j": 200,
+            "D0_energy_j": 300, "D1_energy_j": 400,
+            "D_mid_window_transition": True,
+            "P_mid_window_transition": False,
+        }, [request], {"P0": 2520, "P1": 2520, "D0": 1500, "D1": 1500})
+        self.assertEqual(harness.endpoint_energy["P0"], 100)
+        self.assertIsNone(harness.endpoint_energy["D1"])
+        self.assertIsNone(harness.endpoint_energy_frequency["D1"])
+        self.assertEqual(harness.pair_feedback_frequencies, {})
 
     def test_requested_output_budget_drives_context_not_actual_output(self):
         request = normalize_d1_request(self.normalized_row(
@@ -280,6 +304,58 @@ class StageD1ContractTests(unittest.TestCase):
                 (Path(temporary) / "stage_d1_summary.json").read_text()
             )
             self.assertTrue(summary["request_context_before_routing_audit"])
+
+    @staticmethod
+    def final_search_rows(*, contradictory=False):
+        rows = []
+        frequencies = {"P0": 2520, "P1": 2520, "D0": 1500, "D1": 1500}
+        for endpoint_id, frequency in frequencies.items():
+            rows.append({
+                "endpoint_id": endpoint_id,
+                "current_frequency_mhz": frequency,
+                "final_validated_safe_frequency_mhz": frequency,
+                "candidate_frequency_mhz": None,
+                "unsafe_bound_mhz": (
+                    frequency if contradictory and endpoint_id == "D0" else None
+                ),
+                "validated_safe_frequencies_json": json.dumps([frequency]),
+                "revoked_frequencies_json": json.dumps(
+                    [frequency] if contradictory and endpoint_id == "D0" else []
+                ),
+            })
+        return rows
+
+    def test_preflight_acceptance_fails_below_either_slo_attainment(self):
+        common = {
+            "stage": "preflight", "run_error": None,
+            "structural_hard_gates": True, "routing_evidence_gates": True,
+            "final_safety_state_consistent": True,
+            "restoration_valid": True,
+        }
+        self.assertFalse(d1_preflight_acceptance(
+            **common, ttft_attainment=0.94, tpot_attainment=1.0,
+        ))
+        self.assertFalse(d1_preflight_acceptance(
+            **common, ttft_attainment=1.0, tpot_attainment=0.94,
+        ))
+        self.assertTrue(d1_preflight_acceptance(
+            **common, ttft_attainment=0.95, tpot_attainment=0.95,
+        ))
+
+    def test_preflight_acceptance_rejects_contradictory_final_safety_state(self):
+        self.assertTrue(final_d1_safety_state_consistent(
+            self.final_search_rows()
+        ))
+        self.assertFalse(final_d1_safety_state_consistent(
+            self.final_search_rows(contradictory=True)
+        ))
+        self.assertFalse(d1_preflight_acceptance(
+            stage="preflight", run_error=None,
+            structural_hard_gates=True, routing_evidence_gates=True,
+            ttft_attainment=1.0, tpot_attainment=1.0,
+            final_safety_state_consistent=False,
+            restoration_valid=True,
+        ))
 
 
 if __name__ == "__main__":

@@ -301,6 +301,55 @@ class AdaptiveExplorationTests(unittest.TestCase):
         )
         self.assertEqual(controller.state.last_action_timestamp_s, 11.5)
 
+    def test_previously_safe_mid_is_revoked_by_later_sufficient_unsafe_evidence(self):
+        controller = self.one_step_controller()
+        probe = controller.decide(
+            self.evidence(controller, latency=500, energy=100), now_s=1.0
+        )
+        self.apply(controller, probe)
+        accepted = controller.decide(
+            self.evidence(controller, frequency=200, latency=570, energy=80),
+            now_s=2.0, allow_exploration=False,
+        )
+        self.assertEqual(accepted.decision, "ACCEPT_SAFE")
+        self.assertTrue(controller.is_frequency_validated_safe(200))
+        unsafe = controller.decide(
+            self.evidence(
+                controller, frequency=200, latency=66, passed=7,
+                count=11, energy=81,
+            ),
+            now_s=3.0,
+            allow_exploration=False,
+        )
+        self.assertEqual(
+            (unsafe.decision, unsafe.action, unsafe.requested_frequency_mhz),
+            ("RECOVER", "RECOVER_HIGH", 300),
+        )
+        self.assertFalse(controller.is_frequency_validated_safe(200))
+        self.assertEqual(controller.state.known_safe_frequency, 300)
+        self.assertEqual(controller.state.unsafe_bound, 200)
+        self.assertNotEqual(
+            controller.state.known_safe_frequency,
+            controller.state.unsafe_bound,
+        )
+        self.assertNotIn(200, controller.state.safe_energy_by_frequency_j)
+        self.assertEqual(
+            controller.state.revoked_safe_energy_history[-1]["frequency_mhz"],
+            200,
+        )
+        controller.assert_safety_invariants()
+
+    def test_revocation_falls_back_to_high_without_another_higher_anchor(self):
+        controller = self.one_step_controller()
+        controller.set_current_frequency(200)
+        controller.state.known_safe_frequency = 200
+        controller.state.last_validated_safe_index = 1
+        controller.state.validated_safe_frequencies = {200}
+        target = controller.revoke_current_frequency("SLO_RISK", 3.0)
+        self.assertEqual(target, 300)
+        self.assertTrue(controller.is_frequency_validated_safe(300))
+        self.assertFalse(controller.is_frequency_validated_safe(200))
+
 
 if __name__ == "__main__":
     unittest.main()

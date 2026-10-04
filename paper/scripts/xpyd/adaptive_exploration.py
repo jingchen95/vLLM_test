@@ -187,6 +187,15 @@ class PoolSearchState:
     unsafe_index: Optional[int] = None
     safe_energy_by_frequency_j: dict[int, float] = field(default_factory=dict)
     safe_energy_observations_by_frequency: dict[int, int] = field(default_factory=dict)
+    validated_safe_frequencies: set[int] = field(default_factory=set)
+    revoked_frequencies: set[int] = field(default_factory=set)
+    revoked_safe_energy_history: list[dict[str, Any]] = field(default_factory=list)
+    recent_evidence_frequency: Optional[int] = None
+    recent_valid_request_count: int = 0
+    recent_phase_pass_count: int = 0
+    recent_phase_token_coverage: int = 0
+    recent_evidence_context_signature: str = ""
+    recent_evidence_captured_at_s: float = 0.0
     best_measured_safe_frequency: Optional[int] = None
     best_measured_safe_energy_j: Optional[float] = None
     search_phase: str = SearchPhase.COLD.value
@@ -304,6 +313,7 @@ class AdaptivePoolController:
             known_safe_frequency=high,
             current_index=high_index,
             last_validated_safe_index=high_index,
+            validated_safe_frequencies={high},
         )
 
     @property
@@ -412,6 +422,158 @@ class AdaptivePoolController:
         self.state.best_measured_safe_frequency = best_frequency
         self.state.best_measured_safe_energy_j = best_energy
 
+    def _recompute_best_safe_energy(self) -> None:
+        eligible = {
+            int(frequency): float(energy)
+            for frequency, energy in self.state.safe_energy_by_frequency_j.items()
+            if int(frequency) in self.state.validated_safe_frequencies
+            and int(frequency) not in self.state.revoked_frequencies
+        }
+        self.state.safe_energy_by_frequency_j = eligible
+        self.state.safe_energy_observations_by_frequency = {
+            int(frequency): int(count)
+            for frequency, count in (
+                self.state.safe_energy_observations_by_frequency.items()
+            )
+            if int(frequency) in eligible
+        }
+        if not eligible:
+            self.state.best_measured_safe_frequency = None
+            self.state.best_measured_safe_energy_j = None
+            return
+        best_frequency, best_energy = min(
+            eligible.items(), key=lambda item: (item[1], item[0])
+        )
+        self.state.best_measured_safe_frequency = best_frequency
+        self.state.best_measured_safe_energy_j = best_energy
+
+    def _remember_safe_evidence(self, evidence: PoolEvidence) -> None:
+        self.state.recent_evidence_frequency = int(
+            evidence.observed_frequency_mhz
+        )
+        self.state.recent_valid_request_count = int(evidence.valid_request_count)
+        self.state.recent_phase_pass_count = int(evidence.phase_pass_count)
+        self.state.recent_phase_token_coverage = int(
+            evidence.phase_token_coverage
+        )
+        self.state.recent_evidence_context_signature = str(
+            evidence.context_signature
+        )
+        self.state.recent_evidence_captured_at_s = float(evidence.captured_at_s)
+
+    def _clear_recent_evidence(self) -> None:
+        self.state.recent_evidence_frequency = None
+        self.state.recent_valid_request_count = 0
+        self.state.recent_phase_pass_count = 0
+        self.state.recent_phase_token_coverage = 0
+        self.state.recent_evidence_context_signature = ""
+        self.state.recent_evidence_captured_at_s = 0.0
+
+    def is_frequency_validated_safe(self, frequency_mhz: int) -> bool:
+        frequency = int(frequency_mhz)
+        return (
+            frequency in self.state.validated_safe_frequencies
+            and frequency not in self.state.revoked_frequencies
+        )
+
+    def assert_safety_invariants(self) -> None:
+        overlap = (
+            self.state.validated_safe_frequencies
+            & self.state.revoked_frequencies
+        )
+        if overlap:
+            raise RuntimeError(
+                "frequency cannot be both validated-safe and revoked: %s"
+                % sorted(overlap)
+            )
+        if (
+            self.state.unsafe_bound is not None
+            and int(self.state.unsafe_bound)
+            in self.state.validated_safe_frequencies
+        ):
+            raise RuntimeError(
+                "unsafe bound cannot remain in the validated-safe set"
+            )
+        if (
+            self.state.unsafe_bound is not None
+            and int(self.state.known_safe_frequency)
+            == int(self.state.unsafe_bound)
+        ):
+            raise RuntimeError(
+                "validated-safe frequency cannot equal unsafe bound"
+            )
+        if int(self.state.known_safe_frequency) not in (
+            self.state.validated_safe_frequencies
+        ):
+            raise RuntimeError(
+                "known-safe frequency is absent from validated-safe set"
+            )
+
+    def revoke_current_frequency(
+        self, reason: str, event_timestamp_s: float,
+    ) -> int:
+        """Revoke current lower point and select a strictly higher safe anchor."""
+        state = self.state
+        current = int(state.current_frequency)
+        high = int(self.frequencies_mhz[-1])
+        if current >= high:
+            raise RuntimeError(
+                "no strictly higher recovery frequency exists above HIGH"
+            )
+        prior_energy = state.safe_energy_by_frequency_j.pop(current, None)
+        prior_observations = state.safe_energy_observations_by_frequency.pop(
+            current, None
+        )
+        if prior_energy is not None or prior_observations is not None:
+            state.revoked_safe_energy_history.append({
+                "frequency_mhz": current,
+                "energy_j": prior_energy,
+                "observations": prior_observations,
+                "context_signature": state.context_signature,
+                "revocation_reason": str(reason),
+                "revoked_at_s": float(event_timestamp_s),
+            })
+        state.validated_safe_frequencies.discard(current)
+        state.revoked_frequencies.add(current)
+        # Backward-compatible state may predate the explicit set; import only
+        # strictly higher, non-revoked anchors already represented as safe.
+        for frequency in state.safe_energy_by_frequency_j:
+            if int(frequency) > current:
+                state.validated_safe_frequencies.add(int(frequency))
+        if (
+            int(state.known_safe_frequency) > current
+            and int(state.known_safe_frequency) not in state.revoked_frequencies
+        ):
+            state.validated_safe_frequencies.add(int(state.known_safe_frequency))
+        higher = sorted(
+            frequency for frequency in state.validated_safe_frequencies
+            if int(frequency) > current
+        )
+        target = int(higher[0]) if higher else high
+        # HIGH is the conservative cold-start/fail-closed anchor when no
+        # measured higher lower-frequency point remains.
+        state.validated_safe_frequencies.add(target)
+        state.unsafe_index = self.frequencies_mhz.index(current)
+        state.unsafe_bound = current
+        state.known_safe_frequency = target
+        state.last_validated_safe_index = self.frequencies_mhz.index(target)
+        state.candidate_frequency = None
+        state.search_phase = SearchPhase.RECOVER.value
+        state.search_status = SearchPhase.RECOVER.value
+        state.transition_reason = str(reason)
+        state.last_action_reason = (
+            "revoke unsafe point and recover to strictly higher safe anchor"
+        )
+        self._clear_recent_evidence()
+        state.converged = state.last_validated_safe_index == state.unsafe_index + 1
+        if state.converged:
+            state.convergence_reason = (
+                "safe/unsafe boundary resolved after safe-point revocation"
+            )
+        self._recompute_best_safe_energy()
+        self.assert_safety_invariants()
+        return target
+
     def _mark_converged(self, reason: str) -> None:
         if self.state.converged:
             return
@@ -421,11 +583,14 @@ class AdaptivePoolController:
         self.state.convergence_request_count = self.state.requests_observed
 
     def _best_safe_target(self) -> int:
-        return (
-            int(self.state.best_measured_safe_frequency)
-            if self.state.best_measured_safe_frequency is not None
-            else int(self.state.known_safe_frequency)
-        )
+        if (
+            self.state.best_measured_safe_frequency is not None
+            and self.is_frequency_validated_safe(
+                self.state.best_measured_safe_frequency
+            )
+        ):
+            return int(self.state.best_measured_safe_frequency)
+        return int(self.state.known_safe_frequency)
 
     def _make_decision(
         self, evidence: PoolEvidence, now_s: float, *, decision: str, action: str,
@@ -505,8 +670,11 @@ class AdaptivePoolController:
             self.state.confidence = 0.0
             self.state.safe_energy_by_frequency_j.clear()
             self.state.safe_energy_observations_by_frequency.clear()
+            self.state.validated_safe_frequencies = {high}
+            self.state.revoked_frequencies.clear()
             self.state.best_measured_safe_frequency = None
             self.state.best_measured_safe_energy_j = None
+            self._clear_recent_evidence()
             self.state.converged = False
             self.state.convergence_reason = None
             self.state.convergence_window_count = None
@@ -564,32 +732,33 @@ class AdaptivePoolController:
 
         # A measured lower candidate becomes a known-safe anchor only here.
         if classification == EvidenceClass.UNSAFE:
-            self.state.unsafe_index = self.state.current_index
-            self.state.unsafe_bound = self.state.current_frequency
-            safe_index = self.state.last_validated_safe_index
-            target = self.frequencies_mhz[safe_index]
-            self.state.search_phase = SearchPhase.REFINE.value if self.state.unsafe_index + 1 < safe_index else SearchPhase.HOLD.value
-            self.state.search_status = self.state.search_phase
-            self.state.transition_reason = "SLO_RISK"
-            if self.state.unsafe_index + 1 >= safe_index:
-                self._mark_converged("safe/unsafe boundary resolved by unsafe probe")
+            current = int(self.state.current_frequency)
+            target = self.revoke_current_frequency("SLO_RISK", now)
             action = (
                 "RECOVER_HIGH"
-                if target == self.frequencies_mhz[-1] and target != self.state.current_frequency
-                else ("STEP_UP" if target != self.state.current_frequency else "HOLD")
+                if target == self.frequencies_mhz[-1]
+                else "STEP_UP"
             )
             decision = self._make_decision(
-                evidence, now, decision="RECOVER" if action != "HOLD" else "HOLD",
+                evidence, now, decision="RECOVER",
                 action=action, trigger="SLO_RISK", reason=reason, target=target,
                 classification=classification,
             )
-            self.state.candidate_frequency = None
+            if target <= current:
+                raise RuntimeError("unsafe lower frequency did not recover upward")
             return decision
 
         # SAFE evidence: retain the current point and update energy evidence.
         if classification == EvidenceClass.SAFE:
+            if self.state.current_frequency in self.state.revoked_frequencies:
+                raise RuntimeError(
+                    "revoked frequency cannot be revalidated without context reset"
+                )
             self.state.known_safe_frequency = self.state.current_frequency
             self.state.last_validated_safe_index = self.state.current_index
+            self.state.validated_safe_frequencies.add(
+                int(self.state.current_frequency)
+            )
             self.state.candidate_frequency = None
             self.state.search_phase = SearchPhase.EXPAND.value
             self.state.search_status = SearchPhase.EXPAND.value
@@ -597,6 +766,8 @@ class AdaptivePoolController:
             self.state.context_signature = evidence.context_signature
             self.state.confidence = min(1.0, self.state.confidence + 0.25)
             self._record_safe_energy(self.state.current_frequency, evidence.gross_energy_j)
+            self._remember_safe_evidence(evidence)
+            self.assert_safety_invariants()
             if self.state.converged:
                 target = self._best_safe_target()
                 action = "HOLD"

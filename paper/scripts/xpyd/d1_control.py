@@ -74,6 +74,32 @@ class EndpointFastSafetyRuntime(FastSafetyRuntime):
             window_index=window_index, enabled=enabled,
         )
         self.controllers = dict(controllers)
+        self.endpoint_evidence: dict[str, dict[str, Any]] = {}
+        for endpoint_id, controller in self.controllers.items():
+            state = controller.state
+            seeded = (
+                controller.is_frequency_validated_safe(
+                    controller.current_frequency_mhz
+                )
+                and state.recent_evidence_frequency
+                == controller.current_frequency_mhz
+            )
+            self.endpoint_evidence[endpoint_id] = {
+                "valid_request_count": (
+                    int(state.recent_valid_request_count) if seeded else 0
+                ),
+                "phase_pass_count": (
+                    int(state.recent_phase_pass_count) if seeded else 0
+                ),
+                "phase_token_coverage": (
+                    int(state.recent_phase_token_coverage) if seeded else 0
+                ),
+                "first_timestamp_s": (
+                    float(state.recent_evidence_captured_at_s)
+                    if seeded and state.recent_evidence_captured_at_s > 0
+                    else None
+                ),
+            }
 
     def _log_endpoint(
         self,
@@ -101,6 +127,16 @@ class EndpointFastSafetyRuntime(FastSafetyRuntime):
                 "HARD_TTFT_VIOLATION", "HARD_TPOT_VIOLATION"
             },
             "fast_path_enabled": self.enabled,
+            "evidence_valid_request_count": event.get(
+                "evidence_valid_request_count"
+            ),
+            "evidence_phase_pass_count": event.get(
+                "evidence_phase_pass_count"
+            ),
+            "evidence_attainment": event.get("evidence_attainment"),
+            "evidence_phase_token_coverage": event.get(
+                "evidence_phase_token_coverage"
+            ),
         }
         if self.enabled and candidate_required and not active_candidate(controller):
             recommendation = {
@@ -127,6 +163,78 @@ class EndpointFastSafetyRuntime(FastSafetyRuntime):
             row.update(self.recover(endpoint_id, recommendation))
         self.event_rows.append(row)
 
+    def _update_validated_endpoint_evidence(
+        self, endpoint_id: str, event: Mapping[str, Any],
+    ) -> None:
+        controller = self.controllers[endpoint_id]
+        if not self.enabled or active_candidate(controller):
+            return
+        current = controller.current_frequency_mhz
+        if current >= controller.frequencies_mhz[-1]:
+            return
+        if not controller.is_frequency_validated_safe(current):
+            return
+        phase = ENDPOINT_PHASE[endpoint_id]
+        latency_key = "ttft_ms" if phase == "P" else "tpot_ms"
+        if not _finite(event.get(latency_key)):
+            return
+        if phase == "D" and event.get("ok") is not True:
+            return
+        token_key = "input_len" if phase == "P" else "actual_output_len"
+        raw_tokens = event.get(token_key)
+        if raw_tokens is None and phase == "D":
+            # Older CPU fixtures may not carry actual output; never substitute
+            # realized work with requested budget for safety eligibility.
+            return
+        try:
+            tokens = int(raw_tokens)
+        except (TypeError, ValueError):
+            return
+        if tokens <= 0:
+            return
+        evidence = self.endpoint_evidence[endpoint_id]
+        timestamp = float(event.get("timestamp_unix_s") or time.time())
+        if evidence["first_timestamp_s"] is None:
+            evidence["first_timestamp_s"] = timestamp
+        evidence["valid_request_count"] += 1
+        evidence["phase_token_coverage"] += tokens
+        slo = (
+            float(controller.config.ttft_slo_ms)
+            if phase == "P" else float(controller.config.tpot_slo_ms)
+        )
+        if float(event[latency_key]) <= slo:
+            evidence["phase_pass_count"] += 1
+        count = int(evidence["valid_request_count"])
+        attainment = float(evidence["phase_pass_count"]) / count
+        duration = max(
+            0.0, timestamp - float(evidence["first_timestamp_s"])
+        )
+        enough = (
+            count >= int(controller.config.min_valid_requests)
+            and int(evidence["phase_token_coverage"]) >= int(
+                controller.config.min_input_tokens
+                if phase == "P" else controller.config.min_output_tokens
+            )
+            and (
+                duration >= float(controller.config.min_observation_duration_s)
+                or controller.state.recent_valid_request_count > 0
+            )
+        )
+        if not enough or attainment >= float(controller.config.attainment_gate):
+            return
+        enriched = dict(event)
+        enriched.update({
+            "evidence_valid_request_count": count,
+            "evidence_phase_pass_count": int(evidence["phase_pass_count"]),
+            "evidence_attainment": attainment,
+            "evidence_phase_token_coverage": int(
+                evidence["phase_token_coverage"]
+            ),
+        })
+        self._log_endpoint(
+            endpoint_id, "ENDPOINT_EVIDENCE_SLO_RISK", enriched
+        )
+
     def process_safety_event(self, event: Mapping[str, Any]) -> None:
         if self.measurement_started_monotonic_s is None:
             self.measurement_started_monotonic_s = time.monotonic()
@@ -134,18 +242,30 @@ class EndpointFastSafetyRuntime(FastSafetyRuntime):
             if float(event["ttft_ms"]) > float(self.settings["slo"]["ttft_ms"]):
                 endpoint = str(event.get("selected_prefill_endpoint_id") or "")
                 if endpoint in PHASE_ENDPOINTS["P"]:
+                    candidate = active_candidate(self.controllers[endpoint])
                     self._log_endpoint(
                         endpoint, "HARD_TTFT_VIOLATION", event,
                         candidate_required=True,
                     )
+                    if candidate:
+                        return
+            endpoint = str(event.get("selected_prefill_endpoint_id") or "")
+            if endpoint in PHASE_ENDPOINTS["P"]:
+                self._update_validated_endpoint_evidence(endpoint, event)
         if event.get("event") == "REQUEST_COMPLETED" and _finite(event.get("tpot_ms")):
             if float(event["tpot_ms"]) > float(self.settings["slo"]["tpot_ms"]):
                 endpoint = str(event.get("selected_decode_endpoint_id") or "")
                 if endpoint in PHASE_ENDPOINTS["D"]:
+                    candidate = active_candidate(self.controllers[endpoint])
                     self._log_endpoint(
                         endpoint, "HARD_TPOT_VIOLATION", event,
                         candidate_required=True,
                     )
+                    if candidate:
+                        return
+            endpoint = str(event.get("selected_decode_endpoint_id") or "")
+            if endpoint in PHASE_ENDPOINTS["D"]:
+                self._update_validated_endpoint_evidence(endpoint, event)
 
     def process_load_event(self, event: Mapping[str, Any]) -> None:
         if self.measurement_started_monotonic_s is None:

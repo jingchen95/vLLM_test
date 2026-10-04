@@ -575,6 +575,7 @@ async def replay_trace(
                         "segment": req.segment,
                         "input_len": req.input_len,
                         "requested_output_len": req.output_len,
+                        "actual_output_len": result.get("completion_tokens"),
                         "selected_prefill_endpoint_id": result.get("selected_prefill_endpoint_id"),
                         "selected_decode_endpoint_id": result.get("selected_decode_endpoint_id"),
                     })

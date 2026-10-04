@@ -105,3 +105,24 @@ fixed SLO and a non-contradictory final search state. No full D1 job was
 launched.
 
 Final acceptance token: **WITHHELD**.
+
+## Safety-state correction prepared after job 271610
+
+The follow-up patch keeps the frozen SLO, thresholds, routing hierarchy,
+workload, and frequency action space unchanged. It makes validated safety
+explicitly revocable per context:
+
+- sufficient endpoint-local evidence below 95% revokes the active lower
+  frequency and immediately recovers to a strictly higher validated anchor;
+- one isolated hard-latency outlier remains logged but does not permanently
+  revoke a validated point while recent attainment remains at least 95%;
+- revoked safe-energy samples remain in historical state but are removed from
+  current routing eligibility;
+- a mixed-frequency recovery window cannot be relabeled as single-frequency
+  energy/latency evidence;
+- the final routing snapshot drops stale class/energy evidence after recovery;
+- acceptance now requires both overall TTFT/TPOT attainment of at least 95%
+  and a consistent final validated-safe/revoked/unsafe state.
+
+Complete CPU validation after this correction: **326 tests passed**. A new
+corrected D1 preflight is required; full D1 remains prohibited.

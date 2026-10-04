@@ -124,6 +124,20 @@ class D1RoutingTests(unittest.TestCase):
         with self.assertRaisesRegex(D1RoutingError, "no known-safe pair"):
             self.router(value, cold_start_requests=0).choose(context())
 
+    def test_revoked_endpoint_energy_is_not_routing_eligible(self):
+        value = state()
+        value["endpoints"]["P0"] = endpoint(
+            status="UNSAFE", energy=0.01
+        )
+        value["endpoints"]["P0"]["revoked_frequencies_mhz"] = [1500]
+        decision = self.router(value, cold_start_requests=0).choose(context())
+        self.assertEqual(decision.pair[0], "P1")
+        self.assertTrue(all(
+            not item["known_safe"]
+            for item in decision.candidate_states
+            if item["pair"][0] == "P0"
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()

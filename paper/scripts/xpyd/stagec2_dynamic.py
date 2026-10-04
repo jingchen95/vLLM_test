@@ -324,37 +324,7 @@ def fast_recovery_recommendation(
     high = int(controller.frequencies_mhz[-1])
     if current >= high:
         return {"action": "HOLD_HIGH", "target_mhz": high, "prior_mhz": current, "trigger": trigger}
-    safe_above = sorted(
-        frequency for frequency in state.safe_energy_by_frequency_j
-        if int(frequency) > current
-    )
-    if int(state.known_safe_frequency) > current:
-        safe_above.append(int(state.known_safe_frequency))
-    target = min(safe_above) if safe_above else high
-    current_index = controller.frequencies_mhz.index(current)
-    target_index = controller.frequencies_mhz.index(target)
-    state.safe_energy_by_frequency_j.pop(current, None)
-    state.safe_energy_observations_by_frequency.pop(current, None)
-    state.unsafe_index = current_index
-    state.unsafe_bound = current
-    state.known_safe_frequency = target
-    state.last_validated_safe_index = target_index
-    state.candidate_frequency = None
-    state.search_phase = "RECOVER"
-    state.search_status = "RECOVER"
-    state.transition_reason = trigger
-    state.last_action_reason = "event-driven recovery to previous validated-safe anchor"
-    state.converged = target_index == current_index + 1
-    if state.converged:
-        state.convergence_reason = "fast safety resolved adjacent safe/unsafe boundary"
-    remaining = state.safe_energy_by_frequency_j
-    if remaining:
-        best, energy = min(remaining.items(), key=lambda item: (item[1], item[0]))
-        state.best_measured_safe_frequency = int(best)
-        state.best_measured_safe_energy_j = float(energy)
-    else:
-        state.best_measured_safe_frequency = None
-        state.best_measured_safe_energy_j = None
+    target = controller.revoke_current_frequency(trigger, event_timestamp_s)
     return {
         "action": "FAST_RECOVER",
         "target_mhz": target,

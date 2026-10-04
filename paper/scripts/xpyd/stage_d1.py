@@ -329,6 +329,76 @@ class D1EvidenceLedger:
             self.warmup_request_count += len(requests)
 
 
+def _optional_int(value: Any) -> Optional[int]:
+    if value is None or str(value).strip() == "":
+        return None
+    return int(value)
+
+
+def final_d1_safety_state_consistent(
+    search_rows: Sequence[Mapping[str, Any]],
+) -> bool:
+    """Fail closed unless every endpoint ends at a non-contradictory safe point."""
+    latest: dict[str, Mapping[str, Any]] = {}
+    for row in search_rows:
+        endpoint_id = str(row.get("endpoint_id") or "")
+        if endpoint_id in ENDPOINTS:
+            latest[endpoint_id] = row
+    if set(latest) != set(ENDPOINTS):
+        return False
+    for endpoint_id in ENDPOINTS:
+        row = latest[endpoint_id]
+        current = _optional_int(row.get("current_frequency_mhz"))
+        validated = _optional_int(row.get("final_validated_safe_frequency_mhz"))
+        unsafe = _optional_int(row.get("unsafe_bound_mhz"))
+        candidate = _optional_int(row.get("candidate_frequency_mhz"))
+        try:
+            safe = {
+                int(value) for value in json.loads(
+                    str(row.get("validated_safe_frequencies_json") or "[]")
+                )
+            }
+            revoked = {
+                int(value) for value in json.loads(
+                    str(row.get("revoked_frequencies_json") or "[]")
+                )
+            }
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        if current is None or validated is None or current != validated:
+            return False
+        if candidate is not None or validated not in safe:
+            return False
+        if safe & revoked:
+            return False
+        if unsafe is not None and (unsafe == validated or unsafe in safe):
+            return False
+    return True
+
+
+def d1_preflight_acceptance(
+    *,
+    stage: str,
+    run_error: Optional[str],
+    structural_hard_gates: bool,
+    routing_evidence_gates: bool,
+    ttft_attainment: float,
+    tpot_attainment: float,
+    final_safety_state_consistent: bool,
+    restoration_valid: bool,
+) -> bool:
+    return bool(
+        stage == "preflight"
+        and run_error is None
+        and structural_hard_gates
+        and routing_evidence_gates
+        and float(ttft_attainment) >= 0.95
+        and float(tpot_attainment) >= 0.95
+        and final_safety_state_consistent
+        and restoration_valid
+    )
+
+
 def policy_order(repeat: int, load_index: int) -> tuple[str, ...]:
     offset = (int(repeat) - 1 + int(load_index) * 3) % len(POLICIES)
     return POLICIES[offset:] + POLICIES[:offset]
@@ -449,12 +519,17 @@ class StageD1Harness(StageC2AFastSafetyHarness):
         self.run_dir = Path(os.path.expandvars(str(wrapped["output_root"]))) / self.run_id
         self.routing_control_file = Path(str(runtime["routing_control_file"]))
         self.endpoint_energy: dict[str, Optional[float]] = {item: None for item in ENDPOINTS}
+        self.endpoint_energy_frequency: dict[str, Optional[int]] = {
+            item: None for item in ENDPOINTS
+        }
         self.endpoint_latency: dict[str, Optional[float]] = {item: None for item in ENDPOINTS}
         self.pair_feedback: dict[str, dict[str, dict[str, Any]]] = {}
+        self.pair_feedback_frequencies: dict[str, int] = {}
         self.routing_diagnostic_rows: list[dict[str, Any]] = []
         self.preflight_warmup_rows: list[dict[str, Any]] = []
         self.evidence_ledger = D1EvidenceLedger()
         self.latest_endpoint_evidence: dict[str, dict[str, Any]] = {}
+        self.last_routing_state: dict[str, Any] = {}
 
     def _controllers_endpoint(self) -> dict[str, AdaptivePoolController]:
         config = AdaptiveExplorationConfig.from_mapping(
@@ -489,7 +564,7 @@ class StageD1Harness(StageC2AFastSafetyHarness):
             and int(controller.state.unsafe_bound) == int(targets[endpoint_id])
         ):
             return "UNSAFE"
-        if int(controller.state.known_safe_frequency) == int(targets[endpoint_id]):
+        if controller.is_frequency_validated_safe(int(targets[endpoint_id])):
             return "VALIDATED_SAFE"
         return "UNKNOWN"
 
@@ -505,24 +580,57 @@ class StageD1Harness(StageC2AFastSafetyHarness):
         endpoints = {}
         for endpoint_id in ENDPOINTS:
             controller = endpoint_controllers.get(endpoint_id) if endpoint_controllers else None
+            status = self._endpoint_status(
+                endpoint_id, context.targets, endpoint_controllers
+            )
+            evidence_matches_frequency = (
+                self.endpoint_energy_frequency[endpoint_id]
+                == int(context.targets[endpoint_id])
+            )
             endpoints[endpoint_id] = {
                 "healthy": True,
                 "telemetry_fresh": True,
-                "safety_status": self._endpoint_status(
-                    endpoint_id, context.targets, endpoint_controllers
-                ),
+                "safety_status": status,
                 "requested_frequency_mhz": int(context.targets[endpoint_id]),
                 "observed_frequency_mhz": int(context.targets[endpoint_id]),
                 "validated_safe_frequency_mhz": (
                     int(controller.state.known_safe_frequency)
-                    if controller is not None else int(context.targets[endpoint_id])
+                    if controller is not None
+                    and controller.is_frequency_validated_safe(
+                        controller.state.known_safe_frequency
+                    )
+                    else (
+                        int(context.targets[endpoint_id])
+                        if controller is None else None
+                    )
                 ),
                 "candidate_frequency_mhz": (
                     controller.state.candidate_frequency if controller is not None else None
                 ),
                 "recent_latency_ms": self.endpoint_latency[endpoint_id],
-                "recent_energy_j_per_assigned_request": self.endpoint_energy[endpoint_id],
+                "recent_energy_j_per_assigned_request": (
+                    self.endpoint_energy[endpoint_id]
+                    if status == "VALIDATED_SAFE" and evidence_matches_frequency
+                    else None
+                ),
+                "energy_evidence_frequency_mhz": self.endpoint_energy_frequency[
+                    endpoint_id
+                ],
+                "revoked_frequencies_mhz": (
+                    sorted(controller.state.revoked_frequencies)
+                    if controller is not None else []
+                ),
             }
+        pair_feedback_current = (
+            self.pair_feedback
+            if self.pair_feedback_frequencies
+            and all(
+                self.pair_feedback_frequencies.get(endpoint_id)
+                == int(context.targets[endpoint_id])
+                for endpoint_id in ENDPOINTS
+            )
+            else {}
+        )
         value = {
             "schema_version": 1,
             "updated_unix_s": time.time(),
@@ -530,28 +638,44 @@ class StageD1Harness(StageC2AFastSafetyHarness):
             "control_epoch": generation_suffix,
             "routing_mode": routing_mode,
             "endpoints": endpoints,
-            "class_pair_feedback": self.pair_feedback,
+            "class_pair_feedback": pair_feedback_current,
             "energy_semantics": (
                 "recent endpoint gross board energy divided by requests assigned "
                 "to that endpoint; window-amortized routing evidence, not physical "
                 "per-request attribution"
             ),
         }
+        self.last_routing_state = copy.deepcopy(value)
         self.routing_control_file.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.routing_control_file.with_suffix(".tmp")
         temporary.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
         os.replace(temporary, self.routing_control_file)
 
     def _update_runtime_feedback(
-        self, metrics: Mapping[str, Any], requests: Sequence[Mapping[str, Any]],
+        self,
+        metrics: Mapping[str, Any],
+        requests: Sequence[Mapping[str, Any]],
+        observed_frequencies: Optional[Mapping[str, int]] = None,
     ) -> None:
         evidence = endpoint_evidence_summary(requests, metrics)
         self.latest_endpoint_evidence = evidence
         for endpoint_id, values in evidence.items():
-            self.endpoint_energy[endpoint_id] = values[
-                "gross_energy_j_per_assigned_request"
-            ]
-            self.endpoint_latency[endpoint_id] = values["latency_p95_ms"]
+            phase = ENDPOINT_PHASE[endpoint_id]
+            mixed_frequency = _bool(
+                metrics.get("%s_mid_window_transition" % phase)
+            )
+            self.endpoint_energy[endpoint_id] = (
+                None if mixed_frequency
+                else values["gross_energy_j_per_assigned_request"]
+            )
+            self.endpoint_latency[endpoint_id] = (
+                None if mixed_frequency else values["latency_p95_ms"]
+            )
+            self.endpoint_energy_frequency[endpoint_id] = (
+                int(observed_frequencies[endpoint_id])
+                if observed_frequencies is not None and not mixed_frequency
+                else None
+            )
         feedback: dict[str, dict[str, dict[str, Any]]] = {}
         for workload_class in ("SS", "SL", "LS", "LL"):
             feedback[workload_class] = {}
@@ -574,6 +698,15 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                     and all(item <= 65.0 for item in tpot),
                 }
         self.pair_feedback = feedback
+        has_mixed_frequency = any(
+            _bool(metrics.get("%s_mid_window_transition" % phase))
+            for phase in ("P", "D")
+        )
+        self.pair_feedback_frequencies = (
+            {key: int(value) for key, value in observed_frequencies.items()}
+            if observed_frequencies is not None and not has_mixed_frequency
+            else {}
+        )
 
     def _recover_endpoint(
         self,
@@ -714,6 +847,26 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                     "reason": "no requests assigned to endpoint in evidence window",
                     "decision_timestamp_s": now,
                     "before_window_index": before_window_index,
+                })
+                continue
+            if _bool(metrics.get("%s_mid_window_transition" % phase)):
+                self.decision_rows.append({
+                    "policy": policy,
+                    "block_id": block_id,
+                    "endpoint_id": endpoint_id,
+                    "pool": phase,
+                    "control_path": "EFFICIENCY",
+                    "decision": "HOLD",
+                    "action": "HOLD",
+                    "trigger": "MIXED_FREQUENCY_WINDOW",
+                    "reason": (
+                        "mid-window recovery makes this accounting window "
+                        "ineligible for single-frequency safe classification"
+                    ),
+                    "decision_timestamp_s": now,
+                    "before_window_index": before_window_index,
+                    "evidence_window_index": before_window_index - 1,
+                    "finalization": not allow_exploration,
                 })
                 continue
             signature = d1_context_signature(phase, selected, self.settings)
@@ -913,8 +1066,12 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                             repeat, str(point["id"]).lower(), policy.lower()
                         )
                         self.endpoint_energy = {item: None for item in ENDPOINTS}
+                        self.endpoint_energy_frequency = {
+                            item: None for item in ENDPOINTS
+                        }
                         self.endpoint_latency = {item: None for item in ENDPOINTS}
                         self.pair_feedback = {}
+                        self.pair_feedback_frequencies = {}
                         registry, telemetry, scheduler = self._build_scheduler(capabilities)
                         shared = (
                             self._controllers(capabilities)
@@ -960,7 +1117,9 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                         previous_requests: list[dict[str, Any]] = []
                         for window_index in range(1, windows + 1):
                             if previous is not None:
-                                self._update_runtime_feedback(previous, previous_requests)
+                                self._update_runtime_feedback(
+                                    previous, previous_requests, context.targets
+                                )
                                 if shared is not None:
                                     self._efficiency_control(
                                         context, capabilities, actuator, previous,
@@ -1050,7 +1209,9 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                             requests_all.extend(canonical_requests)
                             previous, previous_requests = row, canonical_requests
                         if previous is not None:
-                            self._update_runtime_feedback(previous, previous_requests)
+                            self._update_runtime_feedback(
+                                previous, previous_requests, context.targets
+                            )
                             if shared is not None:
                                 self._efficiency_control(
                                     context, capabilities, actuator, previous,
@@ -1064,6 +1225,17 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                                     previous, previous_requests, policy, block_id,
                                     windows + 1, allow_exploration=False,
                                 )
+                                self._write_routing_state(
+                                    block_id=block_id,
+                                    routing_mode=(
+                                        "RUNTIME_FEEDBACK"
+                                        if policy == "JOINT-ROUTING-PER-ENDPOINT"
+                                        else "FIXED_RR"
+                                    ),
+                                    context=context,
+                                    endpoint_controllers=endpoint_controllers,
+                                    generation_suffix="finalized",
+                                )
                                 for endpoint_id, controller in endpoint_controllers.items():
                                     state = controller.state
                                     self.search_rows.append({
@@ -1076,6 +1248,16 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                                         "unsafe_bound_mhz": state.unsafe_bound,
                                         "best_measured_safe_frequency_mhz": state.best_measured_safe_frequency,
                                         "best_measured_safe_energy_j": state.best_measured_safe_energy_j,
+                                        "validated_safe_frequencies_json": json.dumps(
+                                            sorted(state.validated_safe_frequencies)
+                                        ),
+                                        "revoked_frequencies_json": json.dumps(
+                                            sorted(state.revoked_frequencies)
+                                        ),
+                                        "revoked_safe_energy_history_json": json.dumps(
+                                            state.revoked_safe_energy_history,
+                                            sort_keys=True,
+                                        ),
                                         "windows_observed": state.windows_observed,
                                         "requests_observed": state.requests_observed,
                                         "converged": state.converged,
@@ -1412,12 +1594,54 @@ class StageD1Harness(StageC2AFastSafetyHarness):
             and int(row.get("observed_freq_after_mhz") or 0) == 1890
             for row in self.action_rows
         )
-        preflight_pass = (
-            self.stage == "preflight" and run_error is None and hard
-            and context_valid and all_pairs and restoration_valid
-            and energy_safe and energy_preference and pressure_spill
-            and endpoint_evidence_valid and independent_state_valid
-            and search_progress_valid and warmup_valid and asymmetry_actuated
+        ttft_all = [float(row["ttft_ms"]) for row in requests]
+        tpot_all = [float(row["tpot_ms"]) for row in requests]
+        overall_ttft_attainment = (
+            sum(value <= 600.0 for value in ttft_all) / len(ttft_all)
+            if ttft_all else 0.0
+        )
+        overall_tpot_attainment = (
+            sum(value <= 65.0 for value in tpot_all) / len(tpot_all)
+            if tpot_all else 0.0
+        )
+        final_safety_consistent = final_d1_safety_state_consistent(
+            self.search_rows
+        )
+        final_endpoints = getattr(self, "last_routing_state", {}).get(
+            "endpoints"
+        ) or {}
+        revoked_energy_ineligible = bool(final_endpoints) and all(
+            not (
+                endpoint.get("energy_evidence_frequency_mhz")
+                in set(endpoint.get("revoked_frequencies_mhz") or [])
+                and endpoint.get("recent_energy_j_per_assigned_request")
+                is not None
+            )
+            for endpoint in final_endpoints.values()
+        )
+        routing_evidence_gates = all((
+            matched,
+            context_valid,
+            all_pairs,
+            energy_safe,
+            energy_preference,
+            pressure_spill,
+            endpoint_evidence_valid,
+            independent_state_valid,
+            search_progress_valid,
+            warmup_valid,
+            asymmetry_actuated,
+            revoked_energy_ineligible,
+        ))
+        preflight_pass = d1_preflight_acceptance(
+            stage=self.stage,
+            run_error=run_error,
+            structural_hard_gates=hard,
+            routing_evidence_gates=routing_evidence_gates,
+            ttft_attainment=overall_ttft_attainment,
+            tpot_attainment=overall_tpot_attainment,
+            final_safety_state_consistent=final_safety_consistent,
+            restoration_valid=restoration_valid,
         )
         summaries = []
         for load in {str(row["load_point"]) for row in rows}:
@@ -1479,6 +1703,7 @@ class StageD1Harness(StageC2AFastSafetyHarness):
             "valid": (
                 run_error is None and hard and matched and context_valid
                 and energy_safe and restoration_valid
+                and (self.stage != "preflight" or preflight_pass)
             ),
             "error": run_error,
             "preflight_pass": preflight_pass,
@@ -1500,6 +1725,16 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                 self.evidence_ledger.control_requests
             ),
             "preflight_p0_mid_p1_high_asymmetry_audit": asymmetry_actuated,
+            "overall_ttft_attainment": overall_ttft_attainment,
+            "overall_tpot_attainment": overall_tpot_attainment,
+            "overall_slo_contract_audit": (
+                overall_ttft_attainment >= 0.95
+                and overall_tpot_attainment >= 0.95
+            ),
+            "final_safety_state_consistency_audit": final_safety_consistent,
+            "revoked_energy_routing_ineligible_audit": (
+                revoked_energy_ineligible
+            ),
             "final_high_restoration_audit": restoration_valid,
             "policies": list(POLICIES),
             "repetitions": repetitions,
