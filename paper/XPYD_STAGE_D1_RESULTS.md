@@ -2,9 +2,8 @@
 
 ## Status
 
-Implementation and CPU preflight are in progress. No D1 scientific result is
-claimed until the fixed-asymmetry GPU preflight passes and the matched full
-matrix completes.
+Implementation and fixed-asymmetry GPU preflight are complete. No D1 scientific
+comparison result is claimed until the matched full matrix completes.
 
 Stage D1 asks whether request-level full-pair routing can exploit independently
 controlled endpoint frequency/load asymmetry while preserving the fixed TIGHT
@@ -80,14 +79,13 @@ verify request-context delivery, use of all four compatible pairs, endpoint
 safety/pressure response, runtime energy preference, pressure spillover,
 per-endpoint accounting, readback validity, and all existing hard gates.
 
-Preflight result: **NOT ACCEPTED**. Job `271682` corrected the contradictory
-safe/unsafe state from job `271610`: it revoked D0=MID, recovered D0 to HIGH,
-passed the overall TTFT/TPOT contract, and ended with consistent controller
-state. A chronological audit nevertheless found one request admitted during the
-recovery actuation interval that still used the revoked D0=MID energy evidence
-for `ENERGY_PREFERENCE`. The generated acceptance audit inspected only the final
-routing snapshot and therefore reported a false positive. See
-`XPYD_D1_PREFLIGHT_RESULTS.md`.
+Preflight result: **ACCEPTED**. Job `272172` passed all physical, SLO, endpoint
+state, and chronological routing gates. D0=MID was revoked after sufficient
+fresh evidence fell below 95% attainment; D0 was published as `RECOVERING` and
+routing-ineligible before actuation, then restored to eligibility only after a
+valid HIGH-frequency readback. No request selected D0 during recovery and no
+post-revocation route used the old MID energy evidence. Overall TTFT/TPOT
+attainment was 100%/98.33%. See `XPYD_D1_PREFLIGHT_RESULTS.md`.
 
 ## Matched full result
 

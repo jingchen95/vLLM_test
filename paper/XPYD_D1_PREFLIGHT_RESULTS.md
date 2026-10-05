@@ -2,11 +2,14 @@
 
 ## Status
 
-Job `271516` is **rejected as a schema-integration failure**. It is not a D1
-mechanism result, and the full D1 experiment has not been launched.
+Job `272172` is **ACCEPTED** as the D1 fixed-asymmetry preflight. The earlier
+jobs below remain preserved as rejected diagnostic runs. The full D1 experiment
+has not been launched.
 
-The job completed 60 requests and exercised all four compatible routes, real
-SSE, request-ID propagation, energy measurement, per-endpoint clocks, and the
+## Initial schema preflight: job 271516
+
+Job `271516` completed 60 requests and exercised all four compatible routes,
+real SSE, request-ID propagation, energy measurement, per-endpoint clocks, and the
 endpoint-local fast-safety path. However, D1 controller/report code consumed
 field names from an older request schema. The normalized measurement CSV uses
 `request_id`, `prefill_endpoint_id`, `decode_endpoint_id`, and
@@ -174,3 +177,64 @@ then publish the successful readback state. The audit must examine every routing
 decision after the revocation timestamp, not only the final snapshot.
 
 Final acceptance token: **WITHHELD**. Full D1 was not launched.
+
+## Routing-atomic revocation preflight: job 272172
+
+Job `272172` completed normally in 16 minutes 50 seconds on Neptune and Europa
+using commit `7158ff2`. It is **ACCEPTED**.
+
+The run retained the frozen experiment contract and completed one excluded
+20-request all-HIGH warm-up followed by three 20-request fixed-asymmetry
+measurement windows. All physical hard gates passed. Across the 60 measured
+requests:
+
+- TTFT attainment was 100%;
+- TPOT attainment was 98.33% (59/60);
+- TTFT p95/p99 were 586.25/589.57 ms;
+- TPOT p95/p99 were 63.22/64.15 ms;
+- total four-GPU gross energy was 94.451 kJ, or 1574.18 J/request;
+- all four compatible pairs were observed: P0-D0 17, P0-D1 13, P1-D0 13,
+  and P1-D1 17;
+- routing produced 34 exploration, 18 lower-pressure, and 8 energy-preference
+  selections.
+
+The required revocation path was physically exercised. Fresh D0 evidence at
+1125 MHz reached 16/17 TPOT passes (94.12%), causing the previously accepted
+point to be revoked. The routing-visible recovery timeline was:
+
+| Event | Timestamp (s) |
+|---|---:|
+| triggering request completed | 1791210960.441718 |
+| revocation/RECOVERING publication | 1791210960.508317 |
+| recovery actuation | 1791210960.814531 |
+| valid 1500 MHz readback/AVAILABLE publication | 1791210961.501960 |
+
+Independent chronological inspection found:
+
+- zero routing decisions in the 0.994-second RECOVERING interval;
+- zero requests selecting D0 during that interval;
+- zero post-revocation decisions using the revoked 1125 MHz energy evidence;
+- the first later D0 decisions occurred after readback, observed 1500 MHz, and
+  carried no stale 1125 MHz energy value;
+- D1 remained available throughout, so no global client admission pause was
+  introduced.
+
+The final D0 state was internally consistent: current and validated-safe
+frequency 1500 MHz, unsafe/revoked bound 1125 MHz, and historical 1125 MHz
+energy retained only in the revocation history. The recovery window's clock
+segments were contiguous and its full gross NVML energy window remained valid.
+Final HIGH clock restoration also passed.
+
+Both generated and independent audits therefore agree:
+
+- `chronological_recovery_routing_audit=true`;
+- `routing_recovery_publication_audit=true`;
+- `revoked_energy_routing_ineligible_audit=true`;
+- `overall_slo_contract_audit=true`;
+- `final_safety_state_consistency_audit=true`;
+- `preflight_pass=true`.
+
+CPU validation for the routing-atomic patch: **334 tests passed**;
+`git diff --check` passed.
+
+Final acceptance token: **D1_PREFLIGHT_PASS**. Full D1 was not launched.
