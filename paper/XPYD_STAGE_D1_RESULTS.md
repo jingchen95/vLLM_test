@@ -80,12 +80,14 @@ verify request-context delivery, use of all four compatible pairs, endpoint
 safety/pressure response, runtime energy preference, pressure spillover,
 per-endpoint accounting, readback validity, and all existing hard gates.
 
-Preflight result: **NOT ACCEPTED**. Corrected job `271610` validated the request
-schema, warm-up exclusion, endpoint-local evidence, routing, energy, and clock
-paths, but exposed a final-window safe-state inconsistency. D0=MID was retained
-simultaneously as validated-safe and as the unsafe bound after a 7/11 endpoint
-TPOT attainment window. Overall measured TPOT attainment was 93.33%, below the
-fixed 95% contract. See `XPYD_D1_PREFLIGHT_RESULTS.md`.
+Preflight result: **NOT ACCEPTED**. Job `271682` corrected the contradictory
+safe/unsafe state from job `271610`: it revoked D0=MID, recovered D0 to HIGH,
+passed the overall TTFT/TPOT contract, and ended with consistent controller
+state. A chronological audit nevertheless found one request admitted during the
+recovery actuation interval that still used the revoked D0=MID energy evidence
+for `ENERGY_PREFERENCE`. The generated acceptance audit inspected only the final
+routing snapshot and therefore reported a false positive. See
+`XPYD_D1_PREFLIGHT_RESULTS.md`.
 
 ## Matched full result
 
