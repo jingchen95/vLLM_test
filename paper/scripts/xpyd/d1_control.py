@@ -160,7 +160,19 @@ class EndpointFastSafetyRuntime(FastSafetyRuntime):
             }
         row.update(recommendation)
         if self.enabled and recommendation["action"] == "FAST_RECOVER":
-            row.update(self.recover(endpoint_id, recommendation))
+            try:
+                row.update(self.recover(endpoint_id, recommendation))
+            except BaseException as exc:
+                # The runner may already have atomically published RECOVERING.
+                # Preserve the decision and failure in the audit even though
+                # the physical recovery exception must still fail the run.
+                row.update(recommendation)
+                row["readback_valid"] = False
+                row["recovery_error"] = "%s: %s" % (
+                    type(exc).__name__, exc,
+                )
+                self.event_rows.append(row)
+                raise
         self.event_rows.append(row)
 
     def _update_validated_endpoint_evidence(

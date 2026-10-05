@@ -8,8 +8,11 @@ runtime controller file; no offline profile is embedded here.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+import fcntl
 import math
+from pathlib import Path
 import threading
 import time
 from typing import Any, Callable, Mapping, Optional, Sequence
@@ -46,6 +49,7 @@ class D1RoutingDecision:
     candidate_states: tuple[dict[str, Any], ...]
     selected_state: dict[str, Any]
     control_generation: Optional[str]
+    decision_timestamp_s: float
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +59,7 @@ class D1RoutingDecision:
             "candidate_states": [dict(item) for item in self.candidate_states],
             "selected_state": dict(self.selected_state),
             "control_generation": self.control_generation,
+            "decision_timestamp_s": self.decision_timestamp_s,
             "score_semantics": (
                 "lexicographic compatibility/health -> safety -> pressure -> "
                 "measured window-amortized energy -> exploration/tie"
@@ -63,6 +68,24 @@ class D1RoutingDecision:
 
 
 StateLoader = Callable[[], Mapping[str, Any]]
+
+
+@contextmanager
+def routing_state_lock(control_file: Path | str, *, exclusive: bool):
+    """Serialize routing decisions with controller state publication.
+
+    The lock file is stable across atomic replacements of the JSON control
+    file.  Readers hold a shared lock for the complete routing decision;
+    publishers hold an exclusive lock while committing a new visible state.
+    """
+    lock_path = Path(str(control_file) + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _finite(value: Any) -> bool:
@@ -137,6 +160,7 @@ class D1PairRouter:
         return {
             "endpoint_id": endpoint_id,
             "healthy": raw.get("healthy") is True,
+            "routing_eligible": raw.get("routing_eligible", True) is True,
             "telemetry_fresh": raw.get("telemetry_fresh") is True,
             "safety_status": str(raw.get("safety_status", "UNKNOWN")),
             "requested_frequency_mhz": raw.get("requested_frequency_mhz"),
@@ -167,6 +191,7 @@ class D1PairRouter:
         ) or {})
         endpoint_safe = (
             p["healthy"] and d["healthy"]
+            and p["routing_eligible"] and d["routing_eligible"]
             and p["telemetry_fresh"] and d["telemetry_fresh"]
             and p["safety_status"] == "VALIDATED_SAFE"
             and d["safety_status"] == "VALIDATED_SAFE"
@@ -174,6 +199,7 @@ class D1PairRouter:
         known_safe = endpoint_safe and feedback.get("slo_safe", True) is not False
         candidate_probe = (
             p["healthy"] and d["healthy"]
+            and p["routing_eligible"] and d["routing_eligible"]
             and p["telemetry_fresh"] and d["telemetry_fresh"]
             and p["safety_status"] in {"VALIDATED_SAFE", "CANDIDATE_PROBE"}
             and d["safety_status"] in {"VALIDATED_SAFE", "CANDIDATE_PROBE"}
@@ -192,6 +218,9 @@ class D1PairRouter:
             "prefill": p,
             "decode": d,
             "healthy": p["healthy"] and d["healthy"],
+            "routing_eligible": (
+                p["routing_eligible"] and d["routing_eligible"]
+            ),
             "endpoint_safe": endpoint_safe,
             "known_safe": known_safe,
             "candidate_probe": candidate_probe,
@@ -231,18 +260,21 @@ class D1PairRouter:
             snapshots = [
                 self._pair_snapshot(pair, state, load, context) for pair in self.pairs
             ]
-            healthy = [item for item in snapshots if item["healthy"]]
-            if not healthy:
-                raise D1RoutingError("no healthy compatible D1 pair")
+            eligible = [
+                item for item in snapshots
+                if item["healthy"] and item["routing_eligible"]
+            ]
+            if not eligible:
+                raise D1RoutingError("no routing-eligible compatible D1 pair")
             mode = str(state.get("routing_mode", "RUNTIME_FEEDBACK"))
             if mode == "FIXED_RR":
-                selected, reason = self._rr(healthy), "FIXED_RR"
+                selected, reason = self._rr(eligible), "FIXED_RR"
             elif self._generation_decisions < self.cold_start_requests:
                 # Cold start is the sole exception to known-safe preference. It
                 # is allowed only over healthy, fresh endpoints and supplies the
                 # observations that the controller did not have a priori.
                 fresh = [
-                    item for item in healthy
+                    item for item in eligible
                     if item["prefill"]["telemetry_fresh"]
                     and item["decode"]["telemetry_fresh"]
                     and item["prefill"]["safety_status"] != "UNSAFE"
@@ -252,13 +284,13 @@ class D1PairRouter:
                     raise D1RoutingError("cold start has no fresh non-unsafe pair")
                 selected, reason = self._rr(fresh), "COLD_START_RR"
             else:
-                safe = [item for item in healthy if item["known_safe"]]
+                safe = [item for item in eligible if item["known_safe"]]
                 probes = [
-                    item for item in healthy
+                    item for item in eligible
                     if item["candidate_probe"] and not item["known_safe"]
                 ]
                 if not safe:
-                    fallback = [item for item in healthy if item["endpoint_safe"]]
+                    fallback = [item for item in eligible if item["endpoint_safe"]]
                     if not fallback:
                         raise D1RoutingError(
                             "no known-safe pair; unknown/stale candidates fail closed"
@@ -279,6 +311,7 @@ class D1PairRouter:
                         candidate_states=tuple(snapshots),
                         selected_state=dict(selected),
                         control_generation=self._generation,
+                        decision_timestamp_s=self.wall_clock(),
                     )
                 minimum_pressure = min(item["pressure"] for item in safe)
                 pressure_candidates = [
@@ -354,4 +387,5 @@ class D1PairRouter:
                 candidate_states=tuple(snapshots),
                 selected_state=dict(selected),
                 control_generation=self._generation,
+                decision_timestamp_s=self.wall_clock(),
             )

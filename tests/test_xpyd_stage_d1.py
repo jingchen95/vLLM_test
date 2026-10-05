@@ -2,16 +2,22 @@
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import MethodType, SimpleNamespace
 from unittest.mock import patch
 import json
 import unittest
 
-from xpyd.adaptive_exploration import evidence_from_window
+from xpyd.adaptive_exploration import (
+    AdaptiveExplorationConfig,
+    AdaptivePoolController,
+    evidence_from_window,
+)
 from xpyd.stage_d1 import (
     D1EvidenceLedger,
     ENDPOINTS,
     POLICIES,
     StageD1Harness,
+    chronological_recovery_audit,
     d1_preflight_acceptance,
     d1_context_signature,
     endpoint_evidence_summary,
@@ -20,7 +26,7 @@ from xpyd.stage_d1 import (
     normalize_d1_request,
     policy_order,
 )
-from xpyd.stagec2_dynamic import StageC2Error
+from xpyd.stagec2_dynamic import StageC2Error, fast_recovery_recommendation
 
 
 class StageD1ContractTests(unittest.TestCase):
@@ -330,6 +336,7 @@ class StageD1ContractTests(unittest.TestCase):
             "stage": "preflight", "run_error": None,
             "structural_hard_gates": True, "routing_evidence_gates": True,
             "final_safety_state_consistent": True,
+            "chronological_recovery_safe": True,
             "restoration_valid": True,
         }
         self.assertFalse(d1_preflight_acceptance(
@@ -354,8 +361,197 @@ class StageD1ContractTests(unittest.TestCase):
             structural_hard_gates=True, routing_evidence_gates=True,
             ttft_attainment=1.0, tpot_attainment=1.0,
             final_safety_state_consistent=False,
+            chronological_recovery_safe=True,
             restoration_valid=True,
         ))
+
+    @staticmethod
+    def recovery_event(**overrides):
+        row = {
+            "endpoint_id": "D0", "action": "FAST_RECOVER",
+            "prior_mhz": 1125, "target_mhz": 1500,
+            "decision_timestamp_s": 100.0,
+            "action_timestamp_s": 100.2,
+            "readback_timestamp_s": 101.0,
+            "readback_valid": True,
+        }
+        row.update(overrides)
+        return row
+
+    @staticmethod
+    def route_row(timestamp, endpoint="D1", *, reason="LOWER_PRESSURE", frequency=1500, energy=None):
+        selected = {
+            "known_safe": True,
+            "prefill": {
+                "endpoint_id": "P0", "observed_frequency_mhz": 2520,
+                "recent_energy_j_per_assigned_request": 10.0,
+            },
+            "decode": {
+                "endpoint_id": endpoint,
+                "observed_frequency_mhz": frequency,
+                "recent_energy_j_per_assigned_request": energy,
+            },
+        }
+        return {
+            "request_id": f"r-{timestamp}",
+            "selected_prefill_endpoint_id": "P0",
+            "selected_decode_endpoint_id": endpoint,
+            "routing_reason": reason,
+            "routing_decision_timestamp_s": timestamp,
+            "selected_state_json": json.dumps(selected),
+        }
+
+    def test_chronological_audit_detects_job_271682_race(self):
+        event = self.recovery_event(
+            decision_timestamp_s=1791149148.2001276,
+            readback_timestamp_s=1791149149.3657272,
+        )
+        route = self.route_row(
+            1791149149.309751, "D0", reason="ENERGY_PREFERENCE",
+            frequency=1125, energy=656.1681,
+        )
+        audit = chronological_recovery_audit([event], [route])
+        self.assertFalse(audit["pass"])
+        self.assertEqual(audit["violation_count"], 2)
+        self.assertEqual(
+            {row["reason"] for row in audit["violations"]},
+            {"RECOVERING_ENDPOINT_SELECTED", "REVOKED_ENERGY_USED_FOR_PREFERENCE"},
+        )
+        self.assertFalse(d1_preflight_acceptance(
+            stage="preflight", run_error=None,
+            structural_hard_gates=True, routing_evidence_gates=True,
+            ttft_attainment=1.0, tpot_attainment=1.0,
+            final_safety_state_consistent=True,
+            chronological_recovery_safe=audit["pass"],
+            restoration_valid=True,
+        ))
+
+    def test_chronological_audit_allows_other_endpoint_during_recovery_and_reuse_after(self):
+        routes = [
+            self.route_row(100.5, "D1"),
+            self.route_row(101.1, "D0", reason="LOWER_PRESSURE", frequency=1500),
+        ]
+        audit = chronological_recovery_audit(
+            [self.recovery_event()], routes
+        )
+        self.assertTrue(audit["pass"])
+        self.assertEqual(audit["violation_count"], 0)
+
+    @staticmethod
+    def recovery_fixture(temporary):
+        config = AdaptiveExplorationConfig(
+            ttft_slo_ms=600, tpot_slo_ms=65,
+            min_valid_requests=1, min_input_tokens=1,
+            min_output_tokens=1, min_observation_duration_s=0,
+        )
+        controllers = {
+            endpoint: AdaptivePoolController(
+                "P" if endpoint.startswith("P") else "D",
+                "prefill" if endpoint.startswith("P") else "decode",
+                [1260, 1890, 2520] if endpoint.startswith("P") else [750, 1125, 1500],
+                config,
+            )
+            for endpoint in ENDPOINTS
+        }
+        d0 = controllers["D0"]
+        d0.set_current_frequency(1125)
+        d0.state.known_safe_frequency = 1125
+        d0.state.validated_safe_frequencies.add(1125)
+        d0.state.safe_energy_by_frequency_j[1125] = 42.0
+        d0.state.safe_energy_observations_by_frequency[1125] = 1
+        harness = StageD1Harness.__new__(StageD1Harness)
+        harness.routing_control_file = Path(temporary) / "routing.json"
+        harness.endpoint_energy = {key: 10.0 for key in ENDPOINTS}
+        harness.endpoint_energy_frequency = {
+            "P0": 2520, "P1": 2520, "D0": 1125, "D1": 1500,
+        }
+        harness.endpoint_latency = {key: 50.0 for key in ENDPOINTS}
+        harness.pair_feedback = {}
+        harness.pair_feedback_frequencies = {}
+        harness.last_routing_state = {}
+        harness.recovering_endpoints = {}
+        harness.routing_eligibility_rows = []
+        context = SimpleNamespace(targets={
+            "P0": 2520, "P1": 2520, "D0": 1125, "D1": 1500,
+        })
+        recommendation = fast_recovery_recommendation(
+            d0, "ENDPOINT_EVIDENCE_SLO_RISK", 99.0
+        )
+        return harness, controllers, context, recommendation
+
+    def test_recovery_is_published_ineligible_before_actuation_then_restored(self):
+        with TemporaryDirectory() as temporary:
+            harness, controllers, context, recommendation = self.recovery_fixture(
+                temporary
+            )
+            observed = {}
+
+            def actuate(this, actuator, supplied_context, targets, **kwargs):
+                del this, actuator, kwargs
+                state = json.loads(
+                    harness.routing_control_file.read_text(encoding="utf-8")
+                )
+                observed.update(state["endpoints"]["D0"])
+                supplied_context.targets.update(targets)
+                return {"D0": {
+                    "timestamp_unix_s": 100.2,
+                    "readback_timestamp_unix_s": 101.0,
+                    "observed_freq_after_mhz": 1500,
+                    "readback_valid": True,
+                }}
+
+            harness._actuate_targets = MethodType(actuate, harness)
+            result = harness._recover_endpoint(
+                "D0", recommendation, actuator=object(), context=context,
+                controllers=controllers, policy="JOINT-ROUTING-PER-ENDPOINT",
+                block_id="fixture",
+            )
+            self.assertEqual(observed["safety_status"], "RECOVERING")
+            self.assertFalse(observed["routing_eligible"])
+            self.assertIsNone(observed["recent_energy_j_per_assigned_request"])
+            self.assertEqual(
+                controllers["D0"].state.revoked_safe_energy_history[-1]["energy_j"],
+                42.0,
+            )
+            final = json.loads(
+                harness.routing_control_file.read_text(encoding="utf-8")
+            )["endpoints"]["D0"]
+            self.assertEqual(final["safety_status"], "VALIDATED_SAFE")
+            self.assertTrue(final["routing_eligible"])
+            self.assertEqual(final["observed_frequency_mhz"], 1500)
+            self.assertTrue(result["readback_valid"])
+            self.assertEqual(
+                [row["state"] for row in harness.routing_eligibility_rows],
+                ["RECOVERING", "AVAILABLE"],
+            )
+
+    def test_recovery_readback_failure_leaves_endpoint_unavailable(self):
+        with TemporaryDirectory() as temporary:
+            harness, controllers, context, recommendation = self.recovery_fixture(
+                temporary
+            )
+
+            def fail(this, actuator, supplied_context, targets, **kwargs):
+                del this, actuator, supplied_context, targets, kwargs
+                raise StageC2Error("readback failed")
+
+            harness._actuate_targets = MethodType(fail, harness)
+            with self.assertRaisesRegex(StageC2Error, "readback failed"):
+                harness._recover_endpoint(
+                    "D0", recommendation, actuator=object(), context=context,
+                    controllers=controllers,
+                    policy="JOINT-ROUTING-PER-ENDPOINT", block_id="fixture",
+                )
+            state = json.loads(
+                harness.routing_control_file.read_text(encoding="utf-8")
+            )["endpoints"]["D0"]
+            self.assertEqual(state["safety_status"], "RECOVERING")
+            self.assertFalse(state["routing_eligible"])
+            self.assertIsNone(state["recent_energy_j_per_assigned_request"])
+            self.assertIn("D0", harness.recovering_endpoints)
+            self.assertFalse(
+                harness.routing_eligibility_rows[0]["readback_valid"]
+            )
 
 
 if __name__ == "__main__":

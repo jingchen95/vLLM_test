@@ -24,6 +24,7 @@ from xpyd.d1_control import (
     active_candidate,
     exploration_permissions,
 )
+from xpyd.d1_routing import routing_state_lock
 from xpyd.phase3b_energy import _read_jsonl
 from xpyd.phase3c_substrate import (
     Phase3CSubstrateHarness,
@@ -385,6 +386,7 @@ def d1_preflight_acceptance(
     ttft_attainment: float,
     tpot_attainment: float,
     final_safety_state_consistent: bool,
+    chronological_recovery_safe: bool,
     restoration_valid: bool,
 ) -> bool:
     return bool(
@@ -395,8 +397,93 @@ def d1_preflight_acceptance(
         and float(ttft_attainment) >= 0.95
         and float(tpot_attainment) >= 0.95
         and final_safety_state_consistent
+        and chronological_recovery_safe
         and restoration_valid
     )
+
+
+def chronological_recovery_audit(
+    safety_rows: Sequence[Mapping[str, Any]],
+    routing_rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Audit every route decision against each endpoint recovery interval."""
+    recoveries = [
+        row for row in safety_rows
+        if row.get("action") == "FAST_RECOVER"
+        and row.get("endpoint_id") in ENDPOINTS
+    ]
+    violations: list[dict[str, Any]] = []
+    for event in recoveries:
+        endpoint_id = str(event["endpoint_id"])
+        decision_ts = event.get("decision_timestamp_s")
+        readback_ts = event.get("readback_timestamp_s")
+        readback_valid = _bool(event.get("readback_valid"))
+        try:
+            decision = float(decision_ts)
+            readback = float(readback_ts) if readback_ts not in (None, "") else math.inf
+            revoked_frequency = int(event.get("prior_mhz"))
+        except (TypeError, ValueError):
+            violations.append({
+                "endpoint_id": endpoint_id,
+                "reason": "RECOVERY_TIMESTAMPS_OR_FREQUENCY_MISSING",
+            })
+            continue
+        if not readback_valid:
+            readback = math.inf
+        for route in routing_rows:
+            try:
+                routed_at = float(route.get("routing_decision_timestamp_s"))
+            except (TypeError, ValueError):
+                violations.append({
+                    "endpoint_id": endpoint_id,
+                    "request_id": route.get("request_id"),
+                    "reason": "ROUTING_DECISION_TIMESTAMP_MISSING",
+                })
+                continue
+            selected_endpoint = (
+                route.get("selected_prefill_endpoint_id")
+                if endpoint_id.startswith("P")
+                else route.get("selected_decode_endpoint_id")
+            )
+            if decision <= routed_at < readback and selected_endpoint == endpoint_id:
+                violations.append({
+                    "endpoint_id": endpoint_id,
+                    "request_id": route.get("request_id"),
+                    "reason": "RECOVERING_ENDPOINT_SELECTED",
+                    "routing_decision_timestamp_s": routed_at,
+                    "revocation_decision_timestamp_s": decision,
+                    "recovery_readback_timestamp_s": (
+                        None if math.isinf(readback) else readback
+                    ),
+                })
+            if routed_at < decision or route.get("routing_reason") != "ENERGY_PREFERENCE":
+                continue
+            try:
+                selected = json.loads(str(route.get("selected_state_json") or "{}"))
+            except json.JSONDecodeError:
+                selected = {}
+            endpoint = selected.get(
+                "prefill" if endpoint_id.startswith("P") else "decode"
+            ) or {}
+            if (
+                selected_endpoint == endpoint_id
+                and _optional_int(endpoint.get("observed_frequency_mhz"))
+                == revoked_frequency
+                and endpoint.get("recent_energy_j_per_assigned_request") is not None
+            ):
+                violations.append({
+                    "endpoint_id": endpoint_id,
+                    "request_id": route.get("request_id"),
+                    "reason": "REVOKED_ENERGY_USED_FOR_PREFERENCE",
+                    "routing_decision_timestamp_s": routed_at,
+                    "revoked_frequency_mhz": revoked_frequency,
+                })
+    return {
+        "recovery_count": len(recoveries),
+        "violation_count": len(violations),
+        "violations": violations,
+        "pass": bool(recoveries) and not violations,
+    }
 
 
 def policy_order(repeat: int, load_index: int) -> tuple[str, ...]:
@@ -530,6 +617,8 @@ class StageD1Harness(StageC2AFastSafetyHarness):
         self.evidence_ledger = D1EvidenceLedger()
         self.latest_endpoint_evidence: dict[str, dict[str, Any]] = {}
         self.last_routing_state: dict[str, Any] = {}
+        self.recovering_endpoints: dict[str, dict[str, Any]] = {}
+        self.routing_eligibility_rows: list[dict[str, Any]] = []
 
     def _controllers_endpoint(self) -> dict[str, AdaptivePoolController]:
         config = AdaptiveExplorationConfig.from_mapping(
@@ -548,12 +637,14 @@ class StageD1Harness(StageC2AFastSafetyHarness):
             for endpoint_id in ENDPOINTS
         }
 
-    @staticmethod
     def _endpoint_status(
+        self,
         endpoint_id: str,
         targets: Mapping[str, int],
         controllers: Optional[Mapping[str, AdaptivePoolController]],
     ) -> str:
+        if endpoint_id in getattr(self, "recovering_endpoints", {}):
+            return "RECOVERING"
         if controllers is None:
             return "VALIDATED_SAFE"
         controller = controllers[endpoint_id]
@@ -576,10 +667,23 @@ class StageD1Harness(StageC2AFastSafetyHarness):
         context: ControllerContext,
         endpoint_controllers: Optional[Mapping[str, AdaptivePoolController]],
         generation_suffix: str,
+        lock_held: bool = False,
     ) -> None:
+        if not lock_held:
+            with routing_state_lock(self.routing_control_file, exclusive=True):
+                self._write_routing_state(
+                    block_id=block_id,
+                    routing_mode=routing_mode,
+                    context=context,
+                    endpoint_controllers=endpoint_controllers,
+                    generation_suffix=generation_suffix,
+                    lock_held=True,
+                )
+            return
         endpoints = {}
         for endpoint_id in ENDPOINTS:
             controller = endpoint_controllers.get(endpoint_id) if endpoint_controllers else None
+            recovery = getattr(self, "recovering_endpoints", {}).get(endpoint_id)
             status = self._endpoint_status(
                 endpoint_id, context.targets, endpoint_controllers
             )
@@ -591,6 +695,7 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                 "healthy": True,
                 "telemetry_fresh": True,
                 "safety_status": status,
+                "routing_eligible": recovery is None,
                 "requested_frequency_mhz": int(context.targets[endpoint_id]),
                 "observed_frequency_mhz": int(context.targets[endpoint_id]),
                 "validated_safe_frequency_mhz": (
@@ -610,7 +715,9 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                 "recent_latency_ms": self.endpoint_latency[endpoint_id],
                 "recent_energy_j_per_assigned_request": (
                     self.endpoint_energy[endpoint_id]
-                    if status == "VALIDATED_SAFE" and evidence_matches_frequency
+                    if recovery is None
+                    and status == "VALIDATED_SAFE"
+                    and evidence_matches_frequency
                     else None
                 ),
                 "energy_evidence_frequency_mhz": self.endpoint_energy_frequency[
@@ -620,6 +727,7 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                     sorted(controller.state.revoked_frequencies)
                     if controller is not None else []
                 ),
+                "recovery": copy.deepcopy(recovery),
             }
         pair_feedback_current = (
             self.pair_feedback
@@ -720,36 +828,122 @@ class StageD1Harness(StageC2AFastSafetyHarness):
         block_id: str,
     ) -> dict[str, Any]:
         target = int(recommendation["target_mhz"])
-        actions = self._actuate_targets(
-            actuator, context, {endpoint_id: target},
-            reason="stage_d1_%s" % str(recommendation["trigger"]).lower(),
-            policy=policy,
-            block_id=block_id,
-            decision_timestamp_s=float(recommendation["decision_timestamp_s"]),
-            recover_on_failure=False,
+        prior = int(recommendation["prior_mhz"])
+        routing_mode = (
+            "RUNTIME_FEEDBACK"
+            if policy == "JOINT-ROUTING-PER-ENDPOINT" else "FIXED_RR"
         )
+        # Commit the safety decision under the same inter-process lock held by
+        # request routing. The committed timestamp is the routing-visible
+        # revocation boundary, distinct from the earlier trigger timestamp.
+        with routing_state_lock(self.routing_control_file, exclusive=True):
+            decision_ts = time.time()
+            recommendation["decision_timestamp_s"] = decision_ts
+            history = controllers[endpoint_id].state.revoked_safe_energy_history
+            if history and int(history[-1].get("frequency_mhz", -1)) == prior:
+                history[-1]["revoked_at_s"] = decision_ts
+            recovery = {
+                "state": "RECOVERING",
+                "routing_eligible": False,
+                "revoked_frequency_mhz": prior,
+                "target_frequency_mhz": target,
+                "trigger": str(recommendation["trigger"]),
+                "decision_timestamp_s": decision_ts,
+                "action_timestamp_s": None,
+                "readback_timestamp_s": None,
+                "readback_valid": None,
+            }
+            self.recovering_endpoints[endpoint_id] = recovery
+            self.endpoint_energy[endpoint_id] = None
+            self.endpoint_energy_frequency[endpoint_id] = None
+            self.pair_feedback_frequencies = {}
+            self._write_routing_state(
+                block_id=block_id,
+                routing_mode=routing_mode,
+                context=context,
+                endpoint_controllers=controllers,
+                generation_suffix="recovering-%s" % endpoint_id,
+                lock_held=True,
+            )
+            eligibility_row = {
+                "policy": policy,
+                "block_id": block_id,
+                "endpoint_id": endpoint_id,
+                "state": "RECOVERING",
+                "routing_eligible": False,
+                "revoked_frequency_mhz": prior,
+                "target_frequency_mhz": target,
+                "decision_timestamp_s": decision_ts,
+                "action_timestamp_s": None,
+                "readback_timestamp_s": None,
+                "readback_valid": None,
+                "reason": str(recommendation["trigger"]),
+            }
+            self.routing_eligibility_rows.append(eligibility_row)
+        try:
+            actions = self._actuate_targets(
+                actuator, context, {endpoint_id: target},
+                reason="stage_d1_%s" % str(recommendation["trigger"]).lower(),
+                policy=policy,
+                block_id=block_id,
+                decision_timestamp_s=decision_ts,
+                recover_on_failure=False,
+            )
+        except BaseException:
+            # The endpoint remains RECOVERING and routing-ineligible. Never
+            # republish the revoked physical state as safe after failure.
+            with routing_state_lock(self.routing_control_file, exclusive=True):
+                recovery["readback_valid"] = False
+                eligibility_row["readback_valid"] = False
+                self._write_routing_state(
+                    block_id=block_id,
+                    routing_mode=routing_mode,
+                    context=context,
+                    endpoint_controllers=controllers,
+                    generation_suffix="recovery-failed-%s" % endpoint_id,
+                    lock_held=True,
+                )
+            raise
         if endpoint_id not in actions:
             raise StageC2Error("D1 fast recovery did not actuate selected endpoint")
         row = actions[endpoint_id]
         readback = float(row["readback_timestamp_unix_s"])
-        controllers[endpoint_id].record_actuation(
-            target, int(row["observed_freq_after_mhz"]),
-            readback_valid=bool(row["readback_valid"]), timestamp_s=readback,
-        )
-        # Publish the recovered endpoint state before the next admission. The
-        # proxy otherwise still sees the pre-recovery candidate snapshot for
-        # the remainder of the accounting window.
-        self._write_routing_state(
-            block_id=block_id,
-            routing_mode=(
-                "RUNTIME_FEEDBACK"
-                if policy == "JOINT-ROUTING-PER-ENDPOINT" else "FIXED_RR"
-            ),
-            context=context,
-            endpoint_controllers=controllers,
-            generation_suffix="fast-recovery-%s" % endpoint_id,
-        )
+        with routing_state_lock(self.routing_control_file, exclusive=True):
+            recovery["action_timestamp_s"] = float(row["timestamp_unix_s"])
+            recovery["readback_timestamp_s"] = readback
+            recovery["readback_valid"] = bool(row["readback_valid"])
+            eligibility_row["action_timestamp_s"] = float(row["timestamp_unix_s"])
+            eligibility_row["readback_timestamp_s"] = readback
+            eligibility_row["readback_valid"] = bool(row["readback_valid"])
+            controllers[endpoint_id].record_actuation(
+                target, int(row["observed_freq_after_mhz"]),
+                readback_valid=bool(row["readback_valid"]), timestamp_s=readback,
+            )
+            del self.recovering_endpoints[endpoint_id]
+            self._write_routing_state(
+                block_id=block_id,
+                routing_mode=routing_mode,
+                context=context,
+                endpoint_controllers=controllers,
+                generation_suffix="fast-recovery-%s" % endpoint_id,
+                lock_held=True,
+            )
+            self.routing_eligibility_rows.append({
+                "policy": policy,
+                "block_id": block_id,
+                "endpoint_id": endpoint_id,
+                "state": "AVAILABLE",
+                "routing_eligible": True,
+                "revoked_frequency_mhz": prior,
+                "target_frequency_mhz": target,
+                "decision_timestamp_s": decision_ts,
+                "action_timestamp_s": float(row["timestamp_unix_s"]),
+                "readback_timestamp_s": readback,
+                "readback_valid": bool(row["readback_valid"]),
+                "reason": "RECOVERY_READBACK_VALID",
+            })
         return {
+            "decision_timestamp_s": decision_ts,
             "action_timestamp_s": row["timestamp_unix_s"],
             "readback_timestamp_s": readback,
             "readback_frequency_mhz": row["observed_freq_after_mhz"],
@@ -1318,6 +1512,10 @@ class StageD1Harness(StageC2AFastSafetyHarness):
         _write_csv(self.run_dir / "clock_segments.csv", self.segment_rows)
         _write_csv(self.run_dir / "endpoint_search_state.csv", self.search_rows)
         _write_csv(
+            self.run_dir / "routing_eligibility_events.csv",
+            getattr(self, "routing_eligibility_rows", []),
+        )
+        _write_csv(
             self.run_dir / "preflight_warmup.csv", self.preflight_warmup_rows
         )
         diagnostics = list(self.routing_diagnostic_rows)
@@ -1333,6 +1531,9 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                 "selected_prefill_endpoint_id": item.get("selected_prefill_endpoint_id"),
                 "selected_decode_endpoint_id": item.get("selected_decode_endpoint_id"),
                 "routing_reason": decision.get("reason"),
+                "routing_decision_timestamp_s": decision.get(
+                    "decision_timestamp_s"
+                ),
                 "candidate_states_json": json.dumps(
                     decision.get("candidate_states"), sort_keys=True
                 ),
@@ -1607,6 +1808,31 @@ class StageD1Harness(StageC2AFastSafetyHarness):
         final_safety_consistent = final_d1_safety_state_consistent(
             self.search_rows
         )
+        recovery_audit = chronological_recovery_audit(
+            self.safety_rows, routing_rows
+        )
+        eligibility_rows = getattr(self, "routing_eligibility_rows", [])
+        recovering_publications = [
+            row for row in eligibility_rows if row.get("state") == "RECOVERING"
+        ]
+        available_publications = [
+            row for row in eligibility_rows if row.get("state") == "AVAILABLE"
+        ]
+        recovery_publication_valid = (
+            bool(recovering_publications)
+            and len(available_publications) == len(recovering_publications)
+            and all(
+                not _bool(row.get("routing_eligible"))
+                and row.get("decision_timestamp_s") not in (None, "")
+                for row in recovering_publications
+            )
+            and all(
+                _bool(row.get("routing_eligible"))
+                and _bool(row.get("readback_valid"))
+                and row.get("readback_timestamp_s") not in (None, "")
+                for row in available_publications
+            )
+        )
         final_endpoints = getattr(self, "last_routing_state", {}).get(
             "endpoints"
         ) or {}
@@ -1632,6 +1858,8 @@ class StageD1Harness(StageC2AFastSafetyHarness):
             warmup_valid,
             asymmetry_actuated,
             revoked_energy_ineligible,
+            recovery_audit["pass"],
+            recovery_publication_valid,
         ))
         preflight_pass = d1_preflight_acceptance(
             stage=self.stage,
@@ -1641,6 +1869,9 @@ class StageD1Harness(StageC2AFastSafetyHarness):
             ttft_attainment=overall_ttft_attainment,
             tpot_attainment=overall_tpot_attainment,
             final_safety_state_consistent=final_safety_consistent,
+            chronological_recovery_safe=(
+                recovery_audit["pass"] and recovery_publication_valid
+            ),
             restoration_valid=restoration_valid,
         )
         summaries = []
@@ -1733,8 +1964,14 @@ class StageD1Harness(StageC2AFastSafetyHarness):
             ),
             "final_safety_state_consistency_audit": final_safety_consistent,
             "revoked_energy_routing_ineligible_audit": (
-                revoked_energy_ineligible
+                revoked_energy_ineligible and recovery_audit["pass"]
             ),
+            "chronological_recovery_routing_audit": recovery_audit["pass"],
+            "chronological_recovery_violation_count": recovery_audit[
+                "violation_count"
+            ],
+            "chronological_recovery_violations": recovery_audit["violations"],
+            "routing_recovery_publication_audit": recovery_publication_valid,
             "final_high_restoration_audit": restoration_valid,
             "policies": list(POLICIES),
             "repetitions": repetitions,

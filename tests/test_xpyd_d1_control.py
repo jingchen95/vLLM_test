@@ -183,6 +183,35 @@ class D1ControlTests(unittest.TestCase):
             "ENDPOINT_EVIDENCE_SLO_RISK",
         )
 
+    def test_readback_failure_is_preserved_in_safety_audit(self):
+        values = controllers()
+        values["D0"].state.candidate_frequency = 1125
+        values["D0"].set_current_frequency(1125)
+
+        def fail(endpoint, recommendation):
+            del endpoint, recommendation
+            raise RuntimeError("readback failed")
+
+        monitor = EndpointFastSafetyRuntime(
+            values, fail,
+            {
+                "slo": {"ttft_ms": 600.0, "tpot_ms": 65.0},
+                "fast_safety": {"telemetry_max_age_s": 300.0},
+                "severe_queue_depth": 4,
+            },
+            policy="JOINT-ROUTING-PER-ENDPOINT", block_id="fixture",
+            window_index=1, enabled=True,
+        )
+        with self.assertRaisesRegex(RuntimeError, "readback failed"):
+            monitor.process_safety_event({
+                "event": "REQUEST_COMPLETED", "tpot_ms": 70.0,
+                "selected_decode_endpoint_id": "D0",
+                "logical_request_id": "failure", "timestamp_unix_s": 2.0,
+            })
+        self.assertEqual(len(monitor.event_rows), 1)
+        self.assertFalse(monitor.event_rows[0]["readback_valid"])
+        self.assertIn("readback failed", monitor.event_rows[0]["recovery_error"])
+
 
 if __name__ == "__main__":
     unittest.main()

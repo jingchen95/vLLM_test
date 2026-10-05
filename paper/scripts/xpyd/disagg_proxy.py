@@ -22,6 +22,7 @@ from xpyd.d1_routing import (
     D1PairRouter,
     D1RoutingDecision,
     RequestRoutingContext,
+    routing_state_lock,
 )
 from xpyd.registry import EndpointRegistry
 from xpyd.types import EndpointSpec, EndpointState, LifecycleState
@@ -794,7 +795,11 @@ class D1RuntimeCompatiblePairs(RoundRobinCompatiblePairs):
     ) -> tuple[str, str]:
         if context is None:
             raise ValueError("D1 routing requires admission-time request context")
-        self.last_decision = self.router.choose(context, load_snapshot)
+        # Hold the shared inter-process lock for the whole decision. A safety
+        # publisher takes the exclusive side before exposing RECOVERING, so a
+        # decision is unambiguously before or after revocation publication.
+        with routing_state_lock(self.control_file, exclusive=False):
+            self.last_decision = self.router.choose(context, load_snapshot)
         return self.last_decision.pair
 
 

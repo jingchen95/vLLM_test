@@ -11,6 +11,7 @@ PAIRS = (("P0", "D0"), ("P0", "D1"), ("P1", "D0"), ("P1", "D1"))
 def endpoint(status="VALIDATED_SAFE", energy=10.0, fresh=True, healthy=True):
     return {
         "healthy": healthy,
+        "routing_eligible": True,
         "telemetry_fresh": fresh,
         "safety_status": status,
         "requested_frequency_mhz": 1500,
@@ -137,6 +138,51 @@ class D1RoutingTests(unittest.TestCase):
             for item in decision.candidate_states
             if item["pair"][0] == "P0"
         ))
+
+    def test_recovering_endpoint_is_excluded_while_other_endpoint_routes(self):
+        value = state()
+        value["endpoints"]["D0"].update({
+            "safety_status": "RECOVERING",
+            "routing_eligible": False,
+            "recent_energy_j_per_assigned_request": 0.01,
+        })
+        router = self.router(value, cold_start_requests=0)
+        decisions = [
+            router.choose(context(request_id=f"recover-{index}"))
+            for index in range(4)
+        ]
+        self.assertTrue(all(item.pair[1] == "D1" for item in decisions))
+        self.assertTrue(all(
+            not candidate["routing_eligible"]
+            for decision in decisions
+            for candidate in decision.candidate_states
+            if candidate["pair"][1] == "D0"
+        ))
+
+    def test_endpoint_may_route_again_only_after_recovery_publication(self):
+        value = state()
+        value["endpoints"]["D0"].update({
+            "safety_status": "RECOVERING", "routing_eligible": False,
+        })
+        router = self.router(value, cold_start_requests=0)
+        self.assertEqual(router.choose(context(request_id="during")).pair[1], "D1")
+        value["endpoints"]["D0"] = endpoint(energy=0.01)
+        after = router.choose(context(request_id="after"))
+        self.assertEqual(after.pair[1], "D0")
+        self.assertEqual(after.reason, "ENERGY_PREFERENCE")
+
+    def test_readback_failure_state_fails_closed_for_affected_endpoint(self):
+        value = state()
+        value["endpoints"]["D0"].update({
+            "safety_status": "RECOVERING",
+            "routing_eligible": False,
+            "recovery": {"readback_valid": False},
+        })
+        decision = self.router(value, cold_start_requests=0).choose(context())
+        self.assertEqual(decision.pair[1], "D1")
+        value["endpoints"]["D1"]["routing_eligible"] = False
+        with self.assertRaisesRegex(D1RoutingError, "no routing-eligible"):
+            self.router(value, cold_start_requests=0).choose(context())
 
 
 if __name__ == "__main__":
