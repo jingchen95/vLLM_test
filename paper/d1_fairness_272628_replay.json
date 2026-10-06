@@ -1,0 +1,615 @@
+{
+  "kind": "diagnostic_only_not_physical_results",
+  "original_job": 272628,
+  "pass": false,
+  "blocks": [
+    {
+      "block": "r01-high-sustainable-per-endpoint-fast-rr",
+      "load": "HIGH-SUSTAINABLE",
+      "repeat": 1,
+      "P_probe_opportunities": [
+        {
+          "evidence_window": 1,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.04143619126019379,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.08948774410722156,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        }
+      ],
+      "P_decisions": [
+        {
+          "evidence_window": 1,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.04143619126019379,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        },
+        {
+          "evidence_window": 1,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.061905569319302835,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 2520,
+          "permission": false
+        },
+        {
+          "evidence_window": 2,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.018937883821005624,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 1890,
+          "permission": false
+        },
+        {
+          "evidence_window": 2,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.09499683269920449,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 2520,
+          "permission": false
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.01518622568498055,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 1890,
+          "permission": false
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.08948774410722156,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        }
+      ],
+      "stop": "after w3 recommendation, before counterfactual w4 physical measurement",
+      "P1_MID_safety_measured": false,
+      "both_P_MID_opportunity_gate": true
+    },
+    {
+      "block": "r01-medium-per-endpoint-fast-rr",
+      "load": "MEDIUM",
+      "repeat": 1,
+      "P_probe_opportunities": [
+        {
+          "evidence_window": 1,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.07455268028813104,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.04332533913354079,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        }
+      ],
+      "P_decisions": [
+        {
+          "evidence_window": 1,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.07455268028813104,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        },
+        {
+          "evidence_window": 1,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.065660760893176,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 2520,
+          "permission": false
+        },
+        {
+          "evidence_window": 2,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.07021492378165324,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 1890,
+          "permission": false
+        },
+        {
+          "evidence_window": 2,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.045442562007034816,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 2520,
+          "permission": false
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.08046903725092609,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 1890,
+          "permission": false
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.04332533913354079,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        }
+      ],
+      "stop": "after w3 recommendation, before counterfactual w4 physical measurement",
+      "P1_MID_safety_measured": false,
+      "both_P_MID_opportunity_gate": true
+    },
+    {
+      "block": "r02-high-sustainable-per-endpoint-fast-rr",
+      "load": "HIGH-SUSTAINABLE",
+      "repeat": 2,
+      "P_probe_opportunities": [
+        {
+          "evidence_window": 1,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.06027871478969852,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.07012253937621911,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        }
+      ],
+      "P_decisions": [
+        {
+          "evidence_window": 1,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.06027871478969852,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        },
+        {
+          "evidence_window": 1,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.10046828584745526,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 2520,
+          "permission": false
+        },
+        {
+          "evidence_window": 2,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.033981586418425046,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 1890,
+          "permission": false
+        },
+        {
+          "evidence_window": 2,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.061749374882007636,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 2520,
+          "permission": false
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.015031534790371856,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 1890,
+          "permission": false
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.07012253937621911,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        }
+      ],
+      "stop": "after w3 recommendation, before counterfactual w4 physical measurement",
+      "P1_MID_safety_measured": false,
+      "both_P_MID_opportunity_gate": true
+    },
+    {
+      "block": "r02-medium-per-endpoint-fast-rr",
+      "load": "MEDIUM",
+      "repeat": 2,
+      "P_probe_opportunities": [
+        {
+          "evidence_window": 1,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.052479602163657546,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.11408945716296652,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1260,
+          "permission": true
+        }
+      ],
+      "P_decisions": [
+        {
+          "evidence_window": 1,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.052479602163657546,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        },
+        {
+          "evidence_window": 1,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.11983918220115224,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 2520,
+          "permission": false
+        },
+        {
+          "evidence_window": 2,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.046895969503869615,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 1890,
+          "permission": false
+        },
+        {
+          "evidence_window": 2,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.1165678297014288,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 2520,
+          "permission": false
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.05330611967171232,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 1890,
+          "permission": false
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 10880,
+          "attainment": 1.0,
+          "headroom": 0.11408945716296652,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1260,
+          "permission": true
+        }
+      ],
+      "stop": "after w3 recommendation, before counterfactual w4 physical measurement",
+      "P1_MID_safety_measured": false,
+      "both_P_MID_opportunity_gate": false
+    },
+    {
+      "block": "r03-high-sustainable-per-endpoint-fast-rr",
+      "load": "HIGH-SUSTAINABLE",
+      "repeat": 3,
+      "P_probe_opportunities": [
+        {
+          "evidence_window": 1,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.09673522459343076,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.04317168906951944,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        }
+      ],
+      "P_decisions": [
+        {
+          "evidence_window": 1,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.09673522459343076,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        },
+        {
+          "evidence_window": 1,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.03262388271590074,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 2520,
+          "permission": false
+        },
+        {
+          "evidence_window": 2,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.018406081246212125,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 1890,
+          "permission": false
+        },
+        {
+          "evidence_window": 2,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.03611467049146692,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 2520,
+          "permission": false
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.015062033121163646,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 1890,
+          "permission": false
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.04317168906951944,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        }
+      ],
+      "stop": "after w3 recommendation, before counterfactual w4 physical measurement",
+      "P1_MID_safety_measured": false,
+      "both_P_MID_opportunity_gate": true
+    },
+    {
+      "block": "r03-medium-per-endpoint-fast-rr",
+      "load": "MEDIUM",
+      "repeat": 3,
+      "P_probe_opportunities": [
+        {
+          "evidence_window": 1,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.06810581148602068,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.04234446367869774,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        }
+      ],
+      "P_decisions": [
+        {
+          "evidence_window": 1,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.06810581148602068,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        },
+        {
+          "evidence_window": 1,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.05287131038494408,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 2520,
+          "permission": false
+        },
+        {
+          "evidence_window": 2,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.0631072773442914,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 1890,
+          "permission": false
+        },
+        {
+          "evidence_window": 2,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.04996512597426772,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 2520,
+          "permission": false
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P0",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 8960,
+          "attainment": 1.0,
+          "headroom": 0.07905241893604398,
+          "decision": "ACCEPT_SAFE",
+          "target_mhz": 1890,
+          "permission": false
+        },
+        {
+          "evidence_window": 3,
+          "endpoint": "P1",
+          "assigned_valid_requests": 10,
+          "input_token_coverage": 12800,
+          "attainment": 1.0,
+          "headroom": 0.04234446367869774,
+          "decision": "EXPLORE_DOWN",
+          "target_mhz": 1890,
+          "permission": true
+        }
+      ],
+      "stop": "after w3 recommendation, before counterfactual w4 physical measurement",
+      "P1_MID_safety_measured": false,
+      "both_P_MID_opportunity_gate": true
+    }
+  ],
+  "source_sha256": {
+    "stage_d1_requests.csv": "de83af68cb974095df420f9b932e108a7bd1b8e3c54a5bbba5ea737192384c83",
+    "stage_d1_measurements.csv": "406959d6afae8a33f01169f369e9ce722c5160856643e7682e9c1f0121a43029",
+    "controller_decisions.csv": "6b9135fc7a69920b4dc13cdc8789791983c1e3b6193f1e0b96b7e6edff19256e",
+    "clock_segments.csv": "c3f909859bec4c8bfa9baf484710d5d0a9321875d5260f2a78ab1d526b23616c"
+  },
+  "config_sha256": "376ea342592ffceb1fbc2ffcf71bfe622619a47971d2d9c011c1bdcb6c758db4",
+  "semantics": "P-side opportunity replay only, holding observed D behavior exogenous. Old w1-w3 physically matched P observations only. Simulated readback bookkeeping, no GPU access. P1 receives a w4 downward opportunity; its target must be reported as recommended, not forced to MID. No counterfactual safety/energy is inferred."
+}

@@ -3,7 +3,9 @@
 import unittest
 
 from xpyd.adaptive_exploration import AdaptiveExplorationConfig, AdaptivePoolController
-from xpyd.d1_control import EndpointFastSafetyRuntime, exploration_permissions
+from xpyd.d1_control import (
+    EndpointFastSafetyRuntime, PhaseExplorationArbiter, exploration_permissions,
+)
 
 
 def controllers():
@@ -95,14 +97,71 @@ class D1ControlTests(unittest.TestCase):
 
     def test_exploration_guard_never_allows_two_same_phase_probes(self):
         values = controllers()
-        permissions = exploration_permissions(values, "P")
+        arbiter = PhaseExplorationArbiter(("P0", "P1"))
+        permissions = exploration_permissions(values, "P", arbiter)
         self.assertEqual(sum(permissions.values()), 1)
         chosen = next(key for key, allowed in permissions.items() if allowed)
         values[chosen].state.candidate_frequency = 1890
         values[chosen].set_current_frequency(1890)
         self.assertEqual(
-            exploration_permissions(values, "P"), {"P0": False, "P1": False}
+            exploration_permissions(values, "P", arbiter), {"P0": False, "P1": False}
         )
+
+    def test_breadth_first_probe_opportunities_are_symmetric_for_both_phases(self):
+        for phase, order, mid in (
+            ("P", ("P0", "P1"), 1890), ("P", ("P1", "P0"), 1890),
+            ("D", ("D0", "D1"), 1125), ("D", ("D1", "D0"), 1125),
+        ):
+            with self.subTest(phase=phase, order=order):
+                values = controllers()
+                arbiter = PhaseExplorationArbiter(order)
+                first, second = order
+                self.assertTrue(exploration_permissions(values, phase, arbiter)[first])
+                arbiter.record_opportunity(first, probe_frequency=mid)
+                values[first].state.candidate_frequency = mid
+                values[first].set_current_frequency(mid)
+                self.assertFalse(any(exploration_permissions(values, phase, arbiter).values()))
+                # Only this endpoint's own candidate measurement can validate it.
+                values[first].state.candidate_frequency = None
+                values[first].state.known_safe_frequency = mid
+                values[first].state.validated_safe_frequencies.add(mid)
+                for _ in range(3):
+                    permissions = exploration_permissions(values, phase, arbiter)
+                    self.assertTrue(permissions[second])
+                    self.assertFalse(permissions[first])
+                self.assertNotIn(mid, values[second].state.validated_safe_frequencies)
+                # Unequal generic evidence counters cannot reverse fairness.
+                values[second].state.windows_observed = 1000
+                values[second].state.requests_observed = 10000
+                self.assertTrue(exploration_permissions(values, phase, arbiter)[second])
+
+    def test_fair_ties_rotate_without_endpoint_name_priority(self):
+        values = controllers()
+        arbiter = PhaseExplorationArbiter(("P1", "P0"))
+        for endpoint in ("P1", "P0", "P1", "P0"):
+            self.assertTrue(exploration_permissions(values, "P", arbiter)[endpoint])
+            arbiter.record_opportunity(endpoint)
+        self.assertEqual(arbiter.opportunities, {"P1": 2, "P0": 2})
+
+    def test_failed_probe_still_gives_untested_peer_the_next_opportunity(self):
+        values = controllers()
+        arbiter = PhaseExplorationArbiter(("D0", "D1"))
+        arbiter.record_opportunity("D0", probe_frequency=1125)
+        values["D0"].state.converged = True
+        values["D0"].state.revoked_frequencies.add(1125)
+        self.assertEqual(exploration_permissions(values, "D", arbiter), {"D0": False, "D1": True})
+
+    def test_missing_safe_peer_and_two_active_candidates_still_fail_closed(self):
+        values = controllers()
+        arbiter = PhaseExplorationArbiter(("P0", "P1"))
+        for ep in ("P0", "P1"):
+            values[ep].state.validated_safe_frequencies.clear()
+        self.assertFalse(any(exploration_permissions(values, "P", arbiter).values()))
+        for ep in ("P0", "P1"):
+            values[ep].state.candidate_frequency = 1890
+            values[ep].set_current_frequency(1890)
+        with self.assertRaisesRegex(ValueError, "simultaneous"):
+            exploration_permissions(values, "P", arbiter)
 
     def test_readback_or_stale_failure_is_scoped_to_affected_endpoint(self):
         values = controllers()

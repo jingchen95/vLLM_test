@@ -21,36 +21,79 @@ def active_candidate(controller: AdaptivePoolController) -> bool:
     )
 
 
+class PhaseExplorationArbiter:
+    """Block-local breadth-first opportunities, never shared safety proof.
+
+    Caller-supplied order seeds the first opportunity only. Subsequent ties
+    rotate after explicitly consumed opportunities; endpoint names and generic
+    evidence counters do not determine priority. History is opportunity history,
+    not context-conditioned safe/unsafe knowledge, and survives context resets.
+    """
+
+    def __init__(self, endpoints: Sequence[str]) -> None:
+        self.endpoints = tuple(endpoints)
+        if not self.endpoints or len(set(self.endpoints)) != len(self.endpoints):
+            raise ValueError("distinct phase-local endpoints are required")
+        self.cursor = 0
+        self.opportunities = {item: 0 for item in self.endpoints}
+        self.probe_history: dict[str, list[int]] = {
+            item: [] for item in self.endpoints
+        }
+
+    def permissions(
+        self, controllers: Mapping[str, AdaptivePoolController],
+    ) -> dict[str, bool]:
+        active = [item for item in self.endpoints if active_candidate(controllers[item])]
+        if len(active) > 1:
+            raise ValueError("simultaneous unvalidated same-phase probes are forbidden")
+        denied = {item: False for item in self.endpoints}
+        if active:
+            return denied
+        safe = {
+            item for item in self.endpoints
+            if controllers[item].is_frequency_validated_safe(
+                controllers[item].current_frequency_mhz
+            )
+        }
+        eligible = [
+            item for item in self.endpoints
+            if not controllers[item].state.converged
+            and any(peer in safe for peer in self.endpoints if peer != item)
+        ]
+        if not eligible:
+            return denied
+        rotation = self.endpoints[self.cursor:] + self.endpoints[:self.cursor]
+
+        def priority(item: str) -> tuple[int, int, int, int]:
+            levels = controllers[item].frequencies_mhz
+            depth = max(
+                (len(levels) - 1 - levels.index(freq)
+                 for freq in self.probe_history[item]), default=0,
+            )
+            return (depth, len(self.probe_history[item]),
+                    self.opportunities[item], rotation.index(item))
+
+        chosen = min(eligible, key=priority)
+        return {item: item == chosen for item in self.endpoints}
+
+    def record_opportunity(
+        self, endpoint_id: str, *, probe_frequency: Optional[int] = None,
+    ) -> None:
+        """Record a consumed permission; count probes only after good readback."""
+        self.opportunities[endpoint_id] += 1
+        if probe_frequency is not None:
+            self.probe_history[endpoint_id].append(int(probe_frequency))
+        self.cursor = (self.endpoints.index(endpoint_id) + 1) % len(self.endpoints)
+
+
 def exploration_permissions(
     controllers: Mapping[str, AdaptivePoolController],
     phase: str,
+    arbiter: PhaseExplorationArbiter,
 ) -> dict[str, bool]:
-    """Allow at most one same-phase unvalidated probe with a safe fallback."""
-    endpoints = PHASE_ENDPOINTS[phase]
-    active = [item for item in endpoints if active_candidate(controllers[item])]
-    if len(active) > 1:
-        raise ValueError("simultaneous unvalidated same-phase probes are forbidden")
-    if active:
-        return {item: False for item in endpoints}
-    safe_fallbacks = [
-        item for item in endpoints
-        if int(controllers[item].state.known_safe_frequency)
-        == controllers[item].current_frequency_mhz
-    ]
-    if not safe_fallbacks:
-        return {item: False for item in endpoints}
-    # Deterministic alternation based only on online evidence counts.
-    chosen = min(
-        endpoints,
-        key=lambda item: (
-            controllers[item].state.windows_observed,
-            controllers[item].state.requests_observed,
-            item,
-        ),
-    )
-    if chosen in safe_fallbacks and len(safe_fallbacks) == 1:
-        chosen = next(item for item in endpoints if item != chosen)
-    return {item: item == chosen for item in endpoints}
+    if set(arbiter.endpoints) != set(PHASE_ENDPOINTS[phase]):
+        raise ValueError("arbiter endpoints must match the phase")
+    return arbiter.permissions(controllers)
 
 
 class EndpointFastSafetyRuntime(FastSafetyRuntime):
@@ -366,4 +409,5 @@ __all__ = [
     "EndpointFastSafetyRuntime",
     "active_candidate",
     "exploration_permissions",
+    "PhaseExplorationArbiter",
 ]

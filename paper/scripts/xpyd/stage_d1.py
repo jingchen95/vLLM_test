@@ -21,6 +21,7 @@ from xpyd.adaptive_exploration import (
 from xpyd.d1_control import (
     ENDPOINT_PHASE,
     EndpointFastSafetyRuntime,
+    PhaseExplorationArbiter,
     active_candidate,
     exploration_permissions,
 )
@@ -54,6 +55,17 @@ POLICIES = (
 )
 ENDPOINTS = ("P0", "P1", "D0", "D1")
 PAIRS = (("P0", "D0"), ("P0", "D1"), ("P1", "D0"), ("P1", "D1"))
+
+
+def endpoint_mixed_clock(metrics: Mapping[str, Any], endpoint_id: str) -> bool:
+    """Use physical endpoint segments; legacy evidence stays conservative."""
+    raw = metrics.get("endpoint_mid_window_transition_json")
+    if raw is not None:
+        flags = json.loads(raw) if isinstance(raw, str) else raw
+        if endpoint_id not in flags or not isinstance(flags[endpoint_id], bool):
+            return True  # missing/invalid required clock evidence is not clean
+        return flags[endpoint_id]
+    return _bool(metrics.get("%s_mid_window_transition" % ENDPOINT_PHASE[endpoint_id]))
 
 
 NORMALIZED_D1_REQUIRED_FIELDS = {
@@ -626,7 +638,7 @@ class StageD1Harness(StageC2AFastSafetyHarness):
             ttft_slo_ms=600.0,
             tpot_slo_ms=65.0,
         )
-        return {
+        controllers = {
             endpoint_id: AdaptivePoolController(
                 ENDPOINT_PHASE[endpoint_id],
                 "prefill" if endpoint_id.startswith("P") else "decode",
@@ -636,6 +648,27 @@ class StageD1Harness(StageC2AFastSafetyHarness):
             )
             for endpoint_id in ENDPOINTS
         }
+        # New controllers and opportunity histories for each cold-start block.
+        self.exploration_arbiters = {
+            phase: PhaseExplorationArbiter([
+                item for item in controllers if ENDPOINT_PHASE[item] == phase
+            ])
+            for phase in ("P", "D")
+        }
+        return controllers
+
+    def _measure_window(self, *args: Any, **kwargs: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        row, requests = super()._measure_window(*args, **kwargs)
+        ledger = kwargs["ledger"]
+        row["endpoint_mid_window_transition_json"] = json.dumps({
+            item: any(
+                segment["endpoint_id"] == item
+                and segment["segment_kind"] == "TRANSITION"
+                for segment in ledger.rows
+            )
+            for item in ENDPOINTS
+        }, sort_keys=True)
+        return row, requests
 
     def _endpoint_status(
         self,
@@ -768,10 +801,7 @@ class StageD1Harness(StageC2AFastSafetyHarness):
         evidence = endpoint_evidence_summary(requests, metrics)
         self.latest_endpoint_evidence = evidence
         for endpoint_id, values in evidence.items():
-            phase = ENDPOINT_PHASE[endpoint_id]
-            mixed_frequency = _bool(
-                metrics.get("%s_mid_window_transition" % phase)
-            )
+            mixed_frequency = endpoint_mixed_clock(metrics, endpoint_id)
             self.endpoint_energy[endpoint_id] = (
                 None if mixed_frequency
                 else values["gross_energy_j_per_assigned_request"]
@@ -1021,7 +1051,9 @@ class StageD1Harness(StageC2AFastSafetyHarness):
     ) -> None:
         now = time.time()
         permissions = {
-            phase: exploration_permissions(controllers, phase)
+            phase: exploration_permissions(
+                controllers, phase, self.exploration_arbiters[phase]
+            )
             for phase in ("P", "D")
         }
         for endpoint_id in ENDPOINTS:
@@ -1043,7 +1075,7 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                     "before_window_index": before_window_index,
                 })
                 continue
-            if _bool(metrics.get("%s_mid_window_transition" % phase)):
+            if endpoint_mixed_clock(metrics, endpoint_id):
                 self.decision_rows.append({
                     "policy": policy,
                     "block_id": block_id,
@@ -1099,6 +1131,17 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                     readback_valid=bool(row["readback_valid"]),
                     timestamp_s=float(row["readback_timestamp_unix_s"]),
                 )
+            granted = allow_exploration and permissions[phase][endpoint_id]
+            arbiter = self.exploration_arbiters[phase]
+            if granted:
+                physical_probe = (
+                    decision.decision == "EXPLORE_DOWN"
+                    and target == int(decision.requested_frequency_mhz)
+                    and actions.get(endpoint_id, {}).get("readback_valid") is True
+                )
+                arbiter.record_opportunity(
+                    endpoint_id, probe_frequency=target if physical_probe else None,
+                )
             log = decision.as_log()
             log.update({
                 "policy": policy,
@@ -1110,6 +1153,9 @@ class StageD1Harness(StageC2AFastSafetyHarness):
                 "evidence_window_index": before_window_index - 1,
                 "context_signature": signature,
                 "finalization": not allow_exploration,
+                "exploration_permission": bool(granted),
+                "exploration_opportunity_count": arbiter.opportunities[endpoint_id],
+                "probe_history_mhz_json": json.dumps(arbiter.probe_history[endpoint_id]),
             })
             if actions:
                 row = actions[endpoint_id]

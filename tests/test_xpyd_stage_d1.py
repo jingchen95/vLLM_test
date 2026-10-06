@@ -21,6 +21,7 @@ from xpyd.stage_d1 import (
     d1_preflight_acceptance,
     d1_context_signature,
     endpoint_evidence_summary,
+    endpoint_mixed_clock,
     final_d1_safety_state_consistent,
     load_configs,
     normalize_d1_request,
@@ -228,6 +229,124 @@ class StageD1ContractTests(unittest.TestCase):
         self.assertIsNone(harness.endpoint_energy["D1"])
         self.assertIsNone(harness.endpoint_energy_frequency["D1"])
         self.assertEqual(harness.pair_feedback_frequencies, {})
+
+    def efficiency_fixture(self):
+        harness = StageD1Harness.__new__(StageD1Harness)
+        harness.settings = json.loads(self.experiment.read_text())["stage_d1"]
+        harness.endpoint_energy = {ep: None for ep in ENDPOINTS}
+        harness.endpoint_energy_frequency = {ep: None for ep in ENDPOINTS}
+        harness.endpoint_latency = {ep: None for ep in ENDPOINTS}
+        controllers = harness._controllers_endpoint()
+        harness.decision_rows = []
+        context = SimpleNamespace(targets={
+            key: controller.current_frequency_mhz for key, controller in controllers.items()
+        })
+
+        def actuate(this, endpoint, target, **kwargs):
+            del this
+            if context.targets[endpoint] == target:
+                return {}
+            context.targets[endpoint] = target
+            now = kwargs["decision_timestamp_s"]
+            return {endpoint: {
+                "timestamp_unix_s": now + 0.1,
+                "readback_timestamp_unix_s": now + 0.2,
+                "observed_freq_after_mhz": target, "readback_valid": True,
+            }}
+
+        harness._endpoint_efficiency_actuation = MethodType(actuate, harness)
+        metrics = {
+            "observation_duration_s": 100.0,
+            "client_waiting_at_offered_close": 0,
+            "backlog_growing": False,
+            "measurement_valid": True, "telemetry_fresh": True,
+            "readback_valid": True,
+            "endpoint_load": {ep: {"waiting_mean": 0, "waiting_max": 0} for ep in ENDPOINTS},
+            "endpoint_mid_window_transition_json": json.dumps({ep: False for ep in ENDPOINTS}),
+            **{ep + "_energy_j": 100.0 for ep in ENDPOINTS},
+        }
+        requests = [normalize_d1_request(self.normalized_row(
+            request_id=f"r{i}", workload_class="SS",
+            input_len=128, requested_output_len=128, observed_output_tokens=128,
+            prefill_endpoint_id="P0" if i % 2 == 0 else "P1",
+            decode_endpoint_id="D0" if i % 4 < 2 else "D1",
+            ttft_ms=580.0, tpot_ms=63.0,
+        )) for i in range(20)]
+        return harness, controllers, context, metrics, requests
+
+    def test_real_efficiency_path_gives_both_endpoints_mid_before_deeper_probe(self):
+        harness, controllers, context, metrics, requests = self.efficiency_fixture()
+        for w in (1, 2, 3, 4):
+            with patch("xpyd.stage_d1.time.time", return_value=100.0 * w):
+                harness._endpoint_efficiency_control(
+                    context, object(), controllers, metrics, requests,
+                    "PER-ENDPOINT-FAST-RR", "b", w + 1,
+                )
+            if w == 1:
+                self.assertEqual((context.targets["P0"], context.targets["P1"]), (1890, 2520))
+            if w == 3:
+                self.assertEqual((context.targets["P0"], context.targets["P1"]), (1890, 1890))
+                self.assertNotIn(1890, controllers["P1"].state.validated_safe_frequencies)
+        for ep, mid in (("P0", 1890), ("P1", 1890), ("D0", 1125), ("D1", 1125)):
+            self.assertIn(mid, controllers[ep].state.validated_safe_frequencies)
+        probes = [row for row in harness.decision_rows if row["decision"] == "EXPLORE_DOWN"]
+        self.assertEqual([row["endpoint_id"] for row in probes], ["P0", "D0", "P1", "D1"])
+
+    def test_mixed_endpoint_does_not_block_clean_peer_candidate_validation(self):
+        for phase, mixed, stable, mid in (("P", "P0", "P1", 1890), ("P", "P1", "P0", 1890),
+                                         ("D", "D0", "D1", 1125), ("D", "D1", "D0", 1125)):
+            with self.subTest(phase=phase, mixed=mixed):
+                harness, controllers, context, metrics, requests = self.efficiency_fixture()
+                controllers[stable].state.candidate_frequency = mid
+                controllers[stable].set_current_frequency(mid)
+                context.targets[stable] = mid
+                metrics[phase + "_mid_window_transition"] = True
+                metrics["endpoint_mid_window_transition_json"] = json.dumps({ep: ep == mixed for ep in ENDPOINTS})
+                with patch("xpyd.stage_d1.time.time", return_value=100.0):
+                    harness._endpoint_efficiency_control(
+                        context, object(), controllers, metrics, requests,
+                        "PER-ENDPOINT-FAST-RR", "b", 2,
+                    )
+                decisions = {row["endpoint_id"]: row for row in harness.decision_rows}
+                self.assertEqual(decisions[mixed]["trigger"], "MIXED_FREQUENCY_WINDOW")
+                self.assertEqual(decisions[stable]["evidence_classification"], "SAFE")
+                self.assertIn(mid, controllers[stable].state.validated_safe_frequencies)
+                harness._update_runtime_feedback(metrics, requests, context.targets)
+                self.assertIsNone(harness.endpoint_energy[mixed])
+                self.assertEqual(harness.endpoint_energy[stable], 10.0)
+
+    def test_fair_permission_does_not_retune_frozen_coarse_jump(self):
+        harness, controllers, context, metrics, requests = self.efficiency_fixture()
+        for w in (1, 2, 3):
+            if w == 3:
+                for row in requests:
+                    if row["prefill_endpoint_id"] == "P1":
+                        row["ttft_ms"] = 530.0  # >10% headroom: frozen two-level jump
+            with patch("xpyd.stage_d1.time.time", return_value=100.0 * w):
+                harness._endpoint_efficiency_control(
+                    context, object(), controllers, metrics, requests,
+                    "PER-ENDPOINT-FAST-RR", "b", w + 1,
+                )
+        self.assertEqual((context.targets["P0"], context.targets["P1"]), (1890, 1260))
+        self.assertEqual(harness.exploration_arbiters["P"].probe_history, {
+            "P0": [1890], "P1": [1260],
+        })
+
+    def test_missing_endpoint_clock_flag_stays_ineligible(self):
+        self.assertTrue(endpoint_mixed_clock({"endpoint_mid_window_transition_json": "{}"}, "P0"))
+        self.assertTrue(endpoint_mixed_clock({"P_mid_window_transition": True}, "P1"))
+
+    def test_measurement_endpoint_flags_come_from_actual_clock_segments(self):
+        harness = StageD1Harness.__new__(StageD1Harness)
+        ledger = SimpleNamespace(rows=[
+            {"endpoint_id": "P0", "segment_kind": "TRANSITION"},
+            *({"endpoint_id": ep, "segment_kind": "STABLE"} for ep in ENDPOINTS),
+        ])
+        with patch("xpyd.stagec2a_fast_safety.StageC2AFastSafetyHarness._measure_window", return_value=({}, [])):
+            metrics, _ = harness._measure_window(ledger=ledger)
+        self.assertEqual(json.loads(metrics["endpoint_mid_window_transition_json"]), {
+            "P0": True, "P1": False, "D0": False, "D1": False,
+        })
 
     def test_requested_output_budget_drives_context_not_actual_output(self):
         request = normalize_d1_request(self.normalized_row(
