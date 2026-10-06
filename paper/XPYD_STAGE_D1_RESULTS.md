@@ -89,7 +89,16 @@ attainment was 100%/98.33%. See `XPYD_D1_PREFLIGHT_RESULTS.md`.
 
 ## Matched full result
 
-Full D1 result: **NOT RUN**. The full matrix is gated on an accepted preflight.
+Job `272537` failed during startup after 18 seconds because submission did not
+pin the cuda-env interpreter. The default system Python could not import vLLM;
+no D1 measurement window ran. This is a submission failure, not a policy result.
+
+Use `bash paper/scripts/submit_xpyd_d1_full.sh` on Minerva to reproduce the full
+submission. It verifies vLLM 0.15.1 and the accepted preflight before submitting,
+and explicitly exports the cuda-env `PYTHON_BIN` into the Slurm job. Experiment
+semantics and controller code are unchanged.
+
+Full D1 scientific result: **PENDING RERUN**.
 
 ## Claim boundary
 

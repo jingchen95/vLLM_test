@@ -1714,6 +1714,7 @@ run_experiment_E() {
 
     # Check vLLM version supports disagg
     local vllm_ver
+    echo "  Python interpreter: ${PYTHON_BIN}"
     vllm_ver=$("${PYTHON_BIN}" -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "unknown")
     echo "  vLLM version: ${vllm_ver}"
     if [ -n "${XPYD_PHASE3A_CONFIG}${XPYD_PHASE3B_CONFIG}${XPYD_PHASE3B_CHARACTERIZATION_CONFIG}${XPYD_PHASE3C_CONFIG}${XPYD_PHASE3D_CONFIG}${XPYD_PHASE4A_CONFIG}${XPYD_PHASE4B_CONFIG}${XPYD_PHASE4B1_CONFIG}${XPYD_PHASE4C_CONFIG}${XPYD_STAGEB_RUNTIME_CONFIG}${XPYD_STAGEC0_RUNTIME_CONFIG}${XPYD_STAGEC1_RUNTIME_CONFIG}${XPYD_STAGEC1_HEADROOM_RUNTIME_CONFIG}${XPYD_STAGEC2_RUNTIME_CONFIG}${XPYD_STAGED1_RUNTIME_CONFIG}" ] && [ "${vllm_ver}" != "0.15.1" ]; then
