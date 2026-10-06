@@ -1,0 +1,841 @@
+{
+  "schema_version": 1,
+  "kind": "offline_diagnostic_audit",
+  "job_id": 272628,
+  "run_id": "stage_d1_full_212c925",
+  "run_commit": "212c9256f81e87b911a8b81c3420e7f13c880059",
+  "accepted_preflight_implementation": "7158ff28acf78735555250f5cc85e366725142f4",
+  "original_data_unchanged": true,
+  "valid": true,
+  "valid_semantics": "all checked measurement, routing, readback and state-consistency gates pass; not a declaration that every policy/repeat meets the SLO",
+  "status": "MEASUREMENT_AND_ROUTING_VALID_WITH_POLICY_SLO_FAILURE",
+  "all_policy_repeats_slo_safe": false,
+  "failed_policy_repeats": [
+    {
+      "load_point": "HIGH-SUSTAINABLE",
+      "repeat": 1,
+      "policy": "PER-ENDPOINT-FAST-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 158715.668,
+      "joules_per_request": 1587.15668,
+      "ttft_attainment": 0.99,
+      "tpot_attainment": 0.94,
+      "slo_contract_pass": false,
+      "paired_energy_saving_fraction_raw": 0.05590577511156929,
+      "paired_energy_saving_fraction_slo_valid": null
+    }
+  ],
+  "audits": {
+    "window_hard_gate_audit": true,
+    "matched_trace_audit": true,
+    "request_context_before_routing_audit": true,
+    "chronological_recovery_routing_audit": true,
+    "revoked_energy_routing_ineligible_audit": true,
+    "chronological_recovery_violation_count": 0,
+    "original_cross_block_false_violation_rows": 8,
+    "original_unique_false_flagged_requests": 4,
+    "endpoint_recovery_intervals_checked": 15,
+    "shared_pool_recovery_events": 11,
+    "total_fast_recovery_events": 26,
+    "routing_recovery_publication_audit": true,
+    "all_48_independent_final_endpoint_states_consistent": true,
+    "all_480_clock_streams_gap_free_readback_valid": true,
+    "final_high_restoration_audit": true,
+    "P_state_replay_assertions": 154
+  },
+  "source_sha256": {
+    "stage_d1_requests.csv": "de83af68cb974095df420f9b932e108a7bd1b8e3c54a5bbba5ea737192384c83",
+    "safety_events.csv": "25e99ae24876db07cb53e4f8ba6fdf000d7eb788c1e87420bbb942cdc41abd46",
+    "stage_d1_repeat_summary.csv": "0aebc198efccaea31058f45e023f94e02c2b5ac74fd2b67f45c8634da93b1855",
+    "stage_d1_measurements.csv": "406959d6afae8a33f01169f369e9ce722c5160856643e7682e9c1f0121a43029",
+    "clock_actions.csv": "05dfb0e6d0a9d54c9d1afacc38faa0095d69fdd8b9907afe279b08eab89fc634",
+    "controller_decisions.csv": "6b9135fc7a69920b4dc13cdc8789791983c1e3b6193f1e0b96b7e6edff19256e",
+    "routing_eligibility_events.csv": "82bbc58b35676939866561a513a306d2653dac654b47eeb95069ad33e106781e",
+    "endpoint_search_state.csv": "06123bb2f79ab5c0f0aa08001fac29d038a77e38870c4477258a2cb4dc491111",
+    "clock_segments.csv": "c3f909859bec4c8bfa9baf484710d5d0a9321875d5260f2a78ab1d526b23616c",
+    "routing_decisions.csv": "82e72e7f1aa702510e2a732397514032af35479a7794ccf74466c14f8396c40a"
+  },
+  "policies": [
+    {
+      "load": "MEDIUM",
+      "policy": "STATIC-HIGH-RR",
+      "fast_recovery_count": 0,
+      "by_phase": {},
+      "residency": {
+        "P0": {
+          "2520": 1
+        },
+        "P1": {
+          "2520": 1
+        },
+        "D0": {
+          "1500": 1
+        },
+        "D1": {
+          "1500": 1
+        }
+      },
+      "transition_seconds": {
+        "P0": 0,
+        "P1": 0,
+        "D0": 0,
+        "D1": 0
+      }
+    },
+    {
+      "load": "MEDIUM",
+      "policy": "SHARED-FAST-RR",
+      "fast_recovery_count": 6,
+      "by_phase": {
+        "D": 3,
+        "P": 3
+      },
+      "residency": {
+        "P0": {
+          "1260": 0.05076575053710765,
+          "1890": 0.749118407814452,
+          "2520": 0.20011584164844035
+        },
+        "P1": {
+          "1260": 0.0517207960315844,
+          "1890": 0.7480355975966532,
+          "2520": 0.2002436063717624
+        },
+        "D0": {
+          "1125": 0.05900954478755659,
+          "1500": 0.9409904552124434
+        },
+        "D1": {
+          "1125": 0.05996378748071293,
+          "1500": 0.940036212519287
+        }
+      },
+      "transition_seconds": {
+        "P0": 1.885725975036621,
+        "P1": 3.8071069717407227,
+        "D0": 1.909416913986206,
+        "D1": 2.1924428939819336
+      }
+    },
+    {
+      "load": "MEDIUM",
+      "policy": "PER-ENDPOINT-FAST-RR",
+      "fast_recovery_count": 6,
+      "by_phase": {
+        "P": 3,
+        "D": 3
+      },
+      "residency": {
+        "P0": {
+          "1260": 0.050776946519125,
+          "1890": 0.7491096822351125,
+          "2520": 0.20011337124576245
+        },
+        "P1": {
+          "2520": 1
+        },
+        "D0": {
+          "750": 0.07264311458246049,
+          "1125": 0.4802616571091876,
+          "1500": 0.4470952283083519
+        },
+        "D1": {
+          "1500": 1
+        }
+      },
+      "transition_seconds": {
+        "P0": 1.8281052112579346,
+        "P1": 0,
+        "D0": 1.9545233249664307,
+        "D1": 0
+      }
+    },
+    {
+      "load": "MEDIUM",
+      "policy": "JOINT-ROUTING-PER-ENDPOINT",
+      "fast_recovery_count": 0,
+      "by_phase": {},
+      "residency": {
+        "P0": {
+          "1260": 0.33430397163248987,
+          "1890": 0.13299469242632983,
+          "2520": 0.5327013359411803
+        },
+        "P1": {
+          "2520": 1
+        },
+        "D0": {
+          "1125": 0.534207557168451,
+          "1500": 0.46579244283154897
+        },
+        "D1": {
+          "1500": 1
+        }
+      },
+      "transition_seconds": {
+        "P0": 0,
+        "P1": 0,
+        "D0": 0,
+        "D1": 0
+      }
+    },
+    {
+      "load": "HIGH-SUSTAINABLE",
+      "policy": "STATIC-HIGH-RR",
+      "fast_recovery_count": 0,
+      "by_phase": {},
+      "residency": {
+        "P0": {
+          "2520": 1
+        },
+        "P1": {
+          "2520": 1
+        },
+        "D0": {
+          "1500": 1
+        },
+        "D1": {
+          "1500": 1
+        }
+      },
+      "transition_seconds": {
+        "P0": 0,
+        "P1": 0,
+        "D0": 0,
+        "D1": 0
+      }
+    },
+    {
+      "load": "HIGH-SUSTAINABLE",
+      "policy": "SHARED-FAST-RR",
+      "fast_recovery_count": 5,
+      "by_phase": {
+        "D": 3,
+        "P": 2
+      },
+      "residency": {
+        "P0": {
+          "1260": 0.029867568603495254,
+          "1890": 0.7699814625266437,
+          "2520": 0.20015096886986108
+        },
+        "P1": {
+          "1260": 0.031043584420853563,
+          "1890": 0.7688061693725484,
+          "2520": 0.200150246206598
+        },
+        "D0": {
+          "1125": 0.05909541016875814,
+          "1500": 0.9409045898312418
+        },
+        "D1": {
+          "1125": 0.060949052933400846,
+          "1500": 0.9390509470665992
+        }
+      },
+      "transition_seconds": {
+        "P0": 1.4832770824432373,
+        "P1": 1.4769980907440186,
+        "D0": 2.2228105068206787,
+        "D1": 2.0909039974212646
+      }
+    },
+    {
+      "load": "HIGH-SUSTAINABLE",
+      "policy": "PER-ENDPOINT-FAST-RR",
+      "fast_recovery_count": 7,
+      "by_phase": {
+        "P": 3,
+        "D": 4
+      },
+      "residency": {
+        "P0": {
+          "1260": 0.05057507463758702,
+          "1890": 0.7492890865106225,
+          "2520": 0.20013583885179043
+        },
+        "P1": {
+          "2520": 1
+        },
+        "D0": {
+          "750": 0.06819263817138434,
+          "1125": 0.4688082196645445,
+          "1500": 0.4629991421640712
+        },
+        "D1": {
+          "1500": 1
+        }
+      },
+      "transition_seconds": {
+        "P0": 1.8722317218780518,
+        "P1": 0,
+        "D0": 2.8231165409088135,
+        "D1": 0
+      }
+    },
+    {
+      "load": "HIGH-SUSTAINABLE",
+      "policy": "JOINT-ROUTING-PER-ENDPOINT",
+      "fast_recovery_count": 2,
+      "by_phase": {
+        "P": 2
+      },
+      "residency": {
+        "P0": {
+          "1260": 0.11089395800379633,
+          "1890": 0.19996059852207,
+          "2520": 0.6891454434741336
+        },
+        "P1": {
+          "1890": 0.13353833075716515,
+          "2520": 0.8664616692428349
+        },
+        "D0": {
+          "1125": 0.3999624233712174,
+          "1500": 0.6000375766287827
+        },
+        "D1": {
+          "1500": 1
+        }
+      },
+      "transition_seconds": {
+        "P0": 1.2619245052337646,
+        "P1": 0,
+        "D0": 0,
+        "D1": 0
+      }
+    }
+  ],
+  "repeat_summary": [
+    {
+      "load_point": "HIGH-SUSTAINABLE",
+      "repeat": 1,
+      "policy": "STATIC-HIGH-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 168114.224,
+      "joules_per_request": 1681.14224,
+      "ttft_attainment": 1,
+      "tpot_attainment": 1,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": null,
+      "paired_energy_saving_fraction_slo_valid": null
+    },
+    {
+      "load_point": "HIGH-SUSTAINABLE",
+      "repeat": 1,
+      "policy": "SHARED-FAST-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 154632.364,
+      "joules_per_request": 1546.32364,
+      "ttft_attainment": 0.99,
+      "tpot_attainment": 0.99,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.08019464194772706,
+      "paired_energy_saving_fraction_slo_valid": 0.08019464194772706
+    },
+    {
+      "load_point": "HIGH-SUSTAINABLE",
+      "repeat": 1,
+      "policy": "PER-ENDPOINT-FAST-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 158715.668,
+      "joules_per_request": 1587.15668,
+      "ttft_attainment": 0.99,
+      "tpot_attainment": 0.94,
+      "slo_contract_pass": false,
+      "paired_energy_saving_fraction_raw": 0.05590577511156929,
+      "paired_energy_saving_fraction_slo_valid": null
+    },
+    {
+      "load_point": "HIGH-SUSTAINABLE",
+      "repeat": 1,
+      "policy": "JOINT-ROUTING-PER-ENDPOINT",
+      "request_count": 100,
+      "total_gross_energy_j": 162589.13499999998,
+      "joules_per_request": 1625.8913499999999,
+      "ttft_attainment": 0.99,
+      "tpot_attainment": 1,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.032865089393030796,
+      "paired_energy_saving_fraction_slo_valid": 0.032865089393030796
+    },
+    {
+      "load_point": "HIGH-SUSTAINABLE",
+      "repeat": 2,
+      "policy": "STATIC-HIGH-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 168219.002,
+      "joules_per_request": 1682.19002,
+      "ttft_attainment": 1,
+      "tpot_attainment": 1,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": null,
+      "paired_energy_saving_fraction_slo_valid": null
+    },
+    {
+      "load_point": "HIGH-SUSTAINABLE",
+      "repeat": 2,
+      "policy": "SHARED-FAST-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 155049.208,
+      "joules_per_request": 1550.4920800000002,
+      "ttft_attainment": 1,
+      "tpot_attainment": 0.99,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.07828957396858162,
+      "paired_energy_saving_fraction_slo_valid": 0.07828957396858162
+    },
+    {
+      "load_point": "HIGH-SUSTAINABLE",
+      "repeat": 2,
+      "policy": "PER-ENDPOINT-FAST-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 162309.028,
+      "joules_per_request": 1623.09028,
+      "ttft_attainment": 0.99,
+      "tpot_attainment": 0.99,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.03513261837090206,
+      "paired_energy_saving_fraction_slo_valid": 0.03513261837090206
+    },
+    {
+      "load_point": "HIGH-SUSTAINABLE",
+      "repeat": 2,
+      "policy": "JOINT-ROUTING-PER-ENDPOINT",
+      "request_count": 100,
+      "total_gross_energy_j": 163815.76799999998,
+      "joules_per_request": 1638.1576799999998,
+      "ttft_attainment": 1,
+      "tpot_attainment": 1,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.0261756041092196,
+      "paired_energy_saving_fraction_slo_valid": 0.0261756041092196
+    },
+    {
+      "load_point": "HIGH-SUSTAINABLE",
+      "repeat": 3,
+      "policy": "STATIC-HIGH-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 168085.63100000002,
+      "joules_per_request": 1680.8563100000001,
+      "ttft_attainment": 1,
+      "tpot_attainment": 1,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": null,
+      "paired_energy_saving_fraction_slo_valid": null
+    },
+    {
+      "load_point": "HIGH-SUSTAINABLE",
+      "repeat": 3,
+      "policy": "SHARED-FAST-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 154382.78699999998,
+      "joules_per_request": 1543.8278699999998,
+      "ttft_attainment": 0.98,
+      "tpot_attainment": 0.99,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.08152299466930654,
+      "paired_energy_saving_fraction_slo_valid": 0.08152299466930654
+    },
+    {
+      "load_point": "HIGH-SUSTAINABLE",
+      "repeat": 3,
+      "policy": "PER-ENDPOINT-FAST-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 158416.597,
+      "joules_per_request": 1584.16597,
+      "ttft_attainment": 0.99,
+      "tpot_attainment": 0.99,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.0575244531164,
+      "paired_energy_saving_fraction_slo_valid": 0.0575244531164
+    },
+    {
+      "load_point": "HIGH-SUSTAINABLE",
+      "repeat": 3,
+      "policy": "JOINT-ROUTING-PER-ENDPOINT",
+      "request_count": 100,
+      "total_gross_energy_j": 161364.435,
+      "joules_per_request": 1613.64435,
+      "ttft_attainment": 0.99,
+      "tpot_attainment": 1,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.03998673747430563,
+      "paired_energy_saving_fraction_slo_valid": 0.03998673747430563
+    },
+    {
+      "load_point": "MEDIUM",
+      "repeat": 1,
+      "policy": "STATIC-HIGH-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 261326.02500000002,
+      "joules_per_request": 2613.2602500000003,
+      "ttft_attainment": 0.98,
+      "tpot_attainment": 1,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": null,
+      "paired_energy_saving_fraction_slo_valid": null
+    },
+    {
+      "load_point": "MEDIUM",
+      "repeat": 1,
+      "policy": "SHARED-FAST-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 238818.498,
+      "joules_per_request": 2388.18498,
+      "ttft_attainment": 0.99,
+      "tpot_attainment": 0.99,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.08612814969347207,
+      "paired_energy_saving_fraction_slo_valid": 0.08612814969347207
+    },
+    {
+      "load_point": "MEDIUM",
+      "repeat": 1,
+      "policy": "PER-ENDPOINT-FAST-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 246998.065,
+      "joules_per_request": 2469.98065,
+      "ttft_attainment": 0.99,
+      "tpot_attainment": 0.99,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.05482791084431805,
+      "paired_energy_saving_fraction_slo_valid": 0.05482791084431805
+    },
+    {
+      "load_point": "MEDIUM",
+      "repeat": 1,
+      "policy": "JOINT-ROUTING-PER-ENDPOINT",
+      "request_count": 100,
+      "total_gross_energy_j": 256634.218,
+      "joules_per_request": 2566.34218,
+      "ttft_attainment": 1,
+      "tpot_attainment": 1,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.01795384520160216,
+      "paired_energy_saving_fraction_slo_valid": 0.01795384520160216
+    },
+    {
+      "load_point": "MEDIUM",
+      "repeat": 2,
+      "policy": "STATIC-HIGH-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 261616.671,
+      "joules_per_request": 2616.16671,
+      "ttft_attainment": 1,
+      "tpot_attainment": 1,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": null,
+      "paired_energy_saving_fraction_slo_valid": null
+    },
+    {
+      "load_point": "MEDIUM",
+      "repeat": 2,
+      "policy": "SHARED-FAST-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 239263.37600000002,
+      "joules_per_request": 2392.63376,
+      "ttft_attainment": 0.99,
+      "tpot_attainment": 0.99,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.08544293035515302,
+      "paired_energy_saving_fraction_slo_valid": 0.08544293035515302
+    },
+    {
+      "load_point": "MEDIUM",
+      "repeat": 2,
+      "policy": "PER-ENDPOINT-FAST-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 251325.53699999998,
+      "joules_per_request": 2513.25537,
+      "ttft_attainment": 0.99,
+      "tpot_attainment": 0.99,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.039336690435908844,
+      "paired_energy_saving_fraction_slo_valid": 0.039336690435908844
+    },
+    {
+      "load_point": "MEDIUM",
+      "repeat": 2,
+      "policy": "JOINT-ROUTING-PER-ENDPOINT",
+      "request_count": 100,
+      "total_gross_energy_j": 254245.598,
+      "joules_per_request": 2542.45598,
+      "ttft_attainment": 1,
+      "tpot_attainment": 1,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.028175089040866123,
+      "paired_energy_saving_fraction_slo_valid": 0.028175089040866123
+    },
+    {
+      "load_point": "MEDIUM",
+      "repeat": 3,
+      "policy": "STATIC-HIGH-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 261717.107,
+      "joules_per_request": 2617.17107,
+      "ttft_attainment": 1,
+      "tpot_attainment": 1,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": null,
+      "paired_energy_saving_fraction_slo_valid": null
+    },
+    {
+      "load_point": "MEDIUM",
+      "repeat": 3,
+      "policy": "SHARED-FAST-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 238753.637,
+      "joules_per_request": 2387.53637,
+      "ttft_attainment": 0.99,
+      "tpot_attainment": 0.99,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.08774157051949992,
+      "paired_energy_saving_fraction_slo_valid": 0.08774157051949992
+    },
+    {
+      "load_point": "MEDIUM",
+      "repeat": 3,
+      "policy": "PER-ENDPOINT-FAST-RR",
+      "request_count": 100,
+      "total_gross_energy_j": 246551.19199999998,
+      "joules_per_request": 2465.51192,
+      "ttft_attainment": 0.99,
+      "tpot_attainment": 0.99,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.05794774049676468,
+      "paired_energy_saving_fraction_slo_valid": 0.05794774049676468
+    },
+    {
+      "load_point": "MEDIUM",
+      "repeat": 3,
+      "policy": "JOINT-ROUTING-PER-ENDPOINT",
+      "request_count": 100,
+      "total_gross_energy_j": 256239.651,
+      "joules_per_request": 2562.39651,
+      "ttft_attainment": 1,
+      "tpot_attainment": 1,
+      "slo_contract_pass": true,
+      "paired_energy_saving_fraction_raw": 0.02092891849060514,
+      "paired_energy_saving_fraction_slo_valid": 0.02092891849060514
+    }
+  ],
+  "p_frequency_joint_occupancy_by_load_policy": [
+    {
+      "load": "MEDIUM",
+      "policy": "STATIC-HIGH-RR",
+      "windows": 15,
+      "requests": 300,
+      "window_equivalents": {
+        "BOTH_HIGH": 15,
+        "ONE_MID_ONE_HIGH": 0,
+        "BOTH_MID": 0,
+        "ANY_LOW": 0,
+        "TRANSITION": 0
+      },
+      "request_equivalents": {
+        "BOTH_HIGH": 300,
+        "ONE_MID_ONE_HIGH": 0,
+        "BOTH_MID": 0,
+        "ANY_LOW": 0,
+        "TRANSITION": 0
+      },
+      "actual_routing_admissions": {
+        "BOTH_HIGH": 300,
+        "ONE_MID_ONE_HIGH": 0,
+        "BOTH_MID": 0,
+        "ANY_LOW": 0,
+        "TRANSITION": 0
+      }
+    },
+    {
+      "load": "MEDIUM",
+      "policy": "SHARED-FAST-RR",
+      "windows": 15,
+      "requests": 300,
+      "window_equivalents": {
+        "BOTH_HIGH": 3,
+        "ONE_MID_ONE_HIGH": 0,
+        "BOTH_MID": 11.206232378141117,
+        "ANY_LOW": 0.7654292416989399,
+        "TRANSITION": 0.028338380159942937
+      },
+      "request_equivalents": {
+        "BOTH_HIGH": 60,
+        "ONE_MID_ONE_HIGH": 0,
+        "BOTH_MID": 224.12464756282236,
+        "ANY_LOW": 15.308584833978799,
+        "TRANSITION": 0.5667676031988589
+      },
+      "actual_routing_admissions": {
+        "BOTH_HIGH": 60,
+        "ONE_MID_ONE_HIGH": 0,
+        "BOTH_MID": 222,
+        "ANY_LOW": 18,
+        "TRANSITION": 0
+      }
+    },
+    {
+      "load": "MEDIUM",
+      "policy": "PER-ENDPOINT-FAST-RR",
+      "windows": 15,
+      "requests": 300,
+      "window_equivalents": {
+        "BOTH_HIGH": 3,
+        "ONE_MID_ONE_HIGH": 11.229706705582304,
+        "BOTH_MID": 0,
+        "ANY_LOW": 0.7611928711831,
+        "TRANSITION": 0.00910042323459495
+      },
+      "request_equivalents": {
+        "BOTH_HIGH": 60,
+        "ONE_MID_ONE_HIGH": 224.5941341116461,
+        "BOTH_MID": 0,
+        "ANY_LOW": 15.223857423662,
+        "TRANSITION": 0.18200846469189896
+      },
+      "actual_routing_admissions": {
+        "BOTH_HIGH": 60,
+        "ONE_MID_ONE_HIGH": 222,
+        "BOTH_MID": 0,
+        "ANY_LOW": 18,
+        "TRANSITION": 0
+      }
+    },
+    {
+      "load": "MEDIUM",
+      "policy": "JOINT-ROUTING-PER-ENDPOINT",
+      "windows": 15,
+      "requests": 300,
+      "window_equivalents": {
+        "BOTH_HIGH": 8,
+        "ONE_MID_ONE_HIGH": 2,
+        "BOTH_MID": 0,
+        "ANY_LOW": 5,
+        "TRANSITION": 0
+      },
+      "request_equivalents": {
+        "BOTH_HIGH": 160,
+        "ONE_MID_ONE_HIGH": 40,
+        "BOTH_MID": 0,
+        "ANY_LOW": 100,
+        "TRANSITION": 0
+      },
+      "actual_routing_admissions": {
+        "BOTH_HIGH": 160,
+        "ONE_MID_ONE_HIGH": 40,
+        "BOTH_MID": 0,
+        "ANY_LOW": 100,
+        "TRANSITION": 0
+      }
+    },
+    {
+      "load": "HIGH-SUSTAINABLE",
+      "policy": "STATIC-HIGH-RR",
+      "windows": 15,
+      "requests": 300,
+      "window_equivalents": {
+        "BOTH_HIGH": 15,
+        "ONE_MID_ONE_HIGH": 0,
+        "BOTH_MID": 0,
+        "ANY_LOW": 0,
+        "TRANSITION": 0
+      },
+      "request_equivalents": {
+        "BOTH_HIGH": 300,
+        "ONE_MID_ONE_HIGH": 0,
+        "BOTH_MID": 0,
+        "ANY_LOW": 0,
+        "TRANSITION": 0
+      },
+      "actual_routing_admissions": {
+        "BOTH_HIGH": 300,
+        "ONE_MID_ONE_HIGH": 0,
+        "BOTH_MID": 0,
+        "ANY_LOW": 0,
+        "TRANSITION": 0
+      }
+    },
+    {
+      "load": "HIGH-SUSTAINABLE",
+      "policy": "SHARED-FAST-RR",
+      "windows": 15,
+      "requests": 300,
+      "window_equivalents": {
+        "BOTH_HIGH": 3,
+        "ONE_MID_ONE_HIGH": 0,
+        "BOTH_MID": 11.521997570719057,
+        "ANY_LOW": 0.45248973900994455,
+        "TRANSITION": 0.025512690270999474
+      },
+      "request_equivalents": {
+        "BOTH_HIGH": 60,
+        "ONE_MID_ONE_HIGH": 0,
+        "BOTH_MID": 230.43995141438114,
+        "ANY_LOW": 9.04979478019889,
+        "TRANSITION": 0.5102538054199894
+      },
+      "actual_routing_admissions": {
+        "BOTH_HIGH": 60,
+        "ONE_MID_ONE_HIGH": 0,
+        "BOTH_MID": 228,
+        "ANY_LOW": 12,
+        "TRANSITION": 0
+      }
+    },
+    {
+      "load": "HIGH-SUSTAINABLE",
+      "policy": "PER-ENDPOINT-FAST-RR",
+      "windows": 15,
+      "requests": 300,
+      "window_equivalents": {
+        "BOTH_HIGH": 3,
+        "ONE_MID_ONE_HIGH": 11.227312884203693,
+        "BOTH_MID": 0,
+        "ANY_LOW": 0.7565787233887471,
+        "TRANSITION": 0.01610839240756159
+      },
+      "request_equivalents": {
+        "BOTH_HIGH": 60,
+        "ONE_MID_ONE_HIGH": 224.54625768407382,
+        "BOTH_MID": 0,
+        "ANY_LOW": 15.131574467774943,
+        "TRANSITION": 0.3221678481512318
+      },
+      "actual_routing_admissions": {
+        "BOTH_HIGH": 60,
+        "ONE_MID_ONE_HIGH": 220,
+        "BOTH_MID": 0,
+        "ANY_LOW": 20,
+        "TRANSITION": 0
+      }
+    },
+    {
+      "load": "HIGH-SUSTAINABLE",
+      "policy": "JOINT-ROUTING-PER-ENDPOINT",
+      "windows": 15,
+      "requests": 300,
+      "window_equivalents": {
+        "BOTH_HIGH": 8.327332584345445,
+        "ONE_MID_ONE_HIGH": 5,
+        "BOTH_MID": 0,
+        "ANY_LOW": 1.6618104041671793,
+        "TRANSITION": 0.010857011487375
+      },
+      "request_equivalents": {
+        "BOTH_HIGH": 166.54665168690892,
+        "ONE_MID_ONE_HIGH": 100,
+        "BOTH_MID": 0,
+        "ANY_LOW": 33.236208083343584,
+        "TRANSITION": 0.2171402297475
+      },
+      "actual_routing_admissions": {
+        "BOTH_HIGH": 163,
+        "ONE_MID_ONE_HIGH": 100,
+        "BOTH_MID": 0,
+        "ANY_LOW": 37,
+        "TRANSITION": 0
+      }
+    }
+  ]
+}
