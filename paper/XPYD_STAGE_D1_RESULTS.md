@@ -98,7 +98,10 @@ submission. It verifies vLLM 0.15.1 and the accepted preflight before submitting
 and explicitly exports the cuda-env `PYTHON_BIN` into the Slurm job. Experiment
 semantics and controller code are unchanged.
 
-Full D1 scientific result: **PENDING RERUN**.
+The corrected submission is job `272628`, run ID `stage_d1_full_212c925`, using
+commit `212c925`. Submission verified the explicit cuda-env interpreter,
+vLLM 0.15.1, and the accepted preflight. It initially queued for resources on
+Neptune and Europa. Full D1 scientific result: **PENDING**.
 
 ## Claim boundary
 
