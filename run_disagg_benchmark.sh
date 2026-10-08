@@ -1658,7 +1658,13 @@ run_phase3c_substrate() {
         fi
         [ -n "${XPYD_STAGEC2_RUN_ID}" ] && args+=(--run-id "${XPYD_STAGEC2_RUN_ID}")
     elif [ -n "${XPYD_STAGEC1_HEADROOM_RUNTIME_CONFIG}" ]; then
-        args=(-m xpyd.stagec1_headroom --runtime-config "${XPYD_STAGEC1_HEADROOM_RUNTIME_CONFIG}" --experiment-config "${XPYD_STAGEC1_HEADROOM_EXPERIMENT_CONFIG}")
+        # Stage E0 reuses the fixed-point headroom launch path and lifecycle.
+        local headroom_module="${XPYD_STAGEC1_HEADROOM_MODULE:-xpyd.stagec1_headroom}"
+        case "${headroom_module}" in
+            xpyd.stagec1_headroom|xpyd.stage_e0_regime) ;;
+            *) echo "ERROR: unsupported XPYD_STAGEC1_HEADROOM_MODULE=${headroom_module}" >&2; return 1 ;;
+        esac
+        args=(-m "${headroom_module}" --runtime-config "${XPYD_STAGEC1_HEADROOM_RUNTIME_CONFIG}" --experiment-config "${XPYD_STAGEC1_HEADROOM_EXPERIMENT_CONFIG}")
         [ -n "${XPYD_STAGEC1_HEADROOM_RUN_ID}" ] && args+=(--run-id "${XPYD_STAGEC1_HEADROOM_RUN_ID}")
     elif [ -n "${XPYD_STAGEC1_RUNTIME_CONFIG}" ]; then
         args=(-m xpyd.stagec1_stationary --runtime-config "${XPYD_STAGEC1_RUNTIME_CONFIG}" --experiment-config "${XPYD_STAGEC1_EXPERIMENT_CONFIG}")

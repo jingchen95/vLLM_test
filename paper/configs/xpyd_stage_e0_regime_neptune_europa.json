@@ -1,0 +1,205 @@
+{
+  "schema_version": 1,
+  "purpose": "Stage E0 regime diagnosis: idle-power ladder (locked levels and default driver governor) and matched STATIC-HIGH / STATIC-TUNED / P-default / all-default serving on the unchanged C1 trace",
+  "output_root": "results/stage_e0_regime",
+  "bucket_definition": {
+    "short_input_max_tokens": 512,
+    "short_output_max_tokens": 256
+  },
+  "shapes": {
+    "SS": {
+      "input_len": 128,
+      "output_len": 128
+    },
+    "SL": {
+      "input_len": 128,
+      "output_len": 512
+    },
+    "LS": {
+      "input_len": 2048,
+      "output_len": 128
+    },
+    "LL": {
+      "input_len": 2048,
+      "output_len": 512
+    }
+  },
+  "control_window_s": 200.0,
+  "scenarios": [
+    {
+      "id": "stationary_medium",
+      "segments": [
+        {
+          "id": "steady_mix",
+          "request_count": 20,
+          "rate_rps": 0.1,
+          "class_weights": {
+            "SS": 0.35,
+            "SL": 0.15,
+            "LS": 0.35,
+            "LL": 0.15
+          }
+        }
+      ]
+    },
+    {
+      "id": "stationary_high_sustainable",
+      "segments": [
+        {
+          "id": "steady_mix",
+          "request_count": 20,
+          "rate_rps": 0.2,
+          "class_weights": {
+            "SS": 0.35,
+            "SL": 0.15,
+            "LS": 0.35,
+            "LL": 0.15
+          }
+        }
+      ]
+    }
+  ],
+  "stagec1": {
+    "policies": [
+      "STATIC-HIGH",
+      "FEEDBACK-DVFS"
+    ],
+    "max_concurrency": 4,
+    "routing": "fixed four-pair round-robin",
+    "pool_frequency_state": {
+      "P": [
+        "P0",
+        "P1"
+      ],
+      "D": [
+        "D0",
+        "D1"
+      ]
+    },
+    "request_aware_routing": false,
+    "probing": false,
+    "predictor": false,
+    "oracle": false,
+    "slo": {
+      "ttft_ms": 600.0,
+      "tpot_ms": 65.0,
+      "attainment": 0.95
+    },
+    "frequency_levels_mhz": {
+      "P0": {
+        "LOW": 1260,
+        "MID": 1890,
+        "HIGH": 2520
+      },
+      "P1": {
+        "LOW": 1260,
+        "MID": 1890,
+        "HIGH": 2520
+      },
+      "D0": {
+        "LOW": 750,
+        "MID": 1125,
+        "HIGH": 1500
+      },
+      "D1": {
+        "LOW": 750,
+        "MID": 1125,
+        "HIGH": 1500
+      }
+    },
+    "load_points": [
+      {
+        "id": "MEDIUM",
+        "scenario": "stationary_medium",
+        "offered_rate_rps": 0.1
+      },
+      {
+        "id": "HIGH-SUSTAINABLE",
+        "scenario": "stationary_high_sustainable",
+        "offered_rate_rps": 0.2
+      }
+    ],
+    "repetitions": 2,
+    "minimum_dwell_s": 1.0,
+    "telemetry_max_age_s": 300.0,
+    "ewma_alpha": 0.5,
+    "step_down_fraction": 0.5,
+    "step_up_fraction": 0.8,
+    "max_queue_depth": 1,
+    "max_kv_cache_usage_frac": 0.9,
+    "severe_queue_depth": 4,
+    "severe_kv_cache_usage_frac": 0.97,
+    "low_kv_cache_usage_frac": 0.5,
+    "trend_thresholds": {
+      "minimum_sustainable_throughput_ratio": 0.9,
+      "admission_delay_slope_ms_per_s": 100.0,
+      "quartile_delay_increase_ms": 1000.0,
+      "minimum_close_waiting": 2.0,
+      "low_mean_client_waiting": 0.25,
+      "low_p95_admission_delay_ms": 250.0
+    }
+  },
+  "stagec1_headroom": {
+    "note": "marker only: selects the fixed-point diagnostic contract in load_configs; points live in stage_e0",
+    "repetitions": 3,
+    "diagnostic_points": [
+      {
+        "id": "HIGH_HIGH",
+        "P_level": "HIGH",
+        "D_level": "HIGH",
+        "description": "see stage_e0"
+      }
+    ]
+  },
+  "stage_e0": {
+    "repetitions": 3,
+    "points": [
+      {
+        "id": "HIGH_HIGH",
+        "P_level": "HIGH",
+        "D_level": "HIGH",
+        "description": "STATIC-HIGH: the baseline of every accepted C1/C2a/D1 result"
+      },
+      {
+        "id": "P_MID_D_HIGH",
+        "P_level": "MID",
+        "D_level": "HIGH",
+        "description": "STATIC-TUNED: the point learned by C1c/C2a, measured once offline in C1b"
+      },
+      {
+        "id": "P_DEFAULT_D_HIGH",
+        "P_level": "DEFAULT",
+        "D_level": "HIGH",
+        "description": "P pool under the driver governor; isolates the P-side idle effect from D-side TPOT"
+      },
+      {
+        "id": "DEFAULT_DEFAULT",
+        "P_level": "DEFAULT",
+        "D_level": "DEFAULT",
+        "description": "all GPUs under the driver governor: the production default"
+      }
+    ],
+    "point_order": "rotated by one position per repeat; every point is cold-started at locked HIGH",
+    "idle_ladder": {
+      "states": [
+        "HIGH",
+        "MID",
+        "LOW",
+        "DEFAULT"
+      ],
+      "settle_s": 60.0,
+      "measure_s": 180.0,
+      "before_serving": true,
+      "after_serving": true
+    },
+    "decision_rules": {
+      "registered": "2026-10-08, before any E0 data",
+      "p_default_idle_break_even_w": 64.6,
+      "rules": [
+        "If DEFAULT_DEFAULT meets the 600/65 >=95% contract in every repeat and its J/request <= P_MID_D_HIGH: locked-clock feedback DVFS adds ~0 in this regime -> direction A (energy proportionality / consolidation).",
+        "If DEFAULT_DEFAULT or P_DEFAULT_D_HIGH violates the contract: the default governor is SLO-unaware while locking wastes idle power -> SLO-aware idle/active clock control is a real gap -> direction B with DEFAULT as baseline.",
+        "P-side break-even: default-governor mean idle L40S power below 64.6 W beats STATIC-TUNED on the P side (P energy is ~98% idle floor; Step 1)."
+      ]
+    }
+  }
+}
