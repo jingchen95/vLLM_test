@@ -1,4 +1,4 @@
-"""Deterministic mixed-workload traces for the post-Phase-4 architecture audit.
+"""Deterministic (or seeded-Poisson) mixed-workload traces for the post-Phase-4 architecture audit.
 
 This module only defines offered load. It does not select routes, change GPU
 state, or make controller decisions.
@@ -12,11 +12,13 @@ from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
+import random
 import re
 from typing import Any, Mapping, Sequence
 
 
 REQUEST_CLASSES = ("SS", "SL", "LS", "LL")
+ARRIVAL_PROCESSES = ("uniform", "poisson")
 
 
 class WorkloadHarnessError(ValueError):
@@ -103,6 +105,11 @@ def validate_config(config: Mapping[str, Any]) -> None:
             if sum(numeric) <= 0:
                 raise WorkloadHarnessError("class weights must have positive mass")
             has_mixed_segment = has_mixed_segment or sum(value > 0 for value in numeric) > 1
+            process = segment.get("arrival_process", "uniform")
+            if process not in ARRIVAL_PROCESSES:
+                raise WorkloadHarnessError("arrival_process must be uniform or poisson")
+            if process == "poisson" and not isinstance(segment.get("seed"), int):
+                raise WorkloadHarnessError("poisson segments require an integer seed")
     if not has_mixed_segment:
         raise WorkloadHarnessError("at least one segment must mix request classes")
 
@@ -164,18 +171,25 @@ def build_trace(
         count = int(segment["request_count"])
         rate = float(segment["rate_rps"])
         counts = _apportion(count, segment["class_weights"])
+        # Uniform arrivals keep the original deterministic grid.  Poisson
+        # arrivals draw seeded exponential gaps; the class mix stays exact.
+        poisson = segment.get("arrival_process", "uniform") == "poisson"
+        rng = random.Random(int(segment["seed"])) if poisson else None
+        offset_s = 0.0
         for offset, request_class in enumerate(_interleave(counts)):
             shape = config["shapes"][request_class]
+            if rng is not None and offset > 0:
+                offset_s += rng.expovariate(rate)
             rows.append({
                 "request_id": "%s-%04d" % (namespace, len(rows)),
-                "arrival_time_s": segment_start_s + offset / rate,
+                "arrival_time_s": segment_start_s + (offset_s if poisson else offset / rate),
                 "input_len": int(shape["input_len"]),
                 "output_len": int(shape["output_len"]),
                 "workload_class": request_class,
                 "segment": str(segment["id"]),
             })
         # Start the next segment on the next point in the offered-arrival grid.
-        segment_start_s += count / rate
+        segment_start_s += (offset_s + 1.0 / rate) if poisson else count / rate
     return rows
 
 

@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "purpose": "Stage E0-c: connector concurrency ladder and Poisson rate sweep at validated HIGH clocks; measures real 2P2D capacity beyond the Stage B concurrency-4 envelope; no controller",
+  "output_root": "results/stage_e0c_capacity",
+  "physical_topology": {
+    "prefill_node": "neptune",
+    "decode_node": "europa"
+  },
+  "bucket_definition": {
+    "short_input_max_tokens": 512,
+    "short_output_max_tokens": 256
+  },
+  "shapes": {
+    "SS": {
+      "input_len": 128,
+      "output_len": 128
+    },
+    "SL": {
+      "input_len": 128,
+      "output_len": 512
+    },
+    "LS": {
+      "input_len": 2048,
+      "output_len": 128
+    },
+    "LL": {
+      "input_len": 2048,
+      "output_len": 512
+    }
+  },
+  "control_window_s": 20.0,
+  "scenarios": [
+    {
+      "id": "placeholder_mix",
+      "segments": [
+        {
+          "id": "steady_mix",
+          "request_count": 20,
+          "rate_rps": 0.1,
+          "class_weights": {
+            "SS": 0.35,
+            "SL": 0.15,
+            "LS": 0.35,
+            "LL": 0.15
+          }
+        }
+      ]
+    }
+  ],
+  "stage_e0c": {
+    "control": "disabled",
+    "frequencies": "all validated HIGH",
+    "routing": "round-robin over four validated pairs",
+    "class_weights": {
+      "SS": 0.35,
+      "SL": 0.15,
+      "LS": 0.35,
+      "LL": 0.15
+    },
+    "concurrency_ladder": [
+      4,
+      8,
+      16,
+      32,
+      64
+    ],
+    "ladder_hold_seconds_per_request_in_flight": 5.0,
+    "ladder_requests_per_slot": 4,
+    "ladder_min_requests": 24,
+    "sweep_rates_rps": [
+      0.3,
+      0.6,
+      1.0,
+      1.5,
+      2.0,
+      3.0,
+      4.0
+    ],
+    "sweep_steady_s": 120.0,
+    "sweep_min_requests": 60,
+    "stop_after_overloads": 2,
+    "seed": 20261008,
+    "request_timeout_s": 300.0,
+    "slo": {
+      "ttft_ms": 600.0,
+      "tpot_ms": 65.0,
+      "attainment": 0.95
+    },
+    "trend_thresholds": {
+      "minimum_sustainable_throughput_ratio": 0.9,
+      "admission_delay_slope_ms_per_s": 100.0,
+      "quartile_delay_increase_ms": 1000.0,
+      "minimum_close_waiting": 2.0,
+      "low_mean_client_waiting": 0.25,
+      "low_p95_admission_delay_ms": 250.0
+    }
+  }
+}
