@@ -39,11 +39,14 @@ RUNS = (
     ("C1c", "stagec1_stationary/stagec1_full_neptune_europa_20260928", "policy"),
     ("C2a", "stagec2a_fast_safety/stagec2a_full_neptune_europa_20261003", "policy"),
     ("D1", "stage_d1/stage_d1_full_212c925", "policy"),
+    ("E0", "stage_e0_regime/stage_e0_regime_neptune_europa_20261008", "headroom"),
 )
 
 POLICY_RE = re.compile(r"^r(\d+)-(medium|high-sustainable)-(.+)-w(\d+)$")
 HEADROOM_RE = re.compile(r"^r(\d+)-([A-Z_]+)-(MEDIUM|HIGH-SUSTAINABLE)$")
 BASELINE_POLICIES = {"static-high", "static-high-rr", "HIGH_HIGH"}
+# E0 windows record per-endpoint clock modes; all other runs are LOCKED.
+LOCKED = "LOCKED"
 
 
 def parse_window(kind: str, name: str) -> dict | None:
@@ -145,22 +148,29 @@ def main(raw_root: str, out_dir: str) -> None:
     windows = []
     for stage, rel, kind in RUNS:
         run_dir = os.path.join(raw_root, rel)
+        if not os.path.isdir(run_dir):
+            continue
         for name, path in window_dirs(run_dir, kind):
             label = parse_window(kind, name)
             if label is None:
                 continue
             with open(os.path.join(path, "summary.json")) as fh:
                 summary = json.load(fh)
+            modes = {}
+            meta_path = os.path.join(path, "metadata.json")
+            if os.path.exists(meta_path):
+                with open(meta_path) as fh:
+                    modes = json.load(fh).get("clock_modes") or {}
             windows.append({"stage": stage, "name": name, "path": path,
-                            "summary": summary, **label,
+                            "summary": summary, **label, "modes": modes,
                             "busy": load_busy(os.path.join(path, "routes.csv"))})
 
     # Pass 1: idle power per (endpoint, clock), pooled over every window,
     # including pre/post accounting-window samples.
-    idle_e: dict[tuple[str, float], float] = defaultdict(float)
-    idle_t: dict[tuple[str, float], float] = defaultdict(float)
-    idle_util: dict[tuple[str, float], list[float]] = defaultdict(list)
-    idle_win: dict[tuple[str, float], list[float]] = defaultdict(list)
+    idle_e: dict[tuple[str, float, str], float] = defaultdict(float)
+    idle_t: dict[tuple[str, float, str], float] = defaultdict(float)
+    idle_util: dict[tuple[str, float, str], list[float]] = defaultdict(list)
+    idle_win: dict[tuple[str, float, str], list[float]] = defaultdict(list)
     for w in windows:
         for ep in ENDPOINTS:
             sp = os.path.join(w["path"], ep, "samples.jsonl")
@@ -169,12 +179,13 @@ def main(raw_root: str, out_dir: str) -> None:
             samples = load_samples(sp)
             w.setdefault("samples", {})[ep] = samples
             busy = w["busy"].get(ep, [])
+            mode = w["modes"].get(ep, LOCKED)
             we: dict[float, float] = defaultdict(float)
             wt: dict[float, float] = defaultdict(float)
             for t0, t1, de, f0, f1, u0 in iter_intervals(samples):
                 if f0 != f1 or overlaps(busy, t0 - GUARD_S, t1 + GUARD_S):
                     continue
-                key = (ep, f0)
+                key = (ep, f0, mode)
                 idle_e[key] += de
                 idle_t[key] += t1 - t0
                 idle_util[key].append(u0)
@@ -182,30 +193,31 @@ def main(raw_root: str, out_dir: str) -> None:
                 wt[f0] += t1 - t0
             for f, t in wt.items():
                 if t >= 5.0:
-                    idle_win[(ep, f)].append(we[f] / t)
+                    idle_win[(ep, f, mode)].append(we[f] / t)
     p_idle = {k: idle_e[k] / idle_t[k] for k in idle_t if idle_t[k] > 0}
 
     with open(os.path.join(out_dir, "idle_power_by_clock.csv"), "w", newline="") as fh:
         wr = csv.writer(fh)
-        wr.writerow(["endpoint", "graphics_mhz", "idle_power_w", "idle_seconds",
+        wr.writerow(["endpoint", "graphics_mhz", "clock_mode", "idle_power_w", "idle_seconds",
                      "per_window_n", "per_window_min_w", "per_window_median_w",
                      "per_window_max_w", "mean_gpu_util_pct"])
-        for (ep, f) in sorted(p_idle):
-            pw = idle_win.get((ep, f), [])
-            wr.writerow([ep, int(f), round(p_idle[(ep, f)], 2),
-                         round(idle_t[(ep, f)], 1), len(pw),
+        for key in sorted(p_idle):
+            ep, f, mode = key
+            pw = idle_win.get(key, [])
+            wr.writerow([ep, int(f), mode, round(p_idle[key], 2),
+                         round(idle_t[key], 1), len(pw),
                          round(min(pw), 2) if pw else "",
                          round(statistics.median(pw), 2) if pw else "",
                          round(max(pw), 2) if pw else "",
-                         round(statistics.mean(idle_util[(ep, f)]), 2)])
+                         round(statistics.mean(idle_util[key]), 2)])
 
-    def idle_power(ep: str, f: float) -> float | None:
-        if (ep, f) in p_idle:
-            return p_idle[(ep, f)]
-        known = [g for (e, g) in p_idle if e == ep]
+    def idle_power(ep: str, f: float, mode: str) -> float | None:
+        if (ep, f, mode) in p_idle:
+            return p_idle[(ep, f, mode)]
+        known = [g for (e, g, m) in p_idle if e == ep and m == mode]
         if not known:
             return None
-        return p_idle[(ep, min(known, key=lambda g: abs(g - f)))]
+        return p_idle[(ep, min(known, key=lambda g: abs(g - f)), mode)]
 
     # Pass 2: per-window decomposition inside the accounting boundary.
     rows = []
@@ -225,7 +237,7 @@ def main(raw_root: str, out_dir: str) -> None:
                     continue
                 gross += de
                 dur += t1 - t0
-                floor += (idle_power(ep, f0) or 0.0) * (t1 - t0)
+                floor += (idle_power(ep, f0, w["modes"].get(ep, LOCKED)) or 0.0) * (t1 - t0)
             row[f"{ep}_reported_j"] = float(info.get("gross_gpu_energy_j") or 0.0)
             row[f"{ep}_gross_j"] = gross
             row[f"{ep}_floor_j"] = floor
