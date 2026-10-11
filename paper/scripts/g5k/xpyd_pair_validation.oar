@@ -1,0 +1,141 @@
+#!/bin/bash
+# OAR batch job: one H200 (chicoree) + one A100 (chuc) node at the same time.
+# Submit from flille:  oarsub -S ./xpyd_pair_validation.oar
+#
+# What it does (nothing is left idle):
+#   1. records which two nodes were allocated and that both are reachable;
+#   2. Appendix-A checks: GPU inventory, sudo-g5k, IP route, iperf3, RDMA,
+#      NCCL/CUDA software presence on both nodes;
+#   3. E0-a idle-power ladder on both nodes (locked clocks + default governor);
+#   4. optional: if $HOME/g5k/xpyd_pd/venv has vLLM and the model is cached,
+#      a single-node vLLM smoke on each node.
+#OAR -n xpyd-pair
+#OAR -q default
+#OAR -t exotic
+#OAR -t day
+#OAR -l {cluster='chicoree'}/host=1+{cluster='chuc'}/host=1,walltime=1:30:00
+#OAR -O /home/jchen/g5k/xpyd_pd/results/OAR_%jobid%.out
+#OAR -E /home/jchen/g5k/xpyd_pd/results/OAR_%jobid%.err
+
+set -uo pipefail
+study="${HOME}/g5k/xpyd_pd"
+out="${study}/results/pair_${OAR_JOB_ID}"
+mkdir -p "${out}"
+exec > >(tee -a "${out}/driver.log") 2>&1
+
+echo "job=${OAR_JOB_ID} driver=$(hostname) start=$(date -u +%FT%TZ)"
+sort -u "${OAR_NODE_FILE}" | tee "${out}/nodes.txt"
+H200=$(grep chicoree "${OAR_NODE_FILE}" | head -1)
+A100=$(grep chuc     "${OAR_NODE_FILE}" | head -1)
+echo "H200=${H200} A100=${A100}"
+if [ -z "${H200}" ] || [ -z "${A100}" ]; then
+  echo "FATAL: did not get one chicoree and one chuc node" >&2
+  exit 2
+fi
+
+run() { local node=$1; shift; oarsh "${node}" "$@"; }
+
+# ------------------------------------------------------------------ 1. reachability + hard gates
+for N in "${H200}" "${A100}"; do
+  echo "== gates on ${N}"
+  run "${N}" hostname || { echo "FATAL: oarsh to ${N} failed" >&2; exit 3; }
+  run "${N}" nvidia-smi -L | tee "${out}/nvidia_smi_L.$(echo "${N}" | cut -d. -f1).txt" || { echo "FATAL: NVML unusable on ${N}" >&2; exit 4; }
+  run "${N}" sudo-g5k id >/dev/null 2>&1 || { echo "FATAL: sudo-g5k unavailable on ${N} (not a full node?)" >&2; exit 5; }
+done
+
+# ------------------------------------------------------------------ 2. Appendix-A environment checks
+for N in "${H200}" "${A100}"; do
+  short=$(echo "${N}" | cut -d. -f1)
+  {
+    echo "### ${N} $(date -u +%FT%TZ)"
+    run "${N}" 'nvidia-smi --query-gpu=index,name,uuid,pci.bus_id,driver_version,power.limit,power.max_limit,clocks.max.sm,memory.total --format=csv'
+    run "${N}" 'nvidia-smi topo -m' || true
+    run "${N}" 'nvidia-smi -q -d SUPPORTED_CLOCKS -i 0 | head -80' || true
+    run "${N}" 'hostname -I; ip -br addr; ip route' || true
+    run "${N}" 'command -v rdma && rdma link; command -v ibv_devices && ibv_devices' 2>&1 || true
+    run "${N}" 'python3 --version; command -v nvcc; ls /usr/local/cuda* 2>/dev/null | head -3; ldconfig -p | grep -c libnccl; nproc; free -g | head -2; df -h /tmp | tail -1' || true
+    run "${N}" 'cat /etc/debian_version; uname -r'
+  } > "${out}/env_${short}.txt" 2>&1
+done
+
+# routes between the two nodes
+A100_IP=$(getent ahostsv4 "${A100}" | awk 'NR==1{print $1}')
+H200_IP=$(getent ahostsv4 "${H200}" | awk 'NR==1{print $1}')
+{
+  echo "A100_IP=${A100_IP} H200_IP=${H200_IP}"
+  run "${H200}" "ping -c 5 ${A100_IP}"; run "${A100}" "ping -c 5 ${H200_IP}"
+  run "${H200}" "ip route get ${A100_IP}"; run "${A100}" "ip route get ${H200_IP}"
+} > "${out}/network.txt" 2>&1 || true
+
+# iperf3 (TCP baseline, 1 and 4 streams, both directions)
+if run "${A100}" 'command -v iperf3' >/dev/null 2>&1 && run "${H200}" 'command -v iperf3' >/dev/null 2>&1; then
+  run "${A100}" "iperf3 -s -1 -D" ; sleep 2
+  run "${H200}" "iperf3 -c ${A100_IP} -t 10 -J" > "${out}/iperf_h200_to_a100_p1.json" 2>&1 || true
+  run "${A100}" "iperf3 -s -1 -D" ; sleep 2
+  run "${H200}" "iperf3 -c ${A100_IP} -t 10 -P 4 -J" > "${out}/iperf_h200_to_a100_p4.json" 2>&1 || true
+  run "${A100}" "iperf3 -s -1 -D" ; sleep 2
+  run "${H200}" "iperf3 -c ${A100_IP} -t 10 -R -J" > "${out}/iperf_a100_to_h200_p1.json" 2>&1 || true
+else
+  echo "iperf3 missing on a node; skipped" > "${out}/iperf_skipped.txt"
+fi
+
+# ------------------------------------------------------------------ 3. idle-power ladder (E0-a on A100 / H200)
+# States: default governor, locked max, locked ~75%, locked ~50% of max supported SM clock.
+# Each: settle 30 s, then 90 s of 200 ms samples (power.draw, clocks, pstate, throttle reasons).
+ladder_one_node() {
+  local node=$1 short
+  short=$(echo "${node}" | cut -d. -f1)
+  local dir="${out}/idle_${short}"; mkdir -p "${dir}"
+  run "${node}" bash -s "${dir}" <<'INNER'
+set -u
+dir=$1
+gpus=$(nvidia-smi --query-gpu=index --format=csv,noheader | paste -sd,)
+mapfile -t sup < <(nvidia-smi -q -d SUPPORTED_CLOCKS -i 0 | grep -oE 'Graphics[[:space:]]*:[[:space:]]*[0-9]+' | grep -oE '[0-9]+$' | sort -nu)
+n=${#sup[@]}; max=${sup[n-1]}; mid=${sup[$(( (n-1)*3/4 ))]}; low=${sup[$(( (n-1)/2 ))]}
+echo "supported_count=${n} max=${max} mid=${mid} low=${low}" > "${dir}/levels.txt"
+sample() {
+  local label=$1
+  sleep 30
+  timeout 95 nvidia-smi -i "${gpus}" \
+    --query-gpu=index,timestamp,power.draw,clocks.current.sm,clocks.current.memory,pstate,utilization.gpu,temperature.gpu,clocks_throttle_reasons.active \
+    --format=csv -lms 200 > "${dir}/idle_${label}.csv" 2>&1 || true
+}
+sudo-g5k nvidia-smi -i "${gpus}" -rgc >/dev/null 2>&1 || true
+sample default_governor
+for pair in "max:${max}" "mid:${mid}" "low:${low}"; do
+  label=${pair%%:*}; f=${pair##*:}
+  sudo-g5k nvidia-smi -i "${gpus}" -lgc "${f},${f}" >/dev/null 2>&1 && sample "locked_${label}_${f}" || echo "lgc ${f} failed" >> "${dir}/levels.txt"
+done
+sudo-g5k nvidia-smi -i "${gpus}" -rgc >/dev/null 2>&1 || true
+nvidia-smi --query-gpu=index,clocks.current.sm,clocks.applications.graphics --format=csv > "${dir}/after_reset.csv"
+INNER
+}
+ladder_one_node "${H200}" &
+ladder_one_node "${A100}" &
+wait
+echo "idle ladder done $(date -u +%FT%TZ)"
+
+# ------------------------------------------------------------------ 4. optional vLLM single-node smoke
+venv="${study}/venv"
+model="${MODEL_DIR:-${HOME}/g5k/models/Mistral-7B-v0.1}"
+if [ -x "${venv}/bin/python" ] && "${venv}/bin/python" -c 'import vllm' 2>/dev/null && [ -f "${model}/config.json" ]; then
+  for N in "${A100}" "${H200}"; do
+    short=$(echo "${N}" | cut -d. -f1)
+    echo "== vLLM smoke on ${N}"
+    run "${N}" bash -s "${venv}" "${model}" "${out}/vllm_smoke_${short}.log" <<'INNER' || true
+venv=$1; model=$2; log=$3
+export CUDA_VISIBLE_DEVICES=0 VLLM_LOGGING_LEVEL=INFO
+"${venv}/bin/python" -m vllm.entrypoints.openai.api_server --model "${model}" --served-model-name m --port 8123 \
+  --max-model-len 4096 --gpu-memory-utilization 0.8 --disable-log-requests > "${log}" 2>&1 &
+pid=$!
+for i in $(seq 1 60); do curl -s -o /dev/null localhost:8123/health && break; sleep 5; done
+curl -s localhost:8123/v1/completions -H 'Content-Type: application/json' \
+  -d '{"model":"m","prompt":"The capital of France is","max_tokens":16}' | tee -a "${log}"; echo
+kill ${pid} 2>/dev/null; wait ${pid} 2>/dev/null
+INNER
+  done
+else
+  echo "vLLM venv or model not ready; smoke skipped" | tee "${out}/vllm_smoke_skipped.txt"
+fi
+
+echo "done $(date -u +%FT%TZ)"
