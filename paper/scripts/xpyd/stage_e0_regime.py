@@ -633,13 +633,22 @@ def load_e0_configs(runtime_path: Path, experiment_path: Path) -> tuple[dict[str
     slo = settings["slo"]
     if (float(slo["ttft_ms"]), float(slo["tpot_ms"]), float(slo["attainment"])) != (600.0, 65.0, 0.95):
         raise StageE0Error("E0 must use the unchanged TIGHT 600/65 ms >=95% contract")
-    if settings.get("frequency_levels_mhz") != {
-        "P0": {"LOW": 1260, "MID": 1890, "HIGH": 2520},
-        "P1": {"LOW": 1260, "MID": 1890, "HIGH": 2520},
-        "D0": {"LOW": 750, "MID": 1125, "HIGH": 1500},
-        "D1": {"LOW": 750, "MID": 1125, "HIGH": 1500},
-    }:
-        raise StageE0Error("E0 locked levels must equal the validated C1 levels")
+    levels = settings.get("frequency_levels_mhz") or {}
+    if str(experiment.get("platform", "minerva")) == "minerva":
+        if levels != {
+            "P0": {"LOW": 1260, "MID": 1890, "HIGH": 2520},
+            "P1": {"LOW": 1260, "MID": 1890, "HIGH": 2520},
+            "D0": {"LOW": 750, "MID": 1125, "HIGH": 1500},
+            "D1": {"LOW": 750, "MID": 1125, "HIGH": 1500},
+        }:
+            raise StageE0Error("E0 locked levels must equal the validated C1 levels")
+    else:
+        # Other platforms: levels are discovered per job and written into the
+        # config; run() still rejects any mismatch with the hardware readback.
+        for endpoint_id in ("P0", "P1", "D0", "D1"):
+            item = levels.get(endpoint_id) or {}
+            if not (0 < int(item.get("LOW", 0)) < int(item.get("MID", 0)) < int(item.get("HIGH", 0))):
+                raise StageE0Error("E0 needs ordered LOW<MID<HIGH levels for %s" % endpoint_id)
     scenarios = {str(item["id"]): item for item in experiment.get("scenarios", [])}
     for load_point in settings["load_points"]:
         segment = scenarios[str(load_point["scenario"])]["segments"][0]

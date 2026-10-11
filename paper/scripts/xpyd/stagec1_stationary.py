@@ -156,9 +156,13 @@ def load_configs(runtime_path: Path, experiment_path: Path) -> tuple[dict[str, A
     if observed != {"MEDIUM": 0.10, "HIGH-SUSTAINABLE": 0.20}:
         raise StageC1Error("Stage C1 requires calibrated 0.10 and 0.20 req/s loads")
     endpoints = {str(item["endpoint_id"]): item for item in runtime["endpoints"]}
-    expected_nodes = {"P0": "neptune", "P1": "neptune", "D0": "europa", "D1": "europa"}
+    # Minerva is the default; a Grid'5000 experiment config names its own
+    # topology explicitly (nodes are only known once the OAR job starts).
+    expected_nodes = dict(experiment.get("expected_topology") or {
+        "P0": "neptune", "P1": "neptune", "D0": "europa", "D1": "europa",
+    })
     if {key: str(value["node"]) for key, value in endpoints.items()} != expected_nodes:
-        raise StageC1Error("runtime topology must be Neptune L40S + Europa L4")
+        raise StageC1Error("runtime topology does not match expected_topology %s" % expected_nodes)
     if any(int(value["tp_degree"]) != 1 for value in endpoints.values()):
         raise StageC1Error("Stage C1 requires TP=1")
     if any(bool(settings.get(key, False)) for key in ("request_aware_routing", "probing", "predictor", "oracle")):

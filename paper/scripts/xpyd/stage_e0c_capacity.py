@@ -54,9 +54,11 @@ def load_configs(runtime_path: Path, workload_path: Path) -> tuple[dict[str, Any
     settings = workload.get("stage_e0c")
     if not isinstance(settings, Mapping):
         raise StageE0cError("stage_e0c settings are required")
-    expected_nodes = {"P0": "neptune", "P1": "neptune", "D0": "europa", "D1": "europa"}
+    expected_nodes = dict(workload.get("expected_topology") or {
+        "P0": "neptune", "P1": "neptune", "D0": "europa", "D1": "europa",
+    })
     if {str(item["endpoint_id"]): str(item["node"]) for item in runtime["endpoints"]} != expected_nodes:
-        raise StageE0cError("runtime topology must be Neptune L40S + Europa L4")
+        raise StageE0cError("runtime topology does not match expected_topology %s" % expected_nodes)
     if any(int(item["tp_degree"]) != 1 for item in runtime["endpoints"]):
         raise StageE0cError("E0-c keeps TP=1")
     ladder = [int(value) for value in settings["concurrency_ladder"]]

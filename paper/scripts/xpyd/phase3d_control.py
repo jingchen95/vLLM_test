@@ -149,18 +149,26 @@ class NvidiaSmiClockBackend:
     def __init__(
         self,
         runner: CommandRunner = _default_runner,
-        nvidia_smi: str = "/usr/bin/nvidia-smi",
-        sudo: str = "/usr/bin/sudo",
+        nvidia_smi: Optional[str] = None,
+        sudo: Optional[str] = None,
         srun: str = "srun",
         clock: Callable[[], float] = time.time,
+        node_exec: Optional[str] = None,
     ) -> None:
+        # Defaults are the Minerva/Slurm path. Grid'5000 jobs export
+        # XPYD_NODE_EXEC=oarsh and XPYD_SUDO=sudo-g5k; nothing else changes.
         self.runner = runner
-        self.nvidia_smi = nvidia_smi
-        self.sudo = sudo
+        self.nvidia_smi = nvidia_smi or os.environ.get("XPYD_NVIDIA_SMI", "/usr/bin/nvidia-smi")
+        self.sudo = sudo or os.environ.get("XPYD_SUDO", "/usr/bin/sudo")
         self.srun = srun
+        self.node_exec = node_exec or os.environ.get("XPYD_NODE_EXEC", "srun")
+        if self.node_exec not in ("srun", "oarsh"):
+            raise Phase3DError("XPYD_NODE_EXEC must be srun or oarsh")
         self.clock = clock
 
     def _node_command(self, node: str, script: str) -> list[str]:
+        if self.node_exec == "oarsh":
+            return ["oarsh", node, "/bin/bash", "-lc", script]
         return [
             self.srun, "--overlap", "--nodes=1", "--ntasks=1",
             "--nodelist=%s" % node, "/bin/bash", "-lc", script,

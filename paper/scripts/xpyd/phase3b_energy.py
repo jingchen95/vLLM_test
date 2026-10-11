@@ -911,7 +911,17 @@ def _launch_monitor(
     command = _monitor_argv(endpoint, endpoint_dir, sampling)
     local_host = socket.gethostname().split(".")[0]
     node = str(endpoint["node"])
-    if node != local_host:
+    if node.split(".")[0] != local_host and os.environ.get("XPYD_NODE_EXEC") == "oarsh":
+        # Grid'5000: oarsh does not forward the environment, so carry the
+        # interpreter path and PYTHONPATH explicitly. The reservation covers the
+        # whole node, so no GPU binding is needed.
+        command = [
+            "oarsh", node, "env",
+            "PYTHONPATH=%s" % os.environ.get("PYTHONPATH", ""),
+            "XPYD_NODE_EXEC=oarsh",
+            *command,
+        ]
+    elif node != local_host:
         physical_gpu = str(endpoint["cuda_visible_device"])
         if not physical_gpu.isdigit():
             raise Phase3BEnergyError(
