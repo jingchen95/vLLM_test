@@ -119,7 +119,8 @@ mapfile -t CFG < <("${PY}" "${REPO}/paper/scripts/g5k/gen_g5k_configs.py" --mode
   --out-dir "${RESULT_ROOT}/configs" --repo "${REPO}" \
   --p-node "${P_NODE}" --d-node "${D_NODE}" --p-ip "${P_IP}" --d-ip "${D_IP}" --proxy-host "${DRIVER}" --proxy-port "${PROXY_PORT}" \
   --p-gpu-name "${P_GPU}" --d-gpu-name "${D_GPU}" --p-levels "${P_LEVELS}" --d-levels "${D_LEVELS}" \
-  --p-mem-mhz "${P_MEM}" --d-mem-mhz "${D_MEM}" --model-dir "${MODEL_DIR}" --result-root "${RESULT_ROOT}") || exit 5
+  --p-mem-mhz "${P_MEM}" --d-mem-mhz "${D_MEM}" --model-dir "${MODEL_DIR}" --result-root "${RESULT_ROOT}")
+[ "${#CFG[@]}" -eq 2 ] || { echo "FATAL: config generation failed"; exit 5; }
 RUNTIME_CFG="${CFG[0]}"; EXPERIMENT_CFG="${CFG[1]}"
 echo "runtime=${RUNTIME_CFG} experiment=${EXPERIMENT_CFG}"
 
@@ -156,7 +157,6 @@ wait_health() {  # NODE_IP PORT EP
   while ! curl -s --connect-timeout 5 "http://$1:$2/health" >/dev/null 2>&1; do
     sleep 10; elapsed=$((elapsed + 10))
     if [ "${elapsed}" -ge "${STARTUP_TIMEOUT_S}" ]; then echo "FATAL: $3 not healthy after ${elapsed}s"; tail -30 "${RESULT_ROOT}/vllm_$3.log"; return 1; fi
-    if ! grep -q . "${RESULT_ROOT}/vllm_$3.log" 2>/dev/null; then :; fi
     [ $((elapsed % 60)) -eq 0 ] && echo "  [$3] ... ${elapsed}s"
   done
   echo "[$3] healthy after ${elapsed}s"
