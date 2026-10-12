@@ -27,11 +27,12 @@ RUN_ID="${XPYD_G5K_RUN_ID:-${MODE}_g5k_${OAR_JOB_ID}}"
 P_HIGH_OVERRIDE="${XPYD_G5K_P_HIGH_MHZ:-}"
 D_HIGH_OVERRIDE="${XPYD_G5K_D_HIGH_MHZ:-}"
 PROXY_PORT=8000
-STARTUP_TIMEOUT_S="${XPYD_G5K_STARTUP_TIMEOUT_S:-900}"
+STARTUP_TIMEOUT_S="${XPYD_G5K_STARTUP_TIMEOUT_S:-600}"
 
 PY="${VENV}/bin/python"
 RESULT_ROOT="${REPO}/results/g5k/${RUN_ID}"
 mkdir -p "${RESULT_ROOT}"
+# Never call a bare `wait` below: bash >= 5.1 would also wait for this tee.
 exec > >(tee -a "${RESULT_ROOT}/launcher.log") 2>&1
 echo "== XPYD G5K launcher job=${OAR_JOB_ID} mode=${MODE} run_id=${RUN_ID} driver=$(hostname -f) start=$(date -u +%FT%TZ)"
 cd "${REPO}" || exit 2

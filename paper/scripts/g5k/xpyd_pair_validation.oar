@@ -110,9 +110,12 @@ sudo-g5k nvidia-smi -i "${gpus}" -rgc >/dev/null 2>&1 || true
 nvidia-smi --query-gpu=index,clocks.current.sm,clocks.applications.graphics --format=csv > "${dir}/after_reset.csv"
 INNER
 }
-ladder_one_node "${H200}" &
-ladder_one_node "${A100}" &
-wait
+ladder_one_node "${H200}" & pid_h200=$!
+ladder_one_node "${A100}" & pid_a100=$!
+# Explicit PIDs: with stdout redirected through a process substitution (tee),
+# a bare `wait` in bash >= 5.1 also waits for that substitution and never
+# returns (this cost job 2230332 its remaining walltime).
+wait "${pid_h200}" "${pid_a100}"
 echo "idle ladder done $(date -u +%FT%TZ)"
 
 # ------------------------------------------------------------------ 4. optional vLLM single-node smoke
