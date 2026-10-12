@@ -41,7 +41,12 @@ git rev-parse HEAD > "${RESULT_ROOT}/git_commit.txt" 2>/dev/null || true
 # ------------------------------------------------------------------ nodes
 sort -u "${OAR_NODE_FILE}" > "${RESULT_ROOT}/nodes.txt"
 P_NODE=$(grep "${P_CLUSTER}" "${RESULT_ROOT}/nodes.txt" | head -1)
-D_NODE=$(grep "${D_CLUSTER}" "${RESULT_ROOT}/nodes.txt" | head -1)
+if [ "${P_CLUSTER}" = "${D_CLUSTER}" ]; then
+  # Homogeneous pair: two distinct nodes of the same cluster.
+  D_NODE=$(grep "${D_CLUSTER}" "${RESULT_ROOT}/nodes.txt" | grep -v "^${P_NODE}$" | head -1)
+else
+  D_NODE=$(grep "${D_CLUSTER}" "${RESULT_ROOT}/nodes.txt" | head -1)
+fi
 DRIVER=$(hostname -f)
 if [ -z "${P_NODE}" ] || [ -z "${D_NODE}" ]; then
   echo "FATAL: need one ${P_CLUSTER} and one ${D_CLUSTER} node, got: $(cat "${RESULT_ROOT}/nodes.txt" | tr '\n' ' ')" >&2

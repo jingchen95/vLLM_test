@@ -22,7 +22,11 @@ case "${P_CLUSTER}${D_CLUSTER}" in *chicoree*) exotic="#OAR -t exotic";; esac
   echo "#OAR -n xpyd-${MODE}-${RUN_ID}"
   echo "#OAR -q default"
   [ -n "${exotic}" ] && echo "${exotic}"
-  echo "#OAR -l {cluster='${P_CLUSTER}'}/host=1+{cluster='${D_CLUSTER}'}/host=1,walltime=${WALLTIME}:00"
+  if [ "${P_CLUSTER}" = "${D_CLUSTER}" ]; then
+    echo "#OAR -l {cluster='${P_CLUSTER}'}/host=2,walltime=${WALLTIME}:00"
+  else
+    echo "#OAR -l {cluster='${P_CLUSTER}'}/host=1+{cluster='${D_CLUSTER}'}/host=1,walltime=${WALLTIME}:00"
+  fi
   echo "#OAR -O ${HOME}/g5k/xpyd_pd/results/OAR_%jobid%.out"
   echo "#OAR -E ${HOME}/g5k/xpyd_pd/results/OAR_%jobid%.err"
   echo "export XPYD_G5K_MODE=${MODE} XPYD_G5K_RUN_ID=${RUN_ID} XPYD_G5K_REPO=${REPO}"
