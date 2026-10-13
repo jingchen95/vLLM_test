@@ -48,6 +48,20 @@ class StageE0cError(RuntimeError):
     pass
 
 
+def classify_gates(gates: Mapping[str, Any]) -> tuple[bool, bool, list[str]]:
+    """Split Phase 3C hard gates into (step_valid, clock_valid, failed_gates).
+
+    ``fixed_clocks`` only says whether locked HIGH held under load and is
+    reported as a flag; every other gate is a correctness/measurement gate.
+    An empty gate set is invalid.
+    """
+    if not gates:
+        return False, False, ["no_hard_gates"]
+    clock_valid = gates.get("fixed_clocks") is True
+    failed = sorted(key for key, value in gates.items() if value is not True and key != "fixed_clocks")
+    return not failed, clock_valid, failed
+
+
 def load_configs(runtime_path: Path, workload_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     runtime = load_runtime_config(runtime_path)
     workload = load_workload_config(workload_path)
@@ -162,12 +176,21 @@ class StageE0cHarness:
                 row["failure"] = json.dumps(_read_json(failure), sort_keys=True)
             return row
         audit = _read_json(step_dir / "audit.json")
-        row["hard_gates_json"] = json.dumps(audit.get("hard_gates", {}), sort_keys=True)
-        if not audit.get("valid"):
-            row.update({"step_valid": False, "error": "Phase 3C audit invalid"})
+        gates = dict(audit.get("hard_gates", {}))
+        row["hard_gates_json"] = json.dumps(gates, sort_keys=True)
+        # The fixed-clock gate reports whether locked HIGH held under load (an
+        # L4 hit its power cap at concurrency 16 in job 275424). That is a
+        # measured property of the operating point, not a connector failure,
+        # so it is recorded and the ladder continues. Every other gate is a
+        # correctness/measurement gate and stops the ladder.
+        step_valid, clock_valid, failed = classify_gates(gates)
+        row["clock_valid"] = clock_valid
+        if not step_valid:
+            row.update({"step_valid": False, "error": "Phase 3C gates failed: %s" % failed})
             return row
         point = {"id": step_id, "offered_rate_rps": rate}
-        metrics = analyze_point(point, step_dir, self.settings["slo"], self.settings["trend_thresholds"])
+        metrics = analyze_point(point, step_dir, self.settings["slo"], self.settings["trend_thresholds"],
+                                require_valid_audit=False)
         requests = list(csv.DictReader((step_dir / "requests.csv").open(encoding="utf-8")))
         load = metrics.pop("endpoint_load")
         row.update(metrics)
@@ -237,10 +260,12 @@ class StageE0cHarness:
                 writer.writeheader()
                 writer.writerows(rows)
         passing = [row for row in self.ladder_rows if row.get("step_valid")]
+        clock_stable = [row for row in passing if row.get("clock_valid")]
         sustainable = [row for row in self.sweep_rows if row.get("step_valid") and row.get("sustainable")]
         summary = {
             "schema_version": 1, "phase": "Stage_E0c_capacity", "run_id": self.run_id,
             "max_validated_concurrency": max((row["max_concurrency"] for row in passing), default=None),
+            "max_clock_stable_concurrency": max((row["max_concurrency"] for row in clock_stable), default=None),
             "first_failed_concurrency": next(
                 (row["max_concurrency"] for row in self.ladder_rows if not row.get("step_valid")), None),
             "max_sustainable_rate_rps": max((row["offered_rate_rps"] for row in sustainable), default=None),
@@ -261,17 +286,19 @@ def _fmt(value: Any, pattern: str = "%.2f") -> str:
 def render_markdown(summary: Mapping[str, Any]) -> str:
     lines = [
         "# XPYD Stage E0-c capacity", "",
-        "Run `%s`. Highest validated connector concurrency: **%s** (first failure: %s). "
+        "Run `%s`. Highest validated connector concurrency: **%s** (first failure: %s); "
+        "highest concurrency at which locked HIGH clocks held: **%s**. "
         "Highest sustainable Poisson rate: **%s req/s**." % (
             summary["run_id"], summary["max_validated_concurrency"],
-            summary["first_failed_concurrency"], _fmt(summary["max_sustainable_rate_rps"])),
+            summary["first_failed_concurrency"], summary.get("max_clock_stable_concurrency"),
+            _fmt(summary["max_sustainable_rate_rps"])),
         "", "## Concurrency ladder (saturating offered load)", "",
-        "| Cap | Valid | Saturated req/s | Output tok/s | TTFT p50/p95 | TPOT p50/p95 | D running max | J/output token | Error |",
-        "|---:|---|---:|---:|---|---|---|---:|---|",
+        "| Cap | Valid | Clock held | Saturated req/s | Output tok/s | TTFT p50/p95 | TPOT p50/p95 | D running max | J/output token | Error |",
+        "|---:|---|---|---:|---:|---|---|---|---:|---|",
     ]
     for row in summary["ladder"]:
-        lines.append("| %s | %s | %s | %s | %s / %s | %s / %s | %s / %s | %s | %s |" % (
-            row["max_concurrency"], row["step_valid"], _fmt(row.get("saturated_rps"), "%.3f"),
+        lines.append("| %s | %s | %s | %s | %s | %s / %s | %s / %s | %s / %s | %s | %s |" % (
+            row["max_concurrency"], row["step_valid"], row.get("clock_valid", "n/a"), _fmt(row.get("saturated_rps"), "%.3f"),
             _fmt(row.get("saturated_output_tok_s"), "%.0f"),
             _fmt(row.get("ttft_p50_ms"), "%.0f"), _fmt(row.get("ttft_p95_ms"), "%.0f"),
             _fmt(row.get("tpot_p50_ms"), "%.1f"), _fmt(row.get("tpot_p95_ms"), "%.1f"),

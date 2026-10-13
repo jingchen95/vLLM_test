@@ -141,9 +141,13 @@ def load_configs(
 
 def analyze_point(
     point: Mapping[str, Any], point_dir: Path, slo: Mapping[str, Any],
-    trend: Mapping[str, Any],
+    trend: Mapping[str, Any], *, require_valid_audit: bool = True,
 ) -> dict[str, Any]:
     audit = _read_json(point_dir / "audit.json")
+    if not require_valid_audit:
+        # Caller has already inspected the hard gates (Stage E0-c records a
+        # failed fixed-clock gate as a flag instead of discarding the step).
+        audit = dict(audit, valid=bool(audit.get("hard_gates")))
     requests = _read_csv(point_dir / "requests.csv")
     load_events = _read_jsonl(point_dir / "client" / "load_events.jsonl")
     routes = _read_csv(point_dir / "routes.csv")

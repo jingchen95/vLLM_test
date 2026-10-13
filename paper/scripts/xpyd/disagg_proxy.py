@@ -10,6 +10,7 @@ import argparse
 from dataclasses import dataclass, field
 import inspect
 import json
+import sys
 import os
 from pathlib import Path
 import time
@@ -1168,6 +1169,64 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+class DiagnosticsWriter:
+    """Queue diagnostics records and write them from a daemon thread.
+
+    The event loop only enqueues; the thread appends to the optional log file
+    (reopened per batch, so an external truncation between windows is
+    honoured) and echoes to stdout.
+    """
+
+    def __init__(self, path: Optional[str], *, echo: bool = True) -> None:
+        import queue
+        import threading
+        self.path = path
+        self.echo = echo
+        self._queue: "queue.Queue[Optional[str]]" = queue.Queue()
+        self._thread = threading.Thread(target=self._run, name="xpyd-diagnostics", daemon=True)
+        self._thread.start()
+
+    def sink(self, value: Mapping[str, Any]) -> None:
+        self._queue.put(json.dumps(dict(value), sort_keys=True))
+
+    def close(self, timeout_s: float = 10.0) -> None:
+        self._queue.put(None)
+        self._thread.join(timeout_s)
+
+    def _run(self) -> None:
+        import queue
+        while True:
+            line = self._queue.get()
+            if line is None:
+                return
+            batch = [line]
+            try:
+                while True:
+                    item = self._queue.get_nowait()
+                    if item is None:
+                        self._write(batch)
+                        return
+                    batch.append(item)
+            except queue.Empty:
+                pass
+            self._write(batch)
+
+    def _write(self, batch: list[str]) -> None:
+        text = "\n".join(batch) + "\n"
+        if self.echo:
+            try:
+                sys.stdout.write(text)
+                sys.stdout.flush()
+            except (OSError, ValueError):
+                pass
+        if self.path:
+            try:
+                with open(self.path, "a", encoding="utf-8") as stream:
+                    stream.write(text)
+            except OSError as exc:
+                sys.stderr.write("diagnostics write failed: %s\n" % exc)
+
+
 def main() -> int:
     args = parse_args()
     import uvicorn
@@ -1185,14 +1244,11 @@ def main() -> int:
         raise SystemExit(
             "--multi-endpoint-config cannot be combined with single-pair hosts"
         )
-    diagnostics_path = args.diagnostics_log
-
-    def diagnostic_sink(value: Mapping[str, Any]) -> None:
-        line = json.dumps(dict(value), sort_keys=True)
-        print(line, flush=True)
-        if diagnostics_path:
-            with open(diagnostics_path, "a", encoding="utf-8") as stream:
-                stream.write(line + "\n")
+    # Disk and stdout writes happen on a background thread: a synchronous
+    # append to a slow shared filesystem froze the event loop for 5-21 s
+    # (Minerva /data ZFS at 96%, E0-c job 275424).
+    writer = DiagnosticsWriter(args.diagnostics_log)
+    diagnostic_sink = writer.sink
 
     if args.multi_endpoint_config:
         multi_config = load_multi_endpoint_config(

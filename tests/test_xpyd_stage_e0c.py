@@ -6,9 +6,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from xpyd.disagg_proxy import DiagnosticsWriter
 from xpyd.stage_e0c_capacity import (
     StageE0cError,
     StageE0cHarness,
+    classify_gates,
     load_configs,
     saturated_throughput,
     step_trace,
@@ -79,6 +81,45 @@ class StageE0cTests(unittest.TestCase):
         self.assertAlmostEqual(result["saturated_rps"], 1.0)
         self.assertAlmostEqual(result["saturated_output_tok_s"], 100.0)
         self.assertIsNone(saturated_throughput(rows[:4])["saturated_rps"])
+
+    def test_clock_gate_is_a_flag_but_correctness_gates_stop(self):
+        base = {"real_sse_and_latency": True, "logical_request_id": True, "phase3a_token_semantics": True,
+                "nvml_energy_windows": True, "fixed_clocks": True}
+        self.assertEqual(classify_gates(base), (True, True, []))
+        self.assertEqual(classify_gates(dict(base, fixed_clocks=False)), (True, False, []))
+        self.assertEqual(classify_gates(dict(base, phase3a_token_semantics=False, fixed_clocks=False)),
+                         (False, False, ["phase3a_token_semantics"]))
+        self.assertEqual(classify_gates({}), (False, False, ["no_hard_gates"]))
+
+    def test_ladder_continues_past_clock_failures_and_reports_both_maxima(self):
+        def steps(phase, concurrency, rate):
+            if phase == "ladder":
+                return {"step_valid": concurrency <= 32, "clock_valid": concurrency <= 8,
+                        "error": None if concurrency <= 32 else "Phase 3C gates failed: ['phase3a_token_semantics']"}
+            return {"step_valid": True, "sustainable": False}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            harness, calls = self.harness(tmp, steps)
+            run_dir = harness.run()
+            self.assertEqual([c[1] for c in calls if c[0] == "ladder"], [4, 8, 16, 32, 64])
+            self.assertEqual({c[1] for c in calls if c[0] == "sweep"}, {32})
+            summary = json.loads((run_dir / "e0c_summary.json").read_text())
+            self.assertEqual(summary["max_validated_concurrency"], 32)
+            self.assertEqual(summary["max_clock_stable_concurrency"], 8)
+            self.assertIn("Clock held", (run_dir / "e0c_summary.md").read_text())
+
+    def test_diagnostics_writer_keeps_order_and_does_not_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "diag.jsonl"
+            writer = DiagnosticsWriter(path.as_posix(), echo=False)
+            for i in range(250):
+                writer.sink({"i": i, "event": "x"})
+            writer.close()
+            lines = path.read_text().splitlines()
+            self.assertEqual(len(lines), 250)
+            self.assertEqual([json.loads(l)["i"] for l in lines], list(range(250)))
+            # No path: records are dropped silently but nothing raises.
+            DiagnosticsWriter(None, echo=False).close()
 
     def harness(self, tmp, steps):
         runtime, workload = self.load()
