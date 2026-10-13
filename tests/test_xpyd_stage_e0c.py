@@ -108,6 +108,44 @@ class StageE0cTests(unittest.TestCase):
             self.assertEqual(summary["max_clock_stable_concurrency"], 8)
             self.assertIn("Clock held", (run_dir / "e0c_summary.md").read_text())
 
+    def _step_with_audit(self, gates):
+        """Run _step with a window runner that writes audit.json, then raises like Phase 3C."""
+        import xpyd.stage_e0c_capacity as module
+        runtime, workload = self.load()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        workload["output_root"] = tmp.name
+
+        def runner(config, step_id, trace):
+            step = Path(tmp.name) / "fixture" / step_id
+            step.mkdir(parents=True)
+            (step / "audit.json").write_text(json.dumps({"valid": False, "hard_gates": gates}))
+            (step / "requests.csv").write_text(
+                "ttft_ms,tpot_ms,client_admitted_unix_s,e2e_latency_ms,observed_output_tokens\n"
+                + "".join("500,60,%d,1000,100\n" % i for i in range(10)))
+            raise RuntimeError("Phase3CError: Phase 3C hard-gate audit failed")
+
+        harness = StageE0cHarness(runtime, workload, run_id="fixture", window_runner=runner)
+        harness.run_dir.mkdir(parents=True)
+        original = module.analyze_point
+        module.analyze_point = lambda *a, **k: {"endpoint_load": {}, "total_gross_energy_j": 1000.0,
+                                                "sustainable": True}
+        self.addCleanup(setattr, module, "analyze_point", original)
+        return harness._step("ladder", "ladder-c016", 16, 3.2, 64, "uniform", 0)
+
+    def test_clock_only_failure_after_phase3c_raise_keeps_step_valid(self):
+        gates = {"real_sse_and_latency": True, "phase3a_token_semantics": True, "fixed_clocks": False}
+        row = self._step_with_audit(gates)
+        self.assertTrue(row["step_valid"])
+        self.assertFalse(row["clock_valid"])
+        self.assertIn("hard-gate audit failed", row["window_exception"])
+
+    def test_correctness_failure_after_phase3c_raise_stops(self):
+        gates = {"real_sse_and_latency": True, "phase3a_token_semantics": False, "fixed_clocks": True}
+        row = self._step_with_audit(gates)
+        self.assertFalse(row["step_valid"])
+        self.assertIn("phase3a_token_semantics", row["error"])
+
     def test_diagnostics_writer_keeps_order_and_does_not_block(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "diag.jsonl"

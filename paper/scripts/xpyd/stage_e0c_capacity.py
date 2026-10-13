@@ -170,11 +170,17 @@ class StageE0cHarness:
         try:
             self.window_runner(self._config(concurrency), step_id, trace)
         except Exception as exc:
-            row.update({"step_valid": False, "error": "%s: %s" % (type(exc).__name__, exc)})
-            failure = step_dir / "failure.json"
-            if failure.is_file():
-                row["failure"] = json.dumps(_read_json(failure), sort_keys=True)
-            return row
+            # Phase 3C raises after writing audit.json when any hard gate
+            # fails. If the audit exists, classify its gates below (a failed
+            # fixed-clock gate alone must not stop the ladder); otherwise the
+            # window never completed and the step is invalid.
+            row["window_exception"] = "%s: %s" % (type(exc).__name__, exc)
+            if not (step_dir / "audit.json").is_file():
+                row.update({"step_valid": False, "error": row["window_exception"]})
+                failure = step_dir / "failure.json"
+                if failure.is_file():
+                    row["failure"] = json.dumps(_read_json(failure), sort_keys=True)
+                return row
         audit = _read_json(step_dir / "audit.json")
         gates = dict(audit.get("hard_gates", {}))
         row["hard_gates_json"] = json.dumps(gates, sort_keys=True)

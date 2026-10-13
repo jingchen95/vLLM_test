@@ -1,7 +1,7 @@
 # XPYD Stage E0-c — Connector concurrency ladder and capacity (first run)
 
-**Status:** partial; measurement valid, ladder stopped early by a clock-gate
-semantic (fixed in code, rerun pending)  
+**Status:** sweep complete (run r3); ladder above concurrency 16 still
+pending (second fix below, run r4)  
 **Slurm job:** `275424` (COMPLETED, 2026-10-13 01:53–02:20, 26 min)  
 **Run:** `results/stage_e0c_capacity/stage_e0c_capacity_neptune_europa_20261012_r2`  
 **Code:** commit `33936ea` (`paper/scripts/xpyd/stage_e0c_capacity.py`)  
@@ -81,3 +81,28 @@ artefact of those stalls.
   warm-up after server start.
 - The sweep used cap 8, chosen by the old stop rule; the rerun sweeps at the
   highest connector-valid concurrency.
+
+## Rerun r3 (job 275483, 2026-10-13 04:24–04:50, commit `ea4f3e1`)
+
+Proxy stalls are gone (TTFT p95 581–600 ms in every sweep step). The ladder
+again stopped at 16 with the same single failed gate (D1 `sw_power_cap`,
+57.5% of samples at 1500 MHz, minimum 1380 MHz; all 11 correctness gates
+passed). The first fix never ran: Phase 3C raises after writing
+`audit.json` when any gate fails, so the step took the exception path. The
+step now classifies the gates whenever `audit.json` exists (commit after
+`ea4f3e1`).
+
+| Offered req/s (Poisson, cap 8) | Completed req/s | Backlog | TTFT p95 / attain | TPOT p95 / attain | J/request |
+|---:|---:|---|---|---|---:|
+| 0.30 | 0.296 | drains | 581 ms / 100% | 64.3 ms / 98.3% | 1003 |
+| 0.60 | 0.432 | grows | 587 ms / 95.8% | 65.9 ms / 77.8% | 698 |
+| 1.00 | 0.476 | grows | 600 ms / 95.0% | 65.8 ms / 65.8% | 641 |
+
+- **SLO-meeting capacity at cap 8 is between 0.30 and 0.60 req/s**; the
+  throughput ceiling at cap 8 is ~0.48 req/s. The TPOT 65 ms contract fails
+  first.
+- **C0's HIGH-SUSTAINABLE (0.20 req/s) is ~2/3 of the SLO-meeting rate and
+  ~40% of the throughput ceiling**, not "the highest sustainable" load; C0's
+  overload at 0.30 was the concurrency-4 client cap.
+- **Energy per request falls from ~2600 J (0.10 req/s, C1) to ~1000 J at
+  0.30 and ~640 J at saturation**: at the C1 loads most energy is idle floor.
