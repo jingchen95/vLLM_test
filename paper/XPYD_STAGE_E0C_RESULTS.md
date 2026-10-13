@@ -1,7 +1,6 @@
 # XPYD Stage E0-c — Connector concurrency ladder and capacity (first run)
 
-**Status:** sweep complete (run r3); ladder above concurrency 16 still
-pending (second fix below, run r4)  
+**Status:** complete (sweep from run r3, ladder from run r4); closed  
 **Slurm job:** `275424` (COMPLETED, 2026-10-13 01:53–02:20, 26 min)  
 **Run:** `results/stage_e0c_capacity/stage_e0c_capacity_neptune_europa_20261012_r2`  
 **Code:** commit `33936ea` (`paper/scripts/xpyd/stage_e0c_capacity.py`)  
@@ -106,3 +105,42 @@ step now classifies the gates whenever `audit.json` exists (commit after
   overload at 0.30 was the concurrency-4 client cap.
 - **Energy per request falls from ~2600 J (0.10 req/s, C1) to ~1000 J at
   0.30 and ~640 J at saturation**: at the C1 loads most energy is idle floor.
+
+## Rerun r4 (job 275490, 2026-10-13 04:52–05:22, commit `c7e3796`)
+
+| Cap | Correctness gates | Locked HIGH held | Saturated req/s | Output tok/s | TTFT p50/p95 | TPOT p50/p95 | D running max | J/output token |
+|---:|---|---|---:|---:|---|---|---|---:|
+| 4 | pass | yes | 0.263 | 67 | 530 / 816 | 59.8 / 63.1 | 2 / 2 | 5.06 |
+| 8 | pass | yes | 0.490 | 122 | 504 / 591 | 61.8 / 65.3 | 4 / 5 | 3.05 |
+| 16 | pass | **no** (D1 power cap) | 0.914 | 238 | 495 / 597 | 63.9 / 71.9 | 9 / 10 | 1.73 |
+| 32 | **fail**: D1 engine died | — | — | — | — | — | — | — |
+
+At cap 32 the D1 decode engine (L4, 22 GiB) crashed with
+`torch.OutOfMemoryError` in `lm_head` while running 16 requests with the KV
+cache at 98.4%; the same instant the P2P-NCCL connector logged
+`[PUT]Recv Tensor, Out Of Memory` for an incoming layer. The connector
+receives pushed KV tensors into GPU memory outside vLLM's KV-cache pool and
+the scheduler applies no backpressure, so `--gpu-memory-utilization 0.82`
+leaves too little headroom once ~16 decodes are resident per L4. The r4 sweep
+then failed its metrics scrape (D1 dead) and is not used; the r3 sweep stands.
+
+## Final E0-c conclusions
+
+1. **Substrate concurrency ceiling: 16 in flight (≈8 per decode endpoint).**
+   Correctness holds through 16; at 32 a decode engine OOMs. Stage B's
+   concurrency-4 envelope was 4× conservative, but the ceiling is real and is
+   a memory limit of the synchronous-PUT P2P-NCCL path on 22 GiB L4s, not a
+   GPU-compute limit.
+2. **Locked HIGH holds only up to 8 in flight.** Above that an L4 reaches its
+   72 W cap and drops to 1380–1470 MHz, so STATIC-HIGH cannot keep its own
+   operating point at high load.
+3. **SLO-meeting capacity: 0.30–0.60 req/s**, bound by the 65 ms TPOT;
+   throughput ceiling at cap 8 ≈ 0.48 req/s, at cap 16 ≈ 0.91 req/s.
+4. **Energy per output token falls 3× from cap 4 to cap 16** (5.1 → 1.7 J),
+   and per request from ~2600 J at C1's 0.10 req/s to ~640 J at saturation.
+   The C1/C2a/D1 loads sat in the idle-floor-dominated regime.
+
+For the re-grounded experiments (plan stage 3): define loads as a fraction of
+the measured SLO-meeting capacity (~0.45 req/s with this mix), keep the client
+cap at 8 per decode endpoint or below, and treat "locked HIGH" as valid only
+up to 8 in flight on L4.
