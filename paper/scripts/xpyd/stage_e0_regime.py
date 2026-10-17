@@ -56,22 +56,35 @@ class GovernorClockBackend(NvidiaSmiClockBackend):
 
     _memory_re = re.compile(r"^MEMORY=\s*(\d+)\s*$", re.MULTILINE)
 
-    def reset_clocks(self, capability: EndpointClockCapability) -> GPUReadback:
-        command = (
-            f"{self.sudo} {self.nvidia_smi} -i {capability.gpu_id} -rgc\n"
-            f"{self.sudo} {self.nvidia_smi} -i {capability.gpu_id} -rmc"
+    def __init__(self, *args: Any, memory_clock_control: Optional[bool] = None, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # HBM GPUs (A100, H100/H200) reject -lmc/-rmc ("not supported"); their
+        # memory clock is fixed. Grid'5000 sets XPYD_MEMORY_CLOCK_CONTROL=0.
+        self.memory_clock_control = (
+            os.environ.get("XPYD_MEMORY_CLOCK_CONTROL", "1") != "0"
+            if memory_clock_control is None else memory_clock_control
         )
+
+    def reset_clocks(self, capability: EndpointClockCapability) -> GPUReadback:
+        command = f"{self.sudo} {self.nvidia_smi} -i {capability.gpu_id} -rgc"
+        if self.memory_clock_control:
+            command += f"\n{self.sudo} {self.nvidia_smi} -i {capability.gpu_id} -rmc"
         self._run(capability.node, "set -euo pipefail\n" + command)
         return self.read(capability.endpoint_id, capability.node, capability.gpu_id)
 
     def lock_memory_clock(self, capability: EndpointClockCapability, memory_mhz: int) -> int:
+        """Re-lock the memory clock, or (without memory control) verify it is unchanged."""
         query = (
             f"{self.nvidia_smi} -i {capability.gpu_id} "
             "--query-gpu=clocks.current.memory --format=csv,noheader,nounits"
         )
+        lock = (
+            f"{self.sudo} {self.nvidia_smi} -i {capability.gpu_id} -lmc {int(memory_mhz)},{int(memory_mhz)}\n"
+            if self.memory_clock_control else ""
+        )
         script = (
             "set -euo pipefail\n"
-            f"{self.sudo} {self.nvidia_smi} -i {capability.gpu_id} -lmc {int(memory_mhz)},{int(memory_mhz)}\n"
+            + lock +
             "for attempt in 1 2 3 4 5 6 7 8 9 10; do\n"
             f"  actual=\"$({query} | tr -d '[:space:]')\"\n"
             "  printf 'MEMORY=%s\\n' \"${actual}\"\n"

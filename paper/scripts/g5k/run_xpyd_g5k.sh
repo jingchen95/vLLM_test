@@ -132,8 +132,8 @@ echo "runtime=${RUNTIME_CFG} experiment=${EXPERIMENT_CFG}"
 
 # ------------------------------------------------------------------ lock clocks at HIGH
 P_HIGH="${P_LEVELS##*,}"; D_HIGH="${D_LEVELS##*,}"
-lock_clocks() {  # NODE GRAPHICS MEM
-  rexec "$1" "for i in 0 1; do sudo-g5k nvidia-smi -i \$i -lgc $2,$2 && sudo-g5k nvidia-smi -i \$i -lmc $3,$3; done; sleep 1; \
+lock_clocks() {  # NODE GRAPHICS MEM (memory clock is fixed on HBM GPUs; not locked)
+  rexec "$1" "for i in 0 1; do sudo-g5k nvidia-smi -i \$i -lgc $2,$2 || exit 1; done; sleep 1; \
     nvidia-smi --query-gpu=index,name,uuid,pci.bus_id,clocks.current.sm,clocks.current.memory --format=csv,noheader -i 0,1"
 }
 {
@@ -152,7 +152,10 @@ NCCL_ENV="NCCL_IB_DISABLE=1 NCCL_SOCKET_IFNAME=^lo NCCL_DEBUG=INFO"
 
 start_server() {  # NODE ENDPOINT GPU PORT KV_JSON EXTRA
   local node=$1 ep=$2 gpu=$3 port=$4 kv=$5 extra=$6 log="${RESULT_ROOT}/vllm_${2}.log"
-  local cmd="cd ${REPO} && nohup env CUDA_VISIBLE_DEVICES=${gpu} ${NCCL_ENV} ${PY} -m vllm.entrypoints.openai.api_server --model ${MODEL_DIR} --port ${port} ${COMMON_ARGS} --kv-transfer-config '${kv}' ${extra} > ${log} 2>&1 & echo \$!"
+  # Background only the server: `cd X && cmd &` would background the whole
+  # AND-list, whose subshell keeps the $(...) pipe open forever (job 2230985
+  # hung 3.5 h here). stdin from /dev/null so oarsh/ssh can return.
+  local cmd="cd ${REPO}; CUDA_VISIBLE_DEVICES=${gpu} ${NCCL_ENV} nohup ${PY} -m vllm.entrypoints.openai.api_server --model ${MODEL_DIR} --port ${port} ${COMMON_ARGS} --kv-transfer-config '${kv}' ${extra} > ${log} 2>&1 < /dev/null & echo \$!"
   local pid
   pid=$(rexec "${node}" "${cmd}" | tail -1)
   SERVER_PIDS+=("${node}:${pid}")
@@ -178,7 +181,7 @@ wait_health "${D_IP}" 8201 D1 || exit 7
 
 # ------------------------------------------------------------------ proxy + harness environment
 export PYTHONPATH="${REPO}/paper/scripts${PYTHONPATH:+:${PYTHONPATH}}"
-export XPYD_NODE_EXEC=oarsh XPYD_SUDO=sudo-g5k XPYD_NVIDIA_SMI=nvidia-smi
+export XPYD_NODE_EXEC=oarsh XPYD_SUDO=sudo-g5k XPYD_NVIDIA_SMI=nvidia-smi XPYD_MEMORY_CLOCK_CONTROL=0
 export XPYD_PROXY_URI="http://127.0.0.1:${PROXY_PORT}"
 export XPYD_PROXY_DIAGNOSTICS_LOG="${RESULT_ROOT}/proxy_diagnostics.jsonl"
 export XPYD_ROUTING_POLICY=round_robin XPYD_ROUTING_CONTROL_FILE=""

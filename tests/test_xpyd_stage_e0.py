@@ -248,6 +248,24 @@ class StageE0Tests(unittest.TestCase):
         self.assertEqual(backend.lock_memory_clock(capability("P0"), 9001), 9001)
         self.assertIn("-lmc 9001,9001", commands[-1])
 
+    def test_backend_without_memory_clock_control_skips_lmc_and_rmc(self):
+        commands = []
+
+        def runner(command):
+            commands.append(command[-1])
+            if "clocks.current.memory" in command[-1]:
+                return subprocess.CompletedProcess(command, 0, "MEMORY=1215\n")
+            return subprocess.CompletedProcess(command, 0, "IDENTITY=NVIDIA A100, uuid-P0, 0000:00:00.0, 210\n")
+
+        backend = GovernorClockBackend(runner=runner, clock=lambda: 1.0, memory_clock_control=False)
+        backend.reset_clocks(capability("P0"))
+        self.assertIn("-rgc", commands[0])
+        self.assertNotIn("-rmc", commands[0])
+        self.assertEqual(backend.lock_memory_clock(capability("P0"), 1215), 1215)
+        self.assertNotIn("-lmc", commands[-1])
+        with self.assertRaises(Phase3DError):
+            backend.lock_memory_clock(capability("P0"), 2619)
+
     def test_backend_memory_relock_mismatch_fails_closed(self):
         def runner(command):
             return subprocess.CompletedProcess(command, 0, "MEMORY=405\n")
