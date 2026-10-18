@@ -86,5 +86,44 @@ class G5kPortTests(unittest.TestCase):
             NvidiaSmiClockBackend(runner=lambda c: None, node_exec="rsh")
 
 
+class MonitorLaunchTests(unittest.TestCase):
+    def launch(self, node, host, node_exec):
+        from unittest import mock
+        import xpyd.phase3b_energy as energy
+        endpoint = {"endpoint_id": "P0", "role": "prefill", "node": node, "cuda_visible_device": "0",
+                    "expected_gpu_name": "A100"}
+        sampling = {"period_s": 0.2, "late_tolerance_s": 0.05}
+        captured = {}
+
+        def fake_popen(command, **kwargs):
+            captured["command"] = command
+            return mock.Mock()
+
+        env = dict(os.environ)
+        env.pop("XPYD_NODE_EXEC", None)
+        if node_exec:
+            env["XPYD_NODE_EXEC"] = node_exec
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(energy.socket, "gethostname", return_value=host), \
+                mock.patch.object(energy.subprocess, "Popen", side_effect=fake_popen), \
+                mock.patch.dict(os.environ, env, clear=True):
+            _, log = energy._launch_monitor(endpoint, Path(tmp), sampling)
+            log.close()
+        return captured["command"]
+
+    def test_fqdn_of_local_host_runs_locally(self):
+        command = self.launch("chuc-2.lille.grid5000.fr", "chuc-2", "oarsh")
+        self.assertNotIn(command[0], ("srun", "oarsh"))
+
+    def test_remote_node_uses_oarsh_on_g5k(self):
+        command = self.launch("chuc-6.lille.grid5000.fr", "chuc-2", "oarsh")
+        self.assertEqual(command[:2], ["oarsh", "chuc-6.lille.grid5000.fr"])
+
+    def test_minerva_remote_node_still_uses_srun(self):
+        command = self.launch("europa", "neptune", None)
+        self.assertEqual(command[0], "srun")
+        self.assertEqual(self.launch("neptune", "neptune", None)[0], sys.executable)
+
+
 if __name__ == "__main__":
     unittest.main()
