@@ -116,6 +116,26 @@ low, mid, high = select_validation_frequencies(sup, high)
 print("%d,%d,%d" % (low, mid, high))
 PYEOF
 }
+# Sustainable HIGH: lock the nominal maximum and read back the clock the GPU
+# actually runs at. H200 NVL locked at 1785 MHz runs at 1635 MHz (job
+# 2234866), so the nominal maximum cannot be validated by readback. Use the
+# observed clock when it is lower and hardware-supported (cf. Minerva's L4
+# 1500 MHz sustainable-frequency probe). An explicit override wins.
+sustainable_high() {  # NODE SUPPORTED_CSV -> MHz
+  local node=$1 sup=$2 max observed
+  max=$(echo "${sup}" | tr ',' '\n' | sort -n | tail -1)
+  observed=$(rexec "${node}" "sudo-g5k nvidia-smi -i 0 -lgc ${max},${max} >/dev/null 2>&1; sleep 3; \
+    nvidia-smi -i 0 --query-gpu=clocks.current.sm --format=csv,noheader,nounits | tr -d ' '; \
+    sudo-g5k nvidia-smi -i 0 -rgc >/dev/null 2>&1" | tail -1)
+  if [ -n "${observed}" ] && [ "${observed}" -lt "${max}" ] && echo ",${sup}," | grep -q ",${observed},"; then
+    echo "${observed}"
+  else
+    echo "${max}"
+  fi
+}
+[ -n "${P_HIGH_OVERRIDE}" ] || P_HIGH_OVERRIDE=$(sustainable_high "${P_NODE}" "${P_SUP}")
+[ -n "${D_HIGH_OVERRIDE}" ] || D_HIGH_OVERRIDE=$(sustainable_high "${D_NODE}" "${D_SUP}")
+echo "sustainable HIGH: P=${P_HIGH_OVERRIDE} MHz (nominal max $(echo "${P_SUP}" | tr ',' '\n' | sort -n | tail -1))  D=${D_HIGH_OVERRIDE} MHz (nominal max $(echo "${D_SUP}" | tr ',' '\n' | sort -n | tail -1))"
 P_LEVELS=$(levels "${P_SUP}" "${P_HIGH_OVERRIDE}") || exit 5
 D_LEVELS=$(levels "${D_SUP}" "${D_HIGH_OVERRIDE}") || exit 5
 echo "P levels (LOW,MID,HIGH)=${P_LEVELS}  D levels=${D_LEVELS}"
