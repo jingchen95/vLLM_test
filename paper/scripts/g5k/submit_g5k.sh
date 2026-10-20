@@ -14,6 +14,19 @@ REPO="${XPYD_G5K_REPO:-${HOME}/vLLM_test}"
 P_CLUSTER="${XPYD_G5K_P_CLUSTER:-chicoree}"; D_CLUSTER="${XPYD_G5K_D_CLUSTER:-chuc}"
 jobs_dir="${HOME}/g5k/xpyd_pd/jobs"; mkdir -p "${jobs_dir}" "${HOME}/g5k/xpyd_pd/results"
 test ! -e "${REPO}/results/g5k/${RUN_ID}" || { echo "run id already used: ${RUN_ID}" >&2; exit 1; }
+# Usage policy: weekday 09:00-19:00 usage per cluster is capped at
+# 2 h x (cores of the cluster) per day, summed over ALL of the user's jobs
+# (chicoree: 64 cores -> 128 core-h/day, i.e. one full node for 2 h). A
+# 3.5 h chicoree+chuc daytime reservation alone was 175% (warning, 2026-10-20).
+# XPYD jobs therefore go to night/weekend windows unless explicitly allowed.
+case " $* " in
+  *" -t night "*) ;;
+  *) if [ "${XPYD_G5K_ALLOW_DAYTIME:-0}" != "1" ]; then
+       echo "refusing a non-night submission: add '-t night', or set XPYD_G5K_ALLOW_DAYTIME=1 after checking" >&2
+       echo "usagepolicycheck -t (daily allowance is per cluster and counts all your jobs)" >&2
+       exit 1
+     fi ;;
+esac
 job="${jobs_dir}/${RUN_ID}.oar"
 exotic=""
 case "${P_CLUSTER}${D_CLUSTER}" in *chicoree*) exotic="#OAR -t exotic";; esac
